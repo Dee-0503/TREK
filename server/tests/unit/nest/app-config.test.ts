@@ -7,6 +7,18 @@ import { ConfigService, ConfigType } from '@nestjs/config';
 import { AppConfigModule } from '../../../src/nest/app-config/app-config.module';
 import { RuntimeEnvService } from '../../../src/nest/app-config/runtime-env.service';
 import { httpConfig, mcpConfig, BOOT_STABLE_TOKENS } from '../../../src/nest/app-config/tokens';
+import { deriveMaps } from '../../../src/app-config/derive';
+import { validateEnvAtBoot } from '../../../src/app-config/env';
+
+describe('maps provider configuration', () => {
+  it('normalizes the shared openstreetmap alias at the derive boundary', () => {
+    expect(deriveMaps({ PLACES_PROVIDER_MODE: 'openstreetmap' }).placesProviderMode).toBe('osm');
+  });
+
+  it('accepts openstreetmap during boot validation', () => {
+    expect(() => validateEnvAtBoot({ PLACES_PROVIDER_MODE: 'openstreetmap' })).not.toThrow();
+  });
+});
 
 describe('RuntimeEnvService', () => {
   const service = new RuntimeEnvService();

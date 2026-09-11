@@ -48,20 +48,27 @@ const publicHttpUrl = optionalWith((v) => {
     const parsed = new URL(v);
     const host = parsed.hostname.toLowerCase();
     if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    // The provider endpoint is operator-configured but still leaves the server;
-    // reject obvious local/private targets at boot. The adapter additionally uses
-    // the SSRF-safe fetch path, which resolves and pins the final address.
-    return !(
+    const octets = host.split('.').map(Number);
+    const ipv4 = octets.length === 4 && octets.every((n, i) => String(n) === host.split('.')[i] && Number.isInteger(n) && n >= 0 && n <= 255);
+    const specialIpv4 = ipv4 && (
+      octets[0] === 0
+      || octets[0] === 10
+      || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+      || (octets[0] === 127)
+      || (octets[0] === 169 && octets[1] === 254)
+      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 0)
+      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 2)
+      || (octets[0] === 192 && octets[1] === 168)
+      || (octets[0] === 198 && octets[1] === 18)
+      || (octets[0] === 198 && octets[1] === 19)
+      || (octets[0] === 198 && octets[1] === 51 && octets[2] === 100)
+      || (octets[0] === 203 && octets[1] === 0 && octets[2] === 113)
+    );
+    return !specialIpv4 && !(
       host === 'localhost'
       || host.endsWith('.local')
       || host.endsWith('.internal')
-      || host === '::1'
-      || host.startsWith('127.')
-      || host.startsWith('10.')
-      || host.startsWith('192.168.')
-      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-      || host.startsWith('169.254.')
-      || host.startsWith('0.')
     );
   } catch {
     return false;
@@ -170,7 +177,7 @@ export const envSchema = z.object({
   PLACES_API_KEY: anyString,
   AMAP_API_KEY: anyString,
   AMAP_API_BASE: publicHttpUrl,
-  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm']),
+  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm', 'openstreetmap']),
   AMAP_TIMEOUT_MS: integer(1, 2_147_483_647, 'must be a whole number of milliseconds between 1 and 2147483647'),
   AMAP_CACHE_TTL_SECONDS: positiveNumber,
   AMAP_RATE_LIMIT_PER_MINUTE: positiveNumber,

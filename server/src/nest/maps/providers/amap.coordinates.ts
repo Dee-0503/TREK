@@ -25,7 +25,13 @@ export class AmapCoordinates {
   }
 
   private static inMainlandChina({ lat, lng }: { lat: number; lng: number }): boolean {
-    return lat >= 0.8293 && lat <= 55.8271 && lng >= 72.004 && lng <= 137.8347;
+    // Conservative mainland-only box. The western/southern edge excludes the
+    // Hong Kong, Macau and Taiwan islands while retaining nearby mainland points.
+    // AMap conversion must not be applied to special administrative regions.
+    if (lat < 18.16 || lat > 53.56 || lng < 73.5 || lng > 135.1) return false;
+    if (lat < 22.35 && lng > 113.8) return false; // HK/MO and nearby islands
+    if (lat >= 22.1 && lat <= 25.5 && lng >= 119.0 && lng <= 122.1) return false; // Taiwan
+    return true;
   }
 
   private static delta(lat: number, lng: number): { lat: number; lng: number } {
