@@ -2522,6 +2522,62 @@ describe('photoBytesKey', () => {
 });
 
 describe('controller-facing wrappers delegate to the folded methods', () => {
+  it('projects public search results without provider-only fields', async () => {
+    const searchPlaces = vi.spyOn(MapsService.prototype, 'searchPlaces').mockResolvedValue({
+      places: [{
+        google_place_id: 'ChIJ123',
+        name: 'Cafe',
+        address: 'Paris',
+        lat: 48.8,
+        lng: 2.3,
+        providerOnlyToken: 'secret',
+        wikidata: 'Q123',
+      }],
+      source: 'google',
+    });
+    try {
+      await expect(svc.search(1, 'cafe')).resolves.toEqual({
+        places: [{ google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3 }],
+        source: 'google',
+      });
+      const result = await svc.search(1, 'cafe');
+      expect(result.places[0]).not.toHaveProperty('providerOnlyToken');
+      expect(result.places[0]).not.toHaveProperty('wikidata');
+    } finally {
+      searchPlaces.mockRestore();
+    }
+  });
+
+  it('projects public Google and OSM details without provider-only fields', async () => {
+    const getPlaceDetails = vi.spyOn(MapsService.prototype, 'getPlaceDetails').mockResolvedValue({
+      place: {
+        google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3,
+        googleMapsUri: 'https://provider.example/internal', providerOnlyToken: 'secret',
+      },
+    });
+    const getPlaceDetailsExpanded = vi.spyOn(MapsService.prototype, 'getPlaceDetailsExpanded').mockResolvedValue({
+      place: {
+        osm_id: 'node:123', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4,
+        wikidata: 'Q123', wikimedia_commons: 'Category:Park', providerOnlyToken: 'secret',
+      },
+    });
+    try {
+      await expect(svc.details(1, 'ChIJ123')).resolves.toEqual({
+        place: { google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3 },
+      });
+      await expect(svc.detailsExpanded(1, 'node:123', undefined, false)).resolves.toEqual({
+        place: { osm_id: 'node:123', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4 },
+      });
+      const google = await svc.details(1, 'ChIJ123');
+      const osm = await svc.detailsExpanded(1, 'node:123', undefined, false);
+      expect(google.place).not.toHaveProperty('providerOnlyToken');
+      expect(osm.place).not.toHaveProperty('wikidata');
+      expect(osm.place).not.toHaveProperty('wikimedia_commons');
+    } finally {
+      getPlaceDetails.mockRestore();
+      getPlaceDetailsExpanded.mockRestore();
+    }
+  });
   it('search/autocomplete/details/detailsExpanded/photo/reverse/resolveUrl/pois forward their args', async () => {
     const spies = {
       searchPlaces: vi.spyOn(MapsService.prototype, 'searchPlaces').mockResolvedValue({ places: [], source: 'osm' }),

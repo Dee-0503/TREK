@@ -151,7 +151,7 @@ export const mapsResolveUrlRequestSchema = z.object({
 export type MapsResolveUrlRequest = z.infer<typeof mapsResolveUrlRequestSchema>;
 
 /** Provider-neutral place projection shared by search and detail responses. */
-const placeProjection = z.object({
+export const mapPlaceProjectionSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   address: z.string().optional(),
@@ -161,15 +161,34 @@ const placeProjection = z.object({
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
   rating: z.number().nullable().optional(),
+  rating_count: z.number().nullable().optional(),
   website: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   types: z.array(z.string()).optional(),
+  opening_hours: z.array(z.string()).nullable().optional(),
+  open_now: z.boolean().nullable().optional(),
+  opening_periods: z.array(z.object({
+    open: z.object({ day: z.number(), hour: z.number(), minute: z.number() }),
+    close: z.object({ day: z.number(), hour: z.number(), minute: z.number() }).nullable().optional(),
+  })).nullable().optional(),
+  opening_special_days: z.array(z.string()).nullable().optional(),
+  google_maps_url: z.string().nullable().optional(),
+  osm_url: z.string().nullable().optional(),
+  summary: z.string().nullable().optional(),
+  reviews: z.array(z.object({
+    author: z.string().nullable().optional(),
+    rating: z.number().nullable().optional(),
+    text: z.string().nullable().optional(),
+    time: z.string().nullable().optional(),
+    photo: z.string().nullable().optional(),
+  })).optional(),
   source: z.string().optional(),
   providerIdentity: placeProviderIdentitySchema.optional(),
 });
+export type MapPlaceProjection = z.infer<typeof mapPlaceProjectionSchema>;
 
 export const mapsSearchResultSchema = z.object({
-  places: z.array(placeProjection),
+  places: z.array(mapPlaceProjectionSchema),
   source: z.string(),
   routeSource: routeSourceSchema.optional(),
 });
@@ -187,7 +206,7 @@ export const mapsAutocompleteResultSchema = z.object({
 export type MapsAutocompleteResult = z.infer<typeof mapsAutocompleteResultSchema>;
 
 export const mapsPlaceDetailsResultSchema = z.object({
-  place: placeProjection.nullable(),
+  place: mapPlaceProjectionSchema.nullable(),
   disabled: z.boolean().optional(),
 });
 export type MapsPlaceDetailsResult = z.infer<typeof mapsPlaceDetailsResultSchema>;
