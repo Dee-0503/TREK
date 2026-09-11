@@ -1,8 +1,29 @@
 import { z } from 'zod';
 
+/** Provider-neutral map/place provider identifiers shared by request and response contracts. */
+export const mapProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export type MapProvider = z.infer<typeof mapProviderSchema>;
+
+export const providerOverrideSchema = mapProviderSchema;
+export type ProviderOverride = z.infer<typeof providerOverrideSchema>;
+
+export const geographicContextSchema = z.object({
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+});
+export type GeographicContext = z.infer<typeof geographicContextSchema>;
+
+const requestContext = {
+  countryCode: geographicContextSchema.shape.countryCode,
+  latitude: geographicContextSchema.shape.latitude,
+  longitude: geographicContextSchema.shape.longitude,
+  providerOverride: providerOverrideSchema.optional(),
+};
+
+const latLng = z.object({ lat: z.number(), lng: z.number() });
+
 /**
- * Maps / geo API contract — single source of truth for the /api/maps endpoints.
- *
  * server/src/nest/maps/maps.service.ts talks to Nominatim/Overpass (and
  * optionally Google Places when a key is configured) and applies the SSRF guard
  * on every outbound URL. The place objects these return are provider-shaped and
@@ -18,21 +39,6 @@ import { z } from 'zod';
  * bespoke bodies in the controller.
  */
 
-const latLng = z.object({ lat: z.number(), lng: z.number() });
-
-export const mapProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
-export type MapProvider = z.infer<typeof mapProviderSchema>;
-
-export const providerOverrideSchema = mapProviderSchema;
-export type ProviderOverride = z.infer<typeof providerOverrideSchema>;
-
-export const geographicContextSchema = z.object({
-  countryCode: z.string().min(2).max(2).optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-});
-export type GeographicContext = z.infer<typeof geographicContextSchema>;
-
 export const routeSourceSchema = z.object({
   provider: z.enum(['amap', 'osrm']),
   fallback: z.boolean(),
@@ -40,12 +46,23 @@ export const routeSourceSchema = z.object({
 });
 export type RouteSource = z.infer<typeof routeSourceSchema>;
 
-const requestContext = {
-  countryCode: geographicContextSchema.shape.countryCode,
-  latitude: geographicContextSchema.shape.latitude,
-  longitude: geographicContextSchema.shape.longitude,
-  providerOverride: providerOverrideSchema.optional(),
-};
+export const routeLegSchema = z.object({
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  note: z.string().optional(),
+});
+export type RouteLeg = z.infer<typeof routeLegSchema>;
+
+export const routeResultSchema = z.object({
+  provider: z.string(),
+  profile: z.string(),
+  coordinates: z.array(z.tuple([z.number(), z.number()])),
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  legs: z.array(routeLegSchema),
+  routeSource: routeSourceSchema,
+});
+export type RouteResult = z.infer<typeof routeResultSchema>;
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -87,8 +104,17 @@ export type MapsResolveUrlRequest = z.infer<typeof mapsResolveUrlRequestSchema>;
 /** Provider-shaped place blob (Google/OSM fields differ); kept open by design. */
 const placeRecord = z.record(z.string(), z.unknown());
 
+const placeProjection = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  address: z.string().optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  providerIdentity: z.object({ provider: mapProviderSchema, providerPlaceId: z.string() }).optional(),
+});
+
 export const mapsSearchResultSchema = z.object({
-  places: z.array(placeRecord),
+  places: z.array(placeProjection),
   source: z.string(),
   routeSource: routeSourceSchema.optional(),
 });
@@ -106,7 +132,7 @@ export const mapsAutocompleteResultSchema = z.object({
 export type MapsAutocompleteResult = z.infer<typeof mapsAutocompleteResultSchema>;
 
 export const mapsPlaceDetailsResultSchema = z.object({
-  place: placeRecord.nullable(),
+  place: placeProjection.nullable(),
   disabled: z.boolean().optional(),
 });
 export type MapsPlaceDetailsResult = z.infer<typeof mapsPlaceDetailsResultSchema>;

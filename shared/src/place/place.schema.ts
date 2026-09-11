@@ -16,8 +16,11 @@ import { z } from 'zod';
 
 const open = z.record(z.string(), z.unknown());
 
+export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export type PlaceProvider = z.infer<typeof placeProviderSchema>;
+
 export const placeProviderIdentitySchema = z.object({
-  provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']),
+  provider: placeProviderSchema,
   providerPlaceId: z.string().min(1),
 });
 export type PlaceProviderIdentity = z.infer<typeof placeProviderIdentitySchema>;
