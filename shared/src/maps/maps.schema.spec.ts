@@ -5,11 +5,27 @@ import {
   mapsResolveUrlRequestSchema,
   mapsPlaceEnrichmentRequestSchema,
   mapsPlaceEnrichmentResultSchema,
+  mapsSearchResultSchema,
+  mapProviderSchema,
+  providerOverrideSchema,
+  routeSourceSchema,
   placePhotoCandidateSchema,
   placeDescriptionSchema,
 } from './maps.schema';
 
 import { describe, it, expect } from 'vitest';
+
+describe('provider-neutral map contracts', () => {
+  it('accepts supported providers and rejects unknown overrides', () => {
+    expect(mapProviderSchema.parse('amap')).toBe('amap');
+    expect(() => providerOverrideSchema.parse('unknown')).toThrow();
+  });
+
+  it('keeps legacy Google and OSM search payloads parseable', () => {
+    expect(mapsSearchResultSchema.safeParse({ places: [{ place_id: 'ChIJx' }], source: 'google' }).success).toBe(true);
+    expect(mapsSearchResultSchema.safeParse({ places: [{ osm_id: 'node/42' }], source: 'osm' }).success).toBe(true);
+  });
+});
 
 describe('mapsSearchRequestSchema', () => {
   it('requires a non-empty query', () => {

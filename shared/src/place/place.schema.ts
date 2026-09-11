@@ -16,6 +16,12 @@ import { z } from 'zod';
 
 const open = z.record(z.string(), z.unknown());
 
+export const placeProviderIdentitySchema = z.object({
+  provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']),
+  providerPlaceId: z.string().min(1),
+});
+export type PlaceProviderIdentity = z.infer<typeof placeProviderIdentitySchema>;
+
 /** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */
 export const hexColorSchema = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
@@ -100,6 +106,7 @@ export const placeSchema = z.object({
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
+  providerIdentity: placeProviderIdentitySchema.optional(),
   route_geometry: z.string().nullable().optional(),
   // Manual track colour (#776). null = inherit the category colour like before.
   route_color: hexColorSchema.nullable().optional(),

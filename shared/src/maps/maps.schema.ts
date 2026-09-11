@@ -20,8 +20,36 @@ import { z } from 'zod';
 
 const latLng = z.object({ lat: z.number(), lng: z.number() });
 
+export const mapProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export type MapProvider = z.infer<typeof mapProviderSchema>;
+
+export const providerOverrideSchema = mapProviderSchema;
+export type ProviderOverride = z.infer<typeof providerOverrideSchema>;
+
+export const geographicContextSchema = z.object({
+  countryCode: z.string().min(2).max(2).optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+});
+export type GeographicContext = z.infer<typeof geographicContextSchema>;
+
+export const routeSourceSchema = z.object({
+  provider: z.enum(['amap', 'osrm']),
+  fallback: z.boolean(),
+  fallbackReason: z.string().optional(),
+});
+export type RouteSource = z.infer<typeof routeSourceSchema>;
+
+const requestContext = {
+  countryCode: geographicContextSchema.shape.countryCode,
+  latitude: geographicContextSchema.shape.latitude,
+  longitude: geographicContextSchema.shape.longitude,
+  providerOverride: providerOverrideSchema.optional(),
+};
+
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
+  ...requestContext,
   // Optional bias toward a coordinate (lat/lng[/radius]); improves
   // foreign-region queries. z.number() is finite-only (zod v4), matching the
   // legacy Number.isFinite() check; radius was never validated beyond "number".
@@ -31,6 +59,7 @@ export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 
 export const mapsAutocompleteRequestSchema = z.object({
   input: z.string().min(1).max(200),
+  ...requestContext,
   lang: z.string().optional(),
   locationBias: z.object({ low: latLng, high: latLng }).optional(),
   /**
@@ -61,6 +90,7 @@ const placeRecord = z.record(z.string(), z.unknown());
 export const mapsSearchResultSchema = z.object({
   places: z.array(placeRecord),
   source: z.string(),
+  routeSource: routeSourceSchema.optional(),
 });
 export type MapsSearchResult = z.infer<typeof mapsSearchResultSchema>;
 
