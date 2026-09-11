@@ -15,9 +15,12 @@ describe('maps provider configuration', () => {
     expect(deriveMaps({ PLACES_PROVIDER_MODE: 'openstreetmap' }).placesProviderMode).toBe('osm');
   });
 
-  it('accepts openstreetmap during boot validation', () => {
-    expect(() => validateEnvAtBoot({ PLACES_PROVIDER_MODE: 'openstreetmap' })).not.toThrow();
+  it('rejects IANA special-use AMap endpoints at boot', () => {
+    for (const host of ['192.0.0.1', '192.0.2.1', '198.18.0.1', '198.51.100.1', '203.0.113.1']) {
+      expect(() => validateEnvAtBoot({ AMAP_API_BASE: `https://${host}` })).toThrow();
+    }
   });
+
 });
 
 describe('RuntimeEnvService', () => {

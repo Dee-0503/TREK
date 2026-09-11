@@ -22,7 +22,17 @@ describe('AmapCoordinates', () => {
     expect(AmapCoordinates.toInternal(point)).toEqual(point);
   });
 
-  it('still transforms nearby mainland Shenzhen', () => {
+  it('does not transform Macau and Taiwan edge coordinates', () => {
+    for (const point of [
+      { lat: 22.1987, lng: 113.5439 },
+      { lat: 21.95, lng: 120.8 },
+    ]) {
+      expect(AmapCoordinates.toProvider(point)).toEqual(point);
+      expect(AmapCoordinates.toInternal(point)).toEqual(point);
+    }
+  });
+
+
     const point = { lat: 22.5431, lng: 114.0579 };
     expect(AmapCoordinates.toProvider(point)).not.toEqual(point);
   });
