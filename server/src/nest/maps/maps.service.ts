@@ -535,17 +535,20 @@ function projectPublicPlace(place: Record<string, unknown>): MapPlaceProjection 
 }
 
 function projectPublicSearchResult(result: { places: Record<string, unknown>[]; source: string; routeSource?: unknown }): MapsSearchResult {
-  return {
-    ...result,
+  const publicResult: { places: MapPlaceProjection[]; source: string; routeSource?: unknown } = {
     places: result.places.map(projectPublicPlace),
-  } as MapsSearchResult;
+    source: result.source,
+  };
+  if (result.routeSource !== undefined) publicResult.routeSource = result.routeSource;
+  return publicResult as MapsSearchResult;
 }
 
 function projectPublicDetailsResult(result: { place: Record<string, unknown> | null; disabled?: boolean }): MapsPlaceDetailsResult {
-  return {
-    ...result,
+  const publicResult: { place: MapPlaceProjection | null; disabled?: boolean } = {
     place: result.place ? projectPublicPlace(result.place) : null,
   };
+  if (result.disabled !== undefined) publicResult.disabled = result.disabled;
+  return publicResult;
 }
 
 @Injectable()
