@@ -24,8 +24,7 @@ export class ProviderRouter {
       if (enabled.includes(override)) return override;
     }
     const mode = readEnv().maps.placesProviderMode;
-    const selectedMode = mode === 'openstreetmap' ? 'osm' : mode;
-    if (selectedMode !== 'auto' && enabled.includes(selectedMode)) return selectedMode;
+    if (mode !== 'auto' && enabled.includes(mode)) return mode;
     if (this.isMainlandChina(context) && enabled.includes('amap')) return 'amap';
     return enabled.includes('google') ? 'google' : (enabled[0] ?? 'osm');
   }

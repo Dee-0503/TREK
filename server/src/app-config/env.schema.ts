@@ -47,28 +47,30 @@ const url = optionalWith((v) => {
 const publicHttpUrl = optionalWith((v) => {
   try {
     const parsed = new URL(v);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return false;
-    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
-    if (isIP(host)) {
-      // URL accepts IPv4-mapped IPv6 and other special ranges. Keep literal
-      // IPv4 endpoints possible, but reject non-public IPv4 ranges; IPv6
-      // literals are rejected conservatively because net.isIP alone does not
-      // classify IPv6 special-use ranges. DNS/final-hop validation remains the
-      // outbound adapter's responsibility.
-      if (isIP(host) !== 4) return false;
-      const octets = host.split('.').map(Number);
-      const [a, b] = octets;
-      return !(
-        a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
-        a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
-        a >= 224 || (a === 100 && b >= 64 && b <= 127)
-      );
-    }
-    // Reject non-canonical numeric IPv4 spellings (decimal/octal/hex and
-    // shortened forms) even when URL normalizes them to a private address.
-    if (/^[0-9.]+$/.test(host) || host.includes('::')) return false;
-    return host.length > 0 && !host.endsWith('.') && !host.includes('..');
+    const host = parsed.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    const octets = host.split('.').map(Number);
+    const ipv4 = octets.length === 4 && octets.every((n, i) => String(n) === host.split('.')[i] && Number.isInteger(n) && n >= 0 && n <= 255);
+    const specialIpv4 = ipv4 && (
+      octets[0] === 0
+      || octets[0] === 10
+      || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+      || (octets[0] === 127)
+      || (octets[0] === 169 && octets[1] === 254)
+      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 0)
+      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 2)
+      || (octets[0] === 192 && octets[1] === 168)
+      || (octets[0] === 198 && octets[1] === 18)
+      || (octets[0] === 198 && octets[1] === 19)
+      || (octets[0] === 198 && octets[1] === 51 && octets[2] === 100)
+      || (octets[0] === 203 && octets[1] === 0 && octets[2] === 113)
+    );
+    return !specialIpv4 && !(
+      host === 'localhost'
+      || host.endsWith('.local')
+      || host.endsWith('.internal')
+    );
   } catch {
     return false;
   }
@@ -176,7 +178,7 @@ export const envSchema = z.object({
   PLACES_API_KEY: anyString,
   AMAP_API_KEY: anyString,
   AMAP_API_BASE: publicHttpUrl,
-  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm']),
+  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm', 'openstreetmap']),
   AMAP_TIMEOUT_MS: integer(1, 2_147_483_647, 'must be a whole number of milliseconds between 1 and 2147483647'),
   AMAP_CACHE_TTL_SECONDS: positiveNumber,
   AMAP_RATE_LIMIT_PER_MINUTE: positiveNumber,

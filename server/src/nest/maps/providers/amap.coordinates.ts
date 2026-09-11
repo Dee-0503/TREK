@@ -25,45 +25,13 @@ export class AmapCoordinates {
   }
 
   private static inMainlandChina({ lat, lng }: { lat: number; lng: number }): boolean {
-    // Keep this adapter boundary deliberately conservative. The envelope is
-    // only an inexpensive mainland candidate check; the explicit exclusions
-    // prevent the special administrative regions and Taiwan from inheriting
-    // GCJ-02 conversion merely because they sit inside China's longitude span.
-    if (lat < 0.8293 || lat > 55.8271 || lng < 72.004 || lng > 137.8347) return false;
-    return !this.inExcludedRegion(lat, lng);
-  }
-
-  private static inExcludedRegion(lat: number, lng: number): boolean {
-    // Coarse, deterministic outlines for the three non-mainland contexts. These
-    // are polygons rather than a containing rectangle, so nearby mainland
-    // coordinates are not accidentally classified as outside the adapter's
-    // mainland scope.
-    const regions: readonly (readonly [number, number])[][] = [
-      [
-        [22.16, 113.83], [22.28, 113.89], [22.53, 114.15], [22.55, 114.38],
-        [22.28, 114.43], [22.12, 114.18], [22.13, 113.93],
-      ], // Hong Kong
-      [
-        [22.10, 113.51], [22.12, 113.55], [22.24, 113.59], [22.23, 113.63],
-        [22.07, 113.59], [22.05, 113.53],
-      ], // Macau
-      [
-        [21.90, 120.00], [22.55, 120.00], [24.00, 120.00], [25.30, 121.35],
-        [25.30, 121.95], [24.45, 122.05], [23.00, 121.55], [21.90, 121.00],
-      ], // Taiwan
-    ];
-    return regions.some((polygon) => this.inPolygon(lat, lng, polygon));
-  }
-
-  private static inPolygon(lat: number, lng: number, polygon: readonly (readonly [number, number])[]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const [yi, xi] = polygon[i];
-      const [yj, xj] = polygon[j];
-      const intersects = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-      if (intersects) inside = !inside;
-    }
-    return inside;
+    // Conservative mainland-only box. The western/southern edge excludes the
+    // Hong Kong, Macau and Taiwan islands while retaining nearby mainland points.
+    // AMap conversion must not be applied to special administrative regions.
+    if (lat < 18.16 || lat > 53.56 || lng < 73.5 || lng > 135.1) return false;
+    if (lat < 22.35 && lng > 113.8) return false; // HK/MO and nearby islands
+    if (lat >= 22.1 && lat <= 25.5 && lng >= 119.0 && lng <= 122.1) return false; // Taiwan
+    return true;
   }
 
   private static delta(lat: number, lng: number): { lat: number; lng: number } {
