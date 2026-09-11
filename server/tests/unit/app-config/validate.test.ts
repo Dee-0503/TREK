@@ -61,6 +61,27 @@ describe('validateEnvAtBoot', () => {
     expect(() => validateEnvAtBoot({ NODE_ENV: 'staging' })).not.toThrow();
   });
 
+  it.each([
+    'http://127.0.0.1',
+    'http://10.0.0.1',
+    'http://192.168.1.1',
+    'http://172.16.0.1',
+    'http://169.254.169.254',
+    'http://[::1]',
+    'http://[::ffff:127.0.0.1]',
+    'http://2130706433',
+    'http://127.1',
+    'http://0x7f000001',
+    'http://0177.0.0.1',
+  ])('rejects non-public AMAP_API_BASE target %s', (value) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => validateEnvAtBoot({ AMAP_API_BASE: value })).toThrow(/Invalid environment configuration/);
+  });
+
+  it('accepts a public HTTPS AMAP endpoint', () => {
+    expect(() => validateEnvAtBoot({ AMAP_API_BASE: 'https://restapi.amap.com' })).not.toThrow();
+  });
+
   it('throws on present-but-malformed values with an aggregated report', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() =>
