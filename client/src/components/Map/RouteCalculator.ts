@@ -1,6 +1,6 @@
 import { useSettingsStore } from '../../store/settingsStore'
 import { pluginsApi } from '../../api/client'
-import type { DistanceUnit, RouteResult, RouteSegment, RouteWithLegs, Waypoint, RouteAnchors } from '../../types'
+import type { DistanceUnit, RouteResult, RouteSegment, Waypoint, RouteAnchors, RouteWithLegs as SharedRouteWithLegs } from '../../types'
 import { formatDistance } from '../../utils/units'
 
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
@@ -16,7 +16,7 @@ const OSRM_PROFILE_BASE: Record<'driving' | 'walking' | 'cycling', string> = {
 
 // Cache route responses keyed by the exact waypoint list. Routes are stable, so
 // this avoids re-hitting the public OSRM demo server on every day switch / reorder.
-const routeCache = new Map<string, RouteWithLegs>()
+const routeCache = new Map<string, SharedRouteWithLegs>()
 const ROUTE_CACHE_MAX = 200
 
 /**
@@ -78,6 +78,7 @@ export async function calculateRoute(
     coordinates,
     distance,
     duration,
+    routeSource: { provider: 'osrm', fallback: false },
     distanceText: formatRouteDistance(distance),
     durationText: formatDuration(duration),
     walkingText: formatDuration(walkingDuration),
@@ -286,9 +287,9 @@ export async function calculateSegments(
 export async function calculateRouteWithLegs(
   waypoints: Waypoint[],
   { signal, profile = 'driving', tripId, dayId }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null } = {}
-): Promise<RouteWithLegs> {
+): Promise<SharedRouteWithLegs> {
   if (!waypoints || waypoints.length < 2) {
-    return { coordinates: [], distance: 0, duration: 0, legs: [] }
+    return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }
   }
 
   const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';')
@@ -329,10 +330,11 @@ export async function calculateRouteWithLegs(
         ...(leg.note ? { noteText: leg.note } : {}),
       }
     })
-    const result: RouteWithLegs = {
+    const result: SharedRouteWithLegs = {
       coordinates: route.coordinates,
       distance: route.distance,
       duration: route.duration,
+      routeSource: { provider: 'amap', fallback: false },
       legs,
       ...(route.viaPoints.length ? { vias: route.viaPoints } : {}),
     }
@@ -374,7 +376,7 @@ export async function calculateRouteWithLegs(
     }
   )
 
-  const result: RouteWithLegs = { coordinates, distance: route.distance, duration: route.duration, legs }
+  const result: SharedRouteWithLegs = { coordinates, distance: route.distance, duration: route.duration, routeSource: { provider: 'osrm', fallback: false }, legs }
   routeCache.set(cacheKey, result)
   if (routeCache.size > ROUTE_CACHE_MAX) {
     const oldest = routeCache.keys().next().value

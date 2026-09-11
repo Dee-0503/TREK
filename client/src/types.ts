@@ -187,6 +187,7 @@ export interface RouteWithLegs {
   coordinates: [number, number][]
   distance: number
   duration: number
+  routeSource: { provider: 'amap' | 'osrm'; fallback: boolean; fallbackReason?: string }
   legs: RouteSegment[]
   /** Present on plugin-provided routes only. */
   vias?: RouteVia[]
@@ -200,6 +201,7 @@ export interface RouteResult {
   durationText: string
   walkingText: string
   drivingText: string
+  routeSource: { provider: 'amap' | 'osrm'; fallback: boolean; fallbackReason?: string }
 }
 
 export interface Waypoint {

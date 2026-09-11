@@ -1,7 +1,8 @@
+import { placeProviderIdentitySchema } from '../place/place.schema';
 import { z } from 'zod';
 
 /** Provider-neutral map/place provider identifiers shared by request and response contracts. */
-export const mapProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export const mapProviderSchema = placeProviderIdentitySchema.shape.provider;
 export type MapProvider = z.infer<typeof mapProviderSchema>;
 
 export const providerOverrideSchema = mapProviderSchema;
@@ -21,9 +22,9 @@ const requestContext = {
   providerOverride: providerOverrideSchema.optional(),
 };
 
-const latLng = z.object({ lat: z.number(), lng: z.number() });
-
 /**
+ * Maps / geo API contract — single source of truth for the /api/maps endpoints.
+ *
  * server/src/nest/maps/maps.service.ts talks to Nominatim/Overpass (and
  * optionally Google Places when a key is configured) and applies the SSRF guard
  * on every outbound URL. The place objects these return are provider-shaped and
@@ -39,6 +40,7 @@ const latLng = z.object({ lat: z.number(), lng: z.number() });
  * bespoke bodies in the controller.
  */
 
+/** Route source metadata returned by the real route consumer. */
 export const routeSourceSchema = z.object({
   provider: z.enum(['amap', 'osrm']),
   fallback: z.boolean(),
@@ -47,19 +49,69 @@ export const routeSourceSchema = z.object({
 export type RouteSource = z.infer<typeof routeSourceSchema>;
 
 export const routeLegSchema = z.object({
+  mid: z.tuple([z.number(), z.number()]),
+  from: z.tuple([z.number(), z.number()]),
+  to: z.tuple([z.number(), z.number()]),
   distance: z.number().nonnegative(),
   duration: z.number().nonnegative(),
-  note: z.string().optional(),
+  walkingText: z.string(),
+  drivingText: z.string(),
+  distanceText: z.string(),
+  durationText: z.string().optional(),
+  noteText: z.string().optional(),
+  mode: z.string().optional(),
 });
-export type RouteLeg = z.infer<typeof routeLegSchema>;
+export type RouteLeg = {
+  mid: [number, number];
+  from: [number, number];
+  to: [number, number];
+  distance: number;
+  duration: number;
+  walkingText: string;
+  drivingText: string;
+  distanceText: string;
+  durationText?: string;
+  noteText?: string;
+  mode?: string;
+};
+
+/** The complete RouteCalculator result, including its display strings. */
+export const routeWithLegsSchema = z.object({
+  coordinates: z.array(z.tuple([z.number(), z.number()])),
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  routeSource: routeSourceSchema,
+  legs: z.array(routeLegSchema),
+  vias: z.array(z.object({
+    lat: z.number(),
+    lng: z.number(),
+    label: z.string().optional(),
+    tone: z.enum(['default', 'success', 'warn', 'danger']),
+    dwellSeconds: z.number().nonnegative().optional(),
+  })).optional(),
+});
+export type RouteWithLegs = {
+  coordinates: [number, number][];
+  distance: number;
+  duration: number;
+  routeSource: RouteSource;
+  legs: z.infer<typeof routeLegSchema>[];
+  vias?: { lat: number; lng: number; label?: string; tone: 'default' | 'success' | 'warn' | 'danger'; dwellSeconds?: number }[];
+};
 
 export const routeResultSchema = z.object({
   coordinates: z.array(z.tuple([z.number(), z.number()])),
   distance: z.number().nonnegative(),
   duration: z.number().nonnegative(),
+  distanceText: z.string(),
+  durationText: z.string(),
+  walkingText: z.string(),
+  drivingText: z.string(),
   routeSource: routeSourceSchema,
 });
 export type RouteResult = z.infer<typeof routeResultSchema>;
+
+const latLng = z.object({ lat: z.number(), lng: z.number() });
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -98,16 +150,22 @@ export const mapsResolveUrlRequestSchema = z.object({
 });
 export type MapsResolveUrlRequest = z.infer<typeof mapsResolveUrlRequestSchema>;
 
-/** Provider-shaped place blob (Google/OSM fields differ); kept open by design. */
-const placeRecord = z.record(z.string(), z.unknown());
-
+/** Provider-neutral place projection shared by search and detail responses. */
 const placeProjection = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   address: z.string().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
-  providerIdentity: z.object({ provider: mapProviderSchema, providerPlaceId: z.string() }).optional(),
+  google_place_id: z.string().nullable().optional(),
+  google_ftid: z.string().nullable().optional(),
+  osm_id: z.string().nullable().optional(),
+  rating: z.number().nullable().optional(),
+  website: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  types: z.array(z.string()).optional(),
+  source: z.string().optional(),
+  providerIdentity: placeProviderIdentitySchema.optional(),
 });
 
 export const mapsSearchResultSchema = z.object({
@@ -129,7 +187,7 @@ export const mapsAutocompleteResultSchema = z.object({
 export type MapsAutocompleteResult = z.infer<typeof mapsAutocompleteResultSchema>;
 
 export const mapsPlaceDetailsResultSchema = z.object({
-  place: z.record(z.string(), z.unknown()).nullable(),
+  place: placeProjection.nullable(),
   disabled: z.boolean().optional(),
 });
 export type MapsPlaceDetailsResult = z.infer<typeof mapsPlaceDetailsResultSchema>;
