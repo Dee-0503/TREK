@@ -29,13 +29,12 @@ export class AmapCoordinates {
     // Hong Kong, Macau and Taiwan islands while retaining nearby mainland points.
     // AMap conversion must not be applied to special administrative regions.
     if (lat < 18.16 || lat > 53.56 || lng < 73.5 || lng > 135.1) return false;
-    if (lat < 18.16 || lat > 53.56 || lng < 73.5 || lng > 135.1) return false;
     // Keep one conservative mainland envelope and explicitly remove the
     // non-mainland islands/territories. The exclusions stay narrow at the
     // Shenzhen border so nearby Mainland coordinates still use GCJ-02.
     if (lat < 22.35 && lng > 113.8) return false; // Hong Kong
     if (lat >= 22.1 && lat <= 22.3 && lng >= 113.45 && lng <= 113.7) return false; // Macau
-    if (lat >= 21.8 && lat <= 25.6 && lng >= 118.8 && lng <= 122.3) return false; // Taiwan and outlying islands
+    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) return false; // Taiwan and outlying islands
     return true;
   }
 
