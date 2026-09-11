@@ -16,6 +16,16 @@ import { z } from 'zod';
 
 const open = z.record(z.string(), z.unknown());
 
+/** One canonical provider identity shape used by maps and place contracts. */
+export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export type PlaceProvider = z.infer<typeof placeProviderSchema>;
+
+export const placeProviderIdentitySchema = z.object({
+  provider: placeProviderSchema,
+  providerPlaceId: z.string().min(1),
+});
+export type PlaceProviderIdentity = z.infer<typeof placeProviderIdentitySchema>;
+
 /** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */
 export const hexColorSchema = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
