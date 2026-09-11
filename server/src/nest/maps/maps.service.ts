@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   mapPlaceProjectionSchema,
 } from '@trek/shared';
@@ -40,7 +40,8 @@ import {
   type GoogleOpeningHours,
   type OverpassPoi,
 } from './maps.helpers';
-
+import { ProviderRouter } from './providers/provider-router';
+import { AmapProvider } from './providers/amap.provider';
 // ── Google API call counter ───────────────────────────────────────────────────
 
 let googleApiCallCount = 0;
@@ -556,6 +557,8 @@ export class MapsService {
   constructor(
     private readonly database: DatabaseService,
     private readonly photoCache: PlacePhotoCacheService,
+    @Optional() private readonly providerRouter?: ProviderRouter,
+    @Optional() private readonly amapProvider?: AmapProvider,
   ) {}
 
   private isSettingDisabled(key: string): boolean {
@@ -1488,6 +1491,14 @@ export class MapsService {
     lang?: string,
     locationBias?: { lat: number; lng: number; radius?: number },
   ): Promise<{ places: Record<string, unknown>[]; source: string }> {
+    const provider = this.providerRouter?.resolvePlaceProvider({
+      latitude: locationBias?.lat,
+      longitude: locationBias?.lng,
+    });
+    if (provider === 'amap' && this.amapProvider) {
+      const result = await this.amapProvider.search(query, { lang, locationBias });
+      return { places: result.places, source: result.source };
+    }
     const { key: apiKey, source: keySource } = this.resolveMapsKey(userId);
 
     if (!apiKey) {
@@ -1559,6 +1570,11 @@ export class MapsService {
     locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } },
     sessionToken?: string,
   ): Promise<{ suggestions: { placeId: string; mainText: string; secondaryText: string }[]; source: string }> {
+    const provider = this.providerRouter?.resolvePlaceProvider();
+    if (provider === 'amap' && this.amapProvider) {
+      const result = await this.amapProvider.autocomplete(input, { lang, locationBias });
+      return { suggestions: result.suggestions, source: result.source };
+    }
     const { key: apiKey, source: keySource } = this.resolveMapsKey(userId);
 
     if (!apiKey) {
@@ -1647,6 +1663,10 @@ export class MapsService {
     lang?: string,
     sessionToken?: string,
   ): Promise<{ place: Record<string, unknown> | null }> {
+    // AMap ids are explicitly namespaced; only the AMap provider may resolve them.
+    if (placeId.startsWith('amap:') && this.amapProvider) {
+      return this.amapProvider.getDetails(placeId, { lang });
+    }
     // OSM details: placeId is "node:123456" or "way:123456" etc.
     if (placeId.includes(':')) {
       const [osmType, osmId] = placeId.split(':');
@@ -2034,6 +2054,10 @@ export class MapsService {
     lang?: string,
     opts?: { lane?: GeoLane; timeoutMs?: number },
   ): Promise<{ name: string | null; address: string | null }> {
+    const provider = this.providerRouter?.resolvePlaceProvider();
+    if (provider === 'amap' && this.amapProvider) {
+      return this.amapProvider.reverseGeocode({ lat: Number(lat), lng: Number(lng) }, { lang });
+    }
     const params = new URLSearchParams({
       lat,
       lon: lng,

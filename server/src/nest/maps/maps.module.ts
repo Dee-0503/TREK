@@ -5,6 +5,7 @@ import { MapsMcp } from './maps.mcp';
 import { PlacePhotosModule } from '../place-photos/place-photos.module';
 import { StorageModule } from '../storage/storage.module';
 import { ProviderRouter } from './providers/provider-router';
+import { AmapProvider } from './providers/amap.provider';
 
 /**
  * Maps / geo domain (L3 leaf module). Registered in AppModule. Exports
@@ -15,7 +16,7 @@ import { ProviderRouter } from './providers/provider-router';
 @Module({
   imports: [PlacePhotosModule, StorageModule],
   controllers: [MapsController],
-  providers: [MapsService, MapsMcp, ProviderRouter],
+  providers: [MapsService, MapsMcp, ProviderRouter, AmapProvider],
   exports: [MapsService, ProviderRouter],
 })
 export class MapsModule {}
