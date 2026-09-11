@@ -1,4 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import {
+  mapPlaceProjectionSchema,
+} from '@trek/shared';
 import type {
   MapsSearchResult,
   MapsAutocompleteResult,
@@ -6,6 +9,7 @@ import type {
   MapsPlacePhotoResult,
   MapsReverseResult,
   MapsResolveUrlResult,
+  MapPlaceProjection,
 } from '@trek/shared';
 import { readEnv, getAppUrl } from '../../app-config';
 import { safeFetchFollow, SsrfBlockedError } from '../../utils/ssrfGuard';
@@ -524,6 +528,26 @@ type LocationBias = { low: { lat: number; lng: number }; high: { lat: number; ln
  * inline; they're encapsulated here as `*Disabled()` helpers over the same
  * `app_settings` rows.
  */
+function projectPublicPlace(place: Record<string, unknown>): MapPlaceProjection {
+  // Parsing with the shared response schema is the HTTP-boundary allowlist: Zod's
+  // default stripping removes provider-owned fields rather than forwarding them.
+  return mapPlaceProjectionSchema.parse(place);
+}
+
+function projectPublicSearchResult(result: { places: Record<string, unknown>[]; source: string; routeSource?: unknown }): MapsSearchResult {
+  return {
+    ...result,
+    places: result.places.map(projectPublicPlace),
+  } as MapsSearchResult;
+}
+
+function projectPublicDetailsResult(result: { place: Record<string, unknown> | null; disabled?: boolean }): MapsPlaceDetailsResult {
+  return {
+    ...result,
+    place: result.place ? projectPublicPlace(result.place) : null,
+  };
+}
+
 @Injectable()
 export class MapsService {
   constructor(
@@ -554,7 +578,7 @@ export class MapsService {
   // ── Controller-facing surface (unchanged signatures) ───────────────────────
 
   search(userId: number, query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }): Promise<MapsSearchResult> {
-    return this.searchPlaces(userId, query, lang, locationBias) as Promise<MapsSearchResult>;
+    return this.searchPlaces(userId, query, lang, locationBias).then(projectPublicSearchResult);
   }
 
   autocomplete(userId: number, input: string, lang?: string, locationBias?: LocationBias, sessionToken?: string): Promise<MapsAutocompleteResult> {
@@ -562,11 +586,11 @@ export class MapsService {
   }
 
   details(userId: number, placeId: string, lang?: string, sessionToken?: string): Promise<MapsPlaceDetailsResult> {
-    return this.getPlaceDetails(userId, placeId, lang, sessionToken) as Promise<MapsPlaceDetailsResult>;
+    return this.getPlaceDetails(userId, placeId, lang, sessionToken).then(projectPublicDetailsResult);
   }
 
   detailsExpanded(userId: number, placeId: string, lang: string | undefined, refresh: boolean): Promise<MapsPlaceDetailsResult> {
-    return this.getPlaceDetailsExpanded(userId, placeId, lang, refresh) as Promise<MapsPlaceDetailsResult>;
+    return this.getPlaceDetailsExpanded(userId, placeId, lang, refresh).then(projectPublicDetailsResult);
   }
 
   photo(userId: number, placeId: string, lat: number, lng: number, name?: string): Promise<MapsPlacePhotoResult> {
