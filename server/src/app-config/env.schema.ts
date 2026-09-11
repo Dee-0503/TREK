@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import { SUPPORTED_LANGUAGE_CODES } from '@trek/shared';
 import { parseDurationMs } from './parsers';
+import { isIP } from 'node:net';
 
 /** Present-but-malformed fails; unset/blank always passes (defaults apply). */
 function optionalWith(test: (v: string) => boolean, message: string) {
@@ -46,23 +47,28 @@ const url = optionalWith((v) => {
 const publicHttpUrl = optionalWith((v) => {
   try {
     const parsed = new URL(v);
-    const host = parsed.hostname.toLowerCase();
-    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    // The provider endpoint is operator-configured but still leaves the server;
-    // reject obvious local/private targets at boot. The adapter additionally uses
-    // the SSRF-safe fetch path, which resolves and pins the final address.
-    return !(
-      host === 'localhost'
-      || host.endsWith('.local')
-      || host.endsWith('.internal')
-      || host === '::1'
-      || host.startsWith('127.')
-      || host.startsWith('10.')
-      || host.startsWith('192.168.')
-      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-      || host.startsWith('169.254.')
-      || host.startsWith('0.')
-    );
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return false;
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    if (isIP(host)) {
+      // URL accepts IPv4-mapped IPv6 and other special ranges. Keep literal
+      // IPv4 endpoints possible, but reject non-public IPv4 ranges; IPv6
+      // literals are rejected conservatively because net.isIP alone does not
+      // classify IPv6 special-use ranges. DNS/final-hop validation remains the
+      // outbound adapter's responsibility.
+      if (isIP(host) !== 4) return false;
+      const octets = host.split('.').map(Number);
+      const [a, b] = octets;
+      return !(
+        a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
+        a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
+        a >= 224 || (a === 100 && b >= 64 && b <= 127)
+      );
+    }
+    // Reject non-canonical numeric IPv4 spellings (decimal/octal/hex and
+    // shortened forms) even when URL normalizes them to a private address.
+    if (/^[0-9.]+$/.test(host) || host.includes('::')) return false;
+    return host.length > 0 && !host.endsWith('.') && !host.includes('..');
   } catch {
     return false;
   }

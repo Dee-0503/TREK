@@ -27,7 +27,12 @@ describe('ProviderRouter', () => {
     expect(new ProviderRouter().resolvePlaceProvider({ countryCode })).toBe('google');
   });
 
-  it('uses the configured default for unknown context', () => {
+  it('normalizes the shared openstreetmap alias for overrides and mode', () => {
+    vi.stubEnv('PLACES_PROVIDER_MODE', 'openstreetmap');
+    expect(new ProviderRouter().resolvePlaceProvider({ override: 'openstreetmap' })).toBe('osm');
+    expect(new ProviderRouter().resolvePlaceProvider()).toBe('osm');
+  });
+
     vi.stubEnv('AMAP_API_KEY', 'test-key');
     vi.stubEnv('PLACES_PROVIDER_MODE', 'amap');
     expect(new ProviderRouter().resolvePlaceProvider({})).toBe('amap');
