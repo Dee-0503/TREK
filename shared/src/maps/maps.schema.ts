@@ -54,12 +54,9 @@ export const routeLegSchema = z.object({
 export type RouteLeg = z.infer<typeof routeLegSchema>;
 
 export const routeResultSchema = z.object({
-  provider: z.string(),
-  profile: z.string(),
   coordinates: z.array(z.tuple([z.number(), z.number()])),
   distance: z.number().nonnegative(),
   duration: z.number().nonnegative(),
-  legs: z.array(routeLegSchema),
   routeSource: routeSourceSchema,
 });
 export type RouteResult = z.infer<typeof routeResultSchema>;
@@ -108,8 +105,8 @@ const placeProjection = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   address: z.string().optional(),
-  lat: z.number().optional(),
-  lng: z.number().optional(),
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
   providerIdentity: z.object({ provider: mapProviderSchema, providerPlaceId: z.string() }).optional(),
 });
 
@@ -132,7 +129,7 @@ export const mapsAutocompleteResultSchema = z.object({
 export type MapsAutocompleteResult = z.infer<typeof mapsAutocompleteResultSchema>;
 
 export const mapsPlaceDetailsResultSchema = z.object({
-  place: placeProjection.nullable(),
+  place: z.record(z.string(), z.unknown()).nullable(),
   disabled: z.boolean().optional(),
 });
 export type MapsPlaceDetailsResult = z.infer<typeof mapsPlaceDetailsResultSchema>;
