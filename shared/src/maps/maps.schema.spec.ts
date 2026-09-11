@@ -8,7 +8,9 @@ import {
   mapsSearchResultSchema,
   mapProviderSchema,
   providerOverrideSchema,
+  geographicContextSchema,
   routeSourceSchema,
+  routeResultSchema,
   placePhotoCandidateSchema,
   placeDescriptionSchema,
 } from './maps.schema';
@@ -22,8 +24,18 @@ describe('provider-neutral map contracts', () => {
   });
 
   it('keeps legacy Google and OSM search payloads parseable', () => {
-    expect(mapsSearchResultSchema.safeParse({ places: [{ place_id: 'ChIJx' }], source: 'google' }).success).toBe(true);
-    expect(mapsSearchResultSchema.safeParse({ places: [{ osm_id: 'node/42' }], source: 'osm' }).success).toBe(true);
+    expect(mapsSearchResultSchema.safeParse({ places: [{ id: 'ChIJx', name: 'Place' }], source: 'google' }).success).toBe(true);
+    expect(mapsSearchResultSchema.safeParse({ places: [{ id: 'node/42', name: 'Place' }], source: 'osm' }).success).toBe(true);
+  });
+  it('validates context and exact route source variants', () => {
+    expect(mapsSearchRequestSchema.safeParse({ query: 'x', countryCode: 'CN', latitude: 39.9, longitude: 116.4, providerOverride: 'amap' }).success).toBe(true);
+    expect(mapsAutocompleteRequestSchema.safeParse({ input: 'x', countryCode: 'cn' }).success).toBe(false);
+    expect(geographicContextSchema.safeParse({ latitude: 91 }).success).toBe(false);
+    expect(routeSourceSchema.parse({ provider: 'amap', fallback: false })).toEqual({ provider: 'amap', fallback: false });
+    expect(routeSourceSchema.parse({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })).toMatchObject({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' });
+    expect(routeSourceSchema.safeParse({ provider: 'amap' }).success).toBe(false);
+    expect(routeSourceSchema.safeParse({ provider: 'google', fallback: false }).success).toBe(false);
+    expect(routeResultSchema.safeParse({ provider: 'amap', profile: 'driving', coordinates: [[116.4, 39.9]], distance: 1, duration: 2, legs: [], routeSource: { provider: 'amap', fallback: false } }).success).toBe(true);
   });
 });
 
