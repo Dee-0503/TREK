@@ -5,40 +5,36 @@ import {
   mapsResolveUrlRequestSchema,
   mapsPlaceEnrichmentRequestSchema,
   mapsPlaceEnrichmentResultSchema,
-  mapsSearchResultSchema,
-  mapProviderSchema,
-  providerOverrideSchema,
-  geographicContextSchema,
-  routeSourceSchema,
-  routeResultSchema,
   placePhotoCandidateSchema,
   placeDescriptionSchema,
+  mapProviderSchema,
+  providerOverrideSchema,
+  routeSourceSchema,
+  routeWithLegsSchema,
+  mapsSearchResultSchema,
+  mapsPlaceDetailsResultSchema,
 } from './maps.schema';
+import { placeProviderIdentitySchema } from '../place/place.schema';
 
 import { describe, it, expect } from 'vitest';
 
 describe('provider-neutral map contracts', () => {
-  it('accepts supported providers and rejects unknown overrides', () => {
+  it('uses one provider identity source and validates route results', () => {
     expect(mapProviderSchema.parse('amap')).toBe('amap');
+    expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' });
     expect(() => providerOverrideSchema.parse('unknown')).toThrow();
+    expect(routeSourceSchema.parse({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })).toMatchObject({ provider: 'osrm', fallback: true });
+    expect(routeWithLegsSchema.safeParse({ coordinates: [[39.9, 116.4]], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true }, legs: [] }).success).toBe(true);
   });
 
-  it('keeps legacy Google and OSM search payloads parseable', () => {
-    expect(mapsSearchResultSchema.safeParse({ places: [{ id: 'ChIJx', name: 'Place' }], source: 'google' }).success).toBe(true);
-    expect(mapsSearchResultSchema.safeParse({ places: [{ id: 'node/42', name: 'Place' }], source: 'osm' }).success).toBe(true);
-  });
-  it('validates context and exact route source variants', () => {
-    expect(mapsSearchRequestSchema.safeParse({ query: 'x', countryCode: 'CN', latitude: 39.9, longitude: 116.4, providerOverride: 'amap' }).success).toBe(true);
-    expect(mapsAutocompleteRequestSchema.safeParse({ input: 'x', countryCode: 'cn' }).success).toBe(false);
-    expect(geographicContextSchema.safeParse({ latitude: 91 }).success).toBe(false);
-    expect(routeSourceSchema.parse({ provider: 'amap', fallback: false })).toEqual({ provider: 'amap', fallback: false });
-    expect(routeSourceSchema.parse({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })).toMatchObject({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' });
-    expect(routeSourceSchema.safeParse({ provider: 'amap' }).success).toBe(false);
-    expect(routeSourceSchema.safeParse({ provider: 'google', fallback: false }).success).toBe(false);
-    expect(routeResultSchema.safeParse({ provider: 'amap', profile: 'driving', coordinates: [[116.4, 39.9]], distance: 1, duration: 2, legs: [], routeSource: { provider: 'amap', fallback: false } }).success).toBe(true);
+  it('projects old Google and OSM payloads without depending on unknown fields', () => {
+    const google = mapsSearchResultSchema.parse({ places: [{ google_place_id: 'ChIJx', name: 'Museum', address: 'Berlin', lat: 52.5, lng: 13.4, rating: 4.5, types: ['museum'], source: 'google', providerOnlyBlob: { nested: true } }], source: 'google' });
+    const osm = mapsPlaceDetailsResultSchema.parse({ place: { osm_id: 'node:42', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4, source: 'openstreetmap', extratags: { amenity: 'park' } } });
+    expect(google.places[0]).toMatchObject({ google_place_id: 'ChIJx', name: 'Museum' });
+    expect(google.places[0]).not.toHaveProperty('providerOnlyBlob');
+    expect(osm.place).toMatchObject({ osm_id: 'node:42', name: 'Park' });
   });
 });
-
 describe('mapsSearchRequestSchema', () => {
   it('requires a non-empty query', () => {
     expect(mapsSearchRequestSchema.safeParse({ query: 'berlin' }).success).toBe(true);

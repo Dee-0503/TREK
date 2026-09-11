@@ -186,7 +186,7 @@ beforeEach(() => {
   // otherwise leak into the ones after them.
   vi.mocked(calculateRouteWithLegs).mockImplementation(waypoints => Promise.resolve({
     coordinates: [], distance: 0, duration: 0,
-    // Each leg carries its endpoint coordinates (mirrors the real RouteCalculator), so
+    routeSource: { provider: 'osrm', fallback: false },    // Each leg carries its endpoint coordinates (mirrors the real RouteCalculator), so
     // connector-driven features that read seg.from/seg.to see faithful [lat, lng] pairs.
     legs: Array.from({ length: Math.max(0, (waypoints?.length ?? 0) - 1) }, (_, i) => {
       const a = waypoints[i], b = waypoints[i + 1]
@@ -2692,7 +2692,8 @@ describe('DayPlanSidebar', () => {
     vi.mocked(calculateRouteWithLegs as any).mockImplementation(() => new Promise(resolve => {
       release.push(() => resolve({
         coordinates: [], distance: 0, duration: 0,
-        legs: [{ distanceText: '2 km', durationText: '10 min', drivingText: '10 min', walkingText: '25 min' }],
+        routeSource: { provider: 'osrm', fallback: false },
+      legs: [{ distanceText: '2 km', durationText: '10 min', drivingText: '10 min', walkingText: '25 min' }],
       }))
     }))
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
