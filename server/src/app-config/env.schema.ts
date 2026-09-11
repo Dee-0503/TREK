@@ -9,6 +9,7 @@
  * listed here pass through untouched (Zod strips unknown keys, it does not
  * reject them).
  */
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { SUPPORTED_LANGUAGE_CODES } from '@trek/shared';
 import { parseDurationMs } from './parsers';
@@ -46,26 +47,30 @@ const url = optionalWith((v) => {
 const publicHttpUrl = optionalWith((v) => {
   try {
     const parsed = new URL(v);
-    const host = parsed.hostname.toLowerCase();
+    const host = parsed.hostname;
     if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    const octets = host.split('.').map(Number);
-    const ipv4 = octets.length === 4 && octets.every((n, i) => String(n) === host.split('.')[i] && Number.isInteger(n) && n >= 0 && n <= 255);
-    const specialIpv4 = ipv4 && (
-      octets[0] === 0
-      || octets[0] === 10
-      || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
-      || (octets[0] === 127)
-      || (octets[0] === 169 && octets[1] === 254)
-      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
-      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 0)
-      || (octets[0] === 192 && octets[1] === 0 && octets[2] === 2)
-      || (octets[0] === 192 && octets[1] === 168)
-      || (octets[0] === 198 && octets[1] === 18)
-      || (octets[0] === 198 && octets[1] === 19)
-      || (octets[0] === 198 && octets[1] === 51 && octets[2] === 100)
-      || (octets[0] === 203 && octets[1] === 0 && octets[2] === 113)
-    );
-    return !specialIpv4 && !(
+    if (parsed.username || parsed.password || host.endsWith('.') || host.includes('..')) return false;
+    if (host !== host.toLowerCase() || host !== new URL(`http://${host}`).hostname) return false;
+    const ipVersion = isIP(host);
+    if (ipVersion === 6) return false;
+    if (ipVersion === 4) {
+      const octets = host.split('.').map(Number);
+      const specialIpv4 = (
+        octets[0] === 0
+        || octets[0] === 10
+        || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+        || octets[0] === 127
+        || (octets[0] === 169 && octets[1] === 254)
+        || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+        || (octets[0] === 192 && octets[1] === 0 && (octets[2] === 0 || octets[2] === 2))
+        || (octets[0] === 192 && octets[1] === 168)
+        || (octets[0] === 198 && octets[1] >= 18 && octets[1] <= 19)
+        || (octets[0] === 198 && octets[1] === 51 && octets[2] === 100)
+        || (octets[0] === 203 && octets[1] === 0 && octets[2] === 113)
+      );
+      return !specialIpv4;
+    }
+    return !(
       host === 'localhost'
       || host.endsWith('.local')
       || host.endsWith('.internal')
