@@ -135,6 +135,14 @@ export function deriveMaps(raw: RawEnv) {
   return {
     placesApiBase: raw.PLACES_API_BASE || undefined,
     placesApiKey: raw.PLACES_API_KEY || undefined,
+    // AMap has separate credentials and an independently validated endpoint;
+    // it must never inherit the Google Places key or base URL.
+    amapApiKey: raw.AMAP_API_KEY || undefined,
+    amapApiBase: stripTrailingSlashes(raw.AMAP_API_BASE || 'https://restapi.amap.com'),
+    placesProviderMode: (raw.PLACES_PROVIDER_MODE?.trim().toLowerCase() || 'auto') as 'auto' | 'google' | 'amap' | 'osm',
+    amapTimeoutMs: Math.floor(positiveNumberOr(raw.AMAP_TIMEOUT_MS, 10_000)),
+    amapCacheTtlSeconds: positiveNumberOr(raw.AMAP_CACHE_TTL_SECONDS, 300),
+    amapRateLimitPerMinute: positiveNumberOr(raw.AMAP_RATE_LIMIT_PER_MINUTE, 60),
     /** Public pk.* token shipped with a managed instance; reaches the browser by design. */
     mapboxToken: raw.MAPBOX_ACCESS_TOKEN || undefined,
     /** CARTO basemap key; without one the tiles come back watermarked (#2054). Public too. */

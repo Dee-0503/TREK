@@ -43,6 +43,30 @@ const url = optionalWith((v) => {
     return false;
   }
 }, 'must be a valid URL (with protocol)');
+const publicHttpUrl = optionalWith((v) => {
+  try {
+    const parsed = new URL(v);
+    const host = parsed.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    // The provider endpoint is operator-configured but still leaves the server;
+    // reject obvious local/private targets at boot. The adapter additionally uses
+    // the SSRF-safe fetch path, which resolves and pins the final address.
+    return !(
+      host === 'localhost'
+      || host.endsWith('.local')
+      || host.endsWith('.internal')
+      || host === '::1'
+      || host.startsWith('127.')
+      || host.startsWith('10.')
+      || host.startsWith('192.168.')
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      || host.startsWith('169.254.')
+      || host.startsWith('0.')
+    );
+  } catch {
+    return false;
+  }
+}, 'must be a public HTTP(S) URL');
 const duration = optionalWith(
   (v) => parseDurationMs(v) != null,
   'must be a duration like "1h", "7d" or "30d"',
@@ -144,6 +168,12 @@ export const envSchema = z.object({
   TREK_MANAGED: boolStr,
   PLACES_API_BASE: url,
   PLACES_API_KEY: anyString,
+  AMAP_API_KEY: anyString,
+  AMAP_API_BASE: publicHttpUrl,
+  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm']),
+  AMAP_TIMEOUT_MS: integer(1, 2_147_483_647, 'must be a whole number of milliseconds between 1 and 2147483647'),
+  AMAP_CACHE_TTL_SECONDS: positiveNumber,
+  AMAP_RATE_LIMIT_PER_MINUTE: positiveNumber,
   MAPBOX_ACCESS_TOKEN: anyString,
   CARTO_API_KEY: anyString,
   DEMO_MODE: boolStr,
