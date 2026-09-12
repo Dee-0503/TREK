@@ -66,7 +66,7 @@ export interface PlaceCreateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider; provider_place_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider | null; provider_place_id?: string | null; website?: string; phone?: string;
   transport_mode?: string; route_geometry?: string; route_color?: string; tags?: number[];
 }
 
@@ -76,7 +76,7 @@ export interface PlaceUpdateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider; provider_place_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider | null; provider_place_id?: string | null; website?: string; phone?: string;
   transport_mode?: string; route_color?: string | null; tags?: number[];
 }
 
@@ -306,9 +306,15 @@ export class PlacesService {
     const {
       name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone,
       transport_mode, route_color, tags,
     } = body;
+    const canonicalProvider = provider === undefined
+      ? existingPlace.provider
+      : provider == null || provider === '' ? null : placeProviderSchema.parse(provider);
+    const canonicalProviderId = provider_place_id === undefined
+      ? existingPlace.provider_place_id
+      : provider_place_id?.trim() || null;
 
     this.dbs.run(`
     UPDATE places SET
@@ -328,6 +334,8 @@ export class PlacesService {
       google_place_id = ?,
       google_ftid = ?,
       osm_id = ?,
+      provider = ?,
+      provider_place_id = ?,
       website = ?,
       phone = ?,
       transport_mode = COALESCE(?, transport_mode),
@@ -345,19 +353,17 @@ export class PlacesService {
       currency || null,
       place_time !== undefined ? place_time : existingPlace.place_time,
       end_time !== undefined ? end_time : existingPlace.end_time,
-      // `?? null` rather than `|| null`: with COALESCE(?, duration_minutes) a
-      // falsy-coerced 0 read as "absent" and silently kept the old duration.
       duration_minutes ?? null,
       notes !== undefined ? notes : existingPlace.notes,
       image_url !== undefined ? image_url : existingPlace.image_url,
       google_place_id !== undefined ? google_place_id : existingPlace.google_place_id,
       google_ftid !== undefined ? google_ftid : existingPlace.google_ftid,
       osm_id !== undefined ? osm_id : existingPlace.osm_id,
+      canonicalProvider,
+      canonicalProviderId,
       website !== undefined ? website : existingPlace.website,
       phone !== undefined ? phone : existingPlace.phone,
       transport_mode || null,
-      // Deliberately not COALESCE: an explicit null is how the picker resets a
-      // track back to its category colour (#776).
       route_color !== undefined ? route_color : existingPlace.route_color,
       placeId,
     );
@@ -562,10 +568,15 @@ export class PlacesService {
       if (strategy.by === 'externalId') {
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places
-      WHERE trip_id = ? AND (google_place_id = ? OR google_ftid = ? OR osm_id = ?)
+      WHERE trip_id = ? AND (
+        (provider IS NOT NULL AND provider_place_id IS NOT NULL AND provider || ':' || provider_place_id = ?)
+        OR 'google:' || google_place_id = ?
+        OR 'google:' || google_ftid = ?
+        OR 'osm:' || osm_id = ?
+      )
       ORDER BY id ASC
       LIMIT 1
-    `, tripId, strategy.id, strategy.id, strategy.id);
+    `, tripId, strategy.id, strategy.id, strategy.id, strategy.id, strategy.id);
       } else if (strategy.by === 'name') {
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places

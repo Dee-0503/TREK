@@ -23,21 +23,23 @@ describe('externalIdsOf', () => {
     ]);
   });
 
-  it('namespaces provider-neutral identities so equal ids from different providers do not collide', () => {
-    expect(externalIdsOf({ provider: 'amap', provider_place_id: 'B0FFFAB6J2' })).toEqual(['amap:B0FFFAB6J2']);
-    expect(externalIdsOf({ provider: 'google', provider_place_id: 'B0FFFAB6J2' })).toEqual(['google:B0FFFAB6J2']);
+  it('namespaces legacy Google and OSM ids so equal bare ids cannot collide', () => {
+    expect(externalIdsOf({ google_place_id: 'same-id', osm_id: 'same-id' })).toEqual([
+      'google:same-id',
+      'osm:same-id',
+    ]);
   });
 
   it('keeps provider order: place_id, ftid, osm', () => {
-    expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual(['p', 'f', 'node/42']);
+    expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual(['google:p', 'google:f', 'osm:node/42']);
   });
 });
 
 describe('placeMatchStrategies', () => {
   it('puts every provider id first, one strategy each, in provider order', () => {
     expect(placeMatchStrategies({ name: 'Trattoria', google_place_id: 'p', osm_id: 'node/42' })).toEqual([
-      { by: 'externalId', id: 'p' },
-      { by: 'externalId', id: 'node/42' },
+      { by: 'externalId', id: 'google:p' },
+      { by: 'externalId', id: 'osm:node/42' },
       { by: 'name', name: 'trattoria' },
     ]);
   });
@@ -59,7 +61,7 @@ describe('placeMatchStrategies', () => {
 
   it('offers provider ids then coordinates for an unnamed candidate that has both', () => {
     expect(placeMatchStrategies({ name: '  ', google_ftid: 'f', lat: 1, lng: 2 })).toEqual([
-      { by: 'externalId', id: 'f' },
+      { by: 'externalId', id: 'google:f' },
       { by: 'coords', lat: 1, lng: 2, tolerance: COORD_DEDUP_TOLERANCE },
     ]);
   });

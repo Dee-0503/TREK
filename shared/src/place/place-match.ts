@@ -59,9 +59,17 @@ export function externalIdsOf(candidate: PlaceMatchCandidate): string[] {
   const providerId = typeof candidate.provider_place_id === 'string' && candidate.provider_place_id.trim() !== '' && provider
     ? `${provider}:${candidate.provider_place_id.trim()}`
     : null;
-  return [providerId, candidate.google_place_id, candidate.google_ftid, candidate.osm_id]
-    .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-    .map((id) => id.trim());
+  const legacyIds = [
+    typeof candidate.google_place_id === 'string' ? `google:${candidate.google_place_id}` : null,
+    typeof candidate.google_ftid === 'string' ? `google:${candidate.google_ftid}` : null,
+    typeof candidate.osm_id === 'string' ? `osm:${candidate.osm_id}` : null,
+  ];
+  return [providerId, ...legacyIds]
+    .filter((id): id is string => typeof id === 'string' && id.slice(id.indexOf(':') + 1).trim() !== '')
+    .map((id) => {
+      const separator = id.indexOf(':');
+      return `${id.slice(0, separator)}:${id.slice(separator + 1).trim()}`;
+    });
 }
 
 /**

@@ -273,7 +273,36 @@ describe('Update place', () => {
     expect(res.body.place.description).toBe('Updated description');
   });
 
-  it('PLACE-005 — PUT returns 404 for non-existent place', async () => {
+  it('PLACE-005 — PUT persists, replaces, and clears provider identity without using Google legacy ids', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'AMap POI' });
+
+    const first = await request(app)
+      .put(`/api/trips/${trip.id}/places/${place.id}`)
+      .set('Cookie', authCookie(user.id))
+      .send({ provider: 'openstreetmap', provider_place_id: ' way:42 ' });
+    expect(first.status).toBe(200);
+    expect(first.body.place.provider).toBe('osm');
+    expect(first.body.place.provider_place_id).toBe('way:42');
+    expect(first.body.place.google_place_id).toBeNull();
+
+    const replacement = await request(app)
+      .put(`/api/trips/${trip.id}/places/${place.id}`)
+      .set('Cookie', authCookie(user.id))
+      .send({ provider: 'amap', provider_place_id: ' B0FFF ' });
+    expect(replacement.body.place.provider).toBe('amap');
+    expect(replacement.body.place.provider_place_id).toBe('B0FFF');
+
+    const cleared = await request(app)
+      .put(`/api/trips/${trip.id}/places/${place.id}`)
+      .set('Cookie', authCookie(user.id))
+      .send({ provider: null, provider_place_id: null });
+    expect(cleared.body.place.provider).toBeNull();
+    expect(cleared.body.place.provider_place_id).toBeNull();
+  });
+
+
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 

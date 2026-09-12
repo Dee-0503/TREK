@@ -89,6 +89,7 @@ export function providerNamespacedDetailCacheKey(provider: string | null | undef
   return canonical ? `${canonical}:${placeId}` : `coords:${placeId}`;
 }
 
+/**
  * the maps provider returned. See `resolveIdentity` for why they do not merge.
  */
 interface PlaceIdentity extends WikiIdentity {

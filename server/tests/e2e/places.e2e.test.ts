@@ -27,7 +27,7 @@ const { db } = vi.hoisted(() => {
   tmp.exec(`CREATE TABLE places (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL, name TEXT,
     description TEXT, lat REAL, lng REAL, address TEXT, category_id INTEGER, price REAL, currency TEXT,
     place_time TEXT, end_time TEXT, duration_minutes INTEGER, notes TEXT, image_url TEXT,
-    google_place_id TEXT, google_ftid TEXT, osm_id TEXT, website TEXT, phone TEXT, transport_mode TEXT,
+    google_place_id TEXT, google_ftid TEXT, osm_id TEXT, provider TEXT, provider_place_id TEXT, website TEXT, phone TEXT, transport_mode TEXT,
     route_geometry TEXT, route_color TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);`);
   tmp.exec(`CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, icon TEXT);`);
@@ -277,7 +277,21 @@ describe('Places e2e (real auth guard + temp SQLite)', () => {
     expect(db.prepare('SELECT id FROM budget_items ORDER BY id').all()).toEqual([{ id: 45 }]);
   });
 
-  it('404 trip when not accessible', async () => {
+  it('saves and updates an AMap provider identity through the real HTTP route', async () => {
+    const created = await request(server).post('/api/trips/1/places').set('Cookie', sessionCookie(1)).send({
+      name: 'AMap POI', provider: 'amap', provider_place_id: ' B0FFF ', lat: 31.2, lng: 121.5,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.place).toMatchObject({ provider: 'amap', provider_place_id: ' B0FFF ' });
+
+    const updated = await request(server).put(`/api/trips/1/places/${created.body.place.id}`).set('Cookie', sessionCookie(1)).send({
+      provider: 'amap', provider_place_id: 'B0NEW',
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0NEW', google_place_id: null });
+  });
+
+
     canAccessTrip.mockReturnValue(undefined);
     const res = await request(server).get('/api/trips/5/places').set('Cookie', sessionCookie(1));
     expect(res.status).toBe(404);

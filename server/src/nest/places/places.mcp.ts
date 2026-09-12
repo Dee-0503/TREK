@@ -9,6 +9,7 @@ import {
   mapsSearchRequestSchema,
   placeImageUrlSchema,
   placeImportListRequestSchema,
+  placeProviderSchema,
   placeWebsiteSchema,
 } from '@trek/shared';
 import { z } from 'zod';
@@ -56,7 +57,7 @@ export class PlacesMcp {
 
   @Tool({
     name: 'create_place',
-    description: 'Add a new place/POI to a trip. Set google_place_id, google_ftid, or osm_id (from search_place) so the app can show opening hours, ratings, and direct Google Maps links. Set price + currency to record the cost so it shows on the item.',
+    description: 'Add a new place/POI to a trip. Prefer setting provider and provider_place_id from search_place results so the place can be matched and refreshed with the correct provider. Legacy google_place_id, google_ftid, and osm_id fields remain supported for compatibility. Set price + currency to record the cost so it shows on the item.',
     inputSchema: {
       tripId: z.number().int().positive(),
       name: z.string().min(1).max(200),
@@ -65,10 +66,11 @@ export class PlacesMcp {
       lng: z.number().optional(),
       address: z.string().max(500).optional(),
       category_id: z.number().int().positive().optional().describe('Category ID — use list_categories to see available options'),
-      google_place_id: z.string().optional().describe('Google Place ID from search_place — enables opening hours display'),
+      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID from search_place — enables direct Google Maps links'),
-      provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).optional().describe('Maps provider for provider_place_id'),
-      provider_place_id: z.string().optional().describe('Provider-qualified place identity from search_place; never put an AMap ID in google_place_id'),
+      osm_id: z.string().optional().describe('OpenStreetMap ID from search_place (e.g. "way:12345") — enables opening hours if no Google ID'),
       notes: z.string().max(2000).optional(),
       website: placeWebsiteSchema.optional(),
       phone: z.string().max(50).optional(),
@@ -80,9 +82,9 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async createPlace(
-    { tripId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, provider, provider_place_id, notes, website, phone, image_url, price, currency }: {
+    { tripId, name, description, lat, lng, address, category_id, provider, provider_place_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency }: {
       tripId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
-      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string;
+      category_id?: number; provider?: 'google' | 'amap' | 'osm'; provider_place_id?: string; google_place_id?: string; google_ftid?: string; osm_id?: string;
       notes?: string; website?: string; phone?: string; image_url?: string; price?: number; currency?: string;
     },
     ctx: McpContext,
@@ -90,7 +92,7 @@ export class PlacesMcp {
     if (this.auth.isDemoUser(ctx.userId)) return demoDenied();
     if (!this.db.canAccessTrip(tripId, ctx.userId)) return noAccess();
     if (!this.guards.hasTripPermission('place_edit', tripId, ctx.userId)) return permissionDenied();
-    const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency });
+    const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, provider, provider_place_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency });
     this.guards.safeBroadcast(tripId, 'place:created', { place });
     return ok({ place });
   }
@@ -107,7 +109,9 @@ export class PlacesMcp {
       lng: z.number().optional(),
       address: z.string().max(500).optional(),
       category_id: z.number().int().positive().optional().describe('Category ID — use list_categories to see available options'),
-      google_place_id: z.string().optional().describe('Google Place ID from search_place — enables opening hours display'),
+      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID from search_place — enables direct Google Maps links'),
       osm_id: z.string().optional().describe('OpenStreetMap ID from search_place (e.g. "way:12345")'),
       place_notes: z.string().max(2000).optional().describe('Notes for the place'),
@@ -124,7 +128,7 @@ export class PlacesMcp {
   async createAndAssignPlace(
     { tripId, dayId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
       tripId: number; dayId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
-      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string;
+      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
       place_notes?: string; website?: string; phone?: string; image_url?: string; assignment_notes?: string;
       price?: number; currency?: string;
     },
@@ -136,7 +140,7 @@ export class PlacesMcp {
     if (!this.assignments.dayExists(dayId, tripId)) return { content: [{ type: 'text' as const, text: 'Day not found.' }], isError: true };
     try {
       const result = this.db.transaction(() => {
-        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, provider, provider_place_id, notes: place_notes, website, phone, image_url, price, currency });
+        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
         const assignment = this.assignments.createAssignment(dayId, place.id, assignment_notes ?? null);
         return { place, assignment };
       });
@@ -171,21 +175,21 @@ export class PlacesMcp {
       phone: z.string().max(50).optional(),
       image_url: placeImageUrlSchema.nullable().optional().describe('Thumbnail for the place: an /uploads/ path, an /api/maps/place-photo/ path, an inline data: image, or an https URL. Pass null to remove the current picture'),
       transport_mode: z.enum(['walking', 'driving', 'cycling', 'transit', 'flight']).optional(),
-      osm_id: z.string().optional().describe('OpenStreetMap ID (e.g. "way:12345")'),
-      google_place_id: z.string().optional().describe('Google Place ID (e.g. "ChIJd8BlQ2BZwokRAFUEcm_qrcA")'),
-      provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).optional(),
-      provider_place_id: z.string().optional(),
+      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
+      google_ftid: z.string().optional().describe('Google Maps feature ID (e.g. "0x89c259b7abdd4769:0x103aaf1c8bf8a050")'),
     },
     annotations: TOOL_ANNOTATIONS_WRITE,
     access: { group: 'places', mode: 'write' },
   })
   async updatePlace(
-    { tripId, placeId, name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid }: {
+    { tripId, placeId, name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, provider, provider_place_id, osm_id, google_place_id, google_ftid }: {
       tripId: number; placeId: number; name?: string; description?: string; lat?: number; lng?: number;
       address?: string; category_id?: number; price?: number; currency?: string; place_time?: string;
       end_time?: string; duration_minutes?: number; notes?: string; website?: string; phone?: string;
       image_url?: string | null;
-      transport_mode?: 'walking' | 'driving' | 'cycling' | 'transit' | 'flight'; osm_id?: string;
+      transport_mode?: 'walking' | 'driving' | 'cycling' | 'transit' | 'flight'; provider?: 'google' | 'amap' | 'osm'; provider_place_id?: string; osm_id?: string;
       google_place_id?: string; google_ftid?: string;
     },
     ctx: McpContext,
@@ -193,7 +197,7 @@ export class PlacesMcp {
     if (this.auth.isDemoUser(ctx.userId)) return demoDenied();
     if (!this.db.canAccessTrip(tripId, ctx.userId)) return noAccess();
     if (!this.guards.hasTripPermission('place_edit', tripId, ctx.userId)) return permissionDenied();
-    const place = await this.places.update(String(tripId), String(placeId), { name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid });
+    const place = await this.places.update(String(tripId), String(placeId), { name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, provider, provider_place_id, osm_id, google_place_id, google_ftid });
     if (!place) return { content: [{ type: 'text' as const, text: 'Place not found.' }], isError: true };
     this.guards.safeBroadcast(tripId, 'place:updated', { place });
     return ok({ place });
