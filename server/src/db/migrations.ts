@@ -4239,6 +4239,16 @@ function runMigrations(db: Database.Database): void {
     /**
      * A journal entry that is not a stop (discussion #2064).
      *
+     * Studio draws its route and prints its distance from every entry that
+     * carries coordinates, and that is right until the journal starts at the
+     * home airport: the night before the flight, the stopover, the place the
+     * trip was planned from all become stops, and the distance counts the legs
+     * to and from them. The traveller knows which of those are the journey and
+     * which are the way there, so the switch sits on the entry. The entry stays
+     * in the journal; it is only left out of the arithmetic.
+     *
+     * DEFAULT 0: every existing entry keeps counting, which is what it did.
+     *
      * Appended LAST: the array is index-addressed against schema_version.
      */
     () => {
@@ -4255,14 +4265,14 @@ function runMigrations(db: Database.Database): void {
       const collectionColumns = db.prepare("SELECT name FROM pragma_table_info('collection_places')").all() as Array<{ name: string }>;
       if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider')) db.exec('ALTER TABLE collection_places ADD COLUMN provider TEXT');
       if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider_place_id')) db.exec('ALTER TABLE collection_places ADD COLUMN provider_place_id TEXT');
-      db.exec("UPDATE places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> ''");
-      db.exec("UPDATE places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> ''");
-      db.exec("UPDATE collection_places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> ''");
-      db.exec("UPDATE collection_places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> ''");
+      db.exec("UPDATE places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
       db.exec('CREATE INDEX IF NOT EXISTS idx_places_provider_identity ON places(provider, provider_place_id)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_collection_places_provider_identity ON collection_places(collection_id, provider, provider_place_id)');
     },
-  if (currentVersion < migrations.length) {
+  ];  if (currentVersion < migrations.length) {
     for (let i = currentVersion; i < migrations.length; i++) {
       console.log(`[DB] Running migration ${i + 1}/${migrations.length}`);
       try {

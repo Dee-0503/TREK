@@ -66,7 +66,7 @@ export interface PlaceCreateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
   transport_mode?: string; route_geometry?: string; route_color?: string; tags?: number[];
 }
 
@@ -76,7 +76,7 @@ export interface PlaceUpdateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
   transport_mode?: string; route_color?: string | null; tags?: number[];
 }
 
@@ -230,9 +230,9 @@ export class PlacesService {
     const result = this.dbs.run(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone, transport_mode,
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone, transport_mode,
       route_geometry, route_color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
       // lat/lng/price/duration_minutes use an explicit undefined check, not `||`:
       // 0 is a legitimate value for all four (Null Island, a free entry, a
@@ -240,7 +240,7 @@ export class PlacesService {
       tripId, name, description || null, lat ?? null, lng ?? null, address || null,
       category_id || null, price ?? null, currency || null,
       place_time || null, end_time || null, duration_minutes ?? 60, notes || null, image_url || null,
-      google_place_id || null, google_ftid || null, osm_id || null, provider || null, provider_place_id || null, website || null, phone || null, transport_mode || 'walking',
+      google_place_id || null, google_ftid || null, osm_id || null, website || null, phone || null, transport_mode || 'walking',
       route_geometry || null, route_color || null,
     );
 
@@ -305,7 +305,7 @@ export class PlacesService {
     const {
       name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone,
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
       transport_mode, route_color, tags,
     } = body;
 
@@ -327,8 +327,6 @@ export class PlacesService {
       google_place_id = ?,
       google_ftid = ?,
       osm_id = ?,
-      provider = ?,
-      provider_place_id = ?,
       website = ?,
       phone = ?,
       transport_mode = COALESCE(?, transport_mode),
@@ -354,8 +352,6 @@ export class PlacesService {
       google_place_id !== undefined ? google_place_id : existingPlace.google_place_id,
       google_ftid !== undefined ? google_ftid : existingPlace.google_ftid,
       osm_id !== undefined ? osm_id : existingPlace.osm_id,
-      provider !== undefined ? provider : existingPlace.provider,
-      provider_place_id !== undefined ? provider_place_id : existingPlace.provider_place_id,
       website !== undefined ? website : existingPlace.website,
       phone !== undefined ? phone : existingPlace.phone,
       transport_mode || null,
@@ -498,9 +494,9 @@ export class PlacesService {
   private buildDedupSet(tripId: string): DedupSet {
     const rows = this.dbs.all<{
       name: string | null; lat: number | null; lng: number | null;
-      google_place_id: string | null; google_ftid: string | null; osm_id: string | null; provider: string | null; provider_place_id: string | null;
+      google_place_id: string | null; google_ftid: string | null; osm_id: string | null;
     }>(
-      'SELECT name, lat, lng, google_place_id, google_ftid, osm_id, provider, provider_place_id FROM places WHERE trip_id = ?', tripId,
+      'SELECT name, lat, lng, google_place_id, google_ftid, osm_id FROM places WHERE trip_id = ?', tripId,
     );
     const names = new Set<string>();
     const coords: Array<{ lat: number; lng: number }> = [];
@@ -563,19 +559,11 @@ export class PlacesService {
     for (const strategy of placeMatchStrategies(place)) {
       let hit: { id: number; google_ftid: string | null } | undefined;
       if (strategy.by === 'externalId') {
-        const provider = place.provider?.trim();
-        const providerId = place.provider_place_id?.trim();
-        if (provider && providerId) {
-          hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
-      SELECT id, google_ftid FROM places
-      WHERE trip_id = ? AND provider = ? AND provider_place_id = ?
-      ORDER BY id ASC LIMIT 1
-    `, tripId, provider, providerId);
-        }
-        hit ??= this.dbs.get<{ id: number; google_ftid: string | null }>(`
+        hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places
       WHERE trip_id = ? AND (google_place_id = ? OR google_ftid = ? OR osm_id = ?)
-      ORDER BY id ASC LIMIT 1
+      ORDER BY id ASC
+      LIMIT 1
     `, tripId, strategy.id, strategy.id, strategy.id);
       } else if (strategy.by === 'name') {
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
@@ -1235,7 +1223,7 @@ export class PlacesService {
 
   private async enrichOne(tripId: string, userId: number, place: EnrichablePlace, lang?: string): Promise<void> {
     // Already linked (shouldn't happen for list imports) — nothing to resolve.
-    if (place.provider_place_id || place.google_place_id) return;
+    if (place.google_place_id) return;
     if (typeof place.lat !== 'number' || typeof place.lng !== 'number') return;
 
     const { places: results } = await this.maps.searchPlaces(userId, place.name, lang, {
@@ -1251,7 +1239,6 @@ export class PlacesService {
       ?? trimOrNull((match.providerIdentity as { provider?: unknown } | undefined)?.provider)
       ?? (trimOrNull(match.google_place_id) ? 'google' : null);
     const gpid = trimOrNull(match.google_place_id);
-    if (!providerId && !gpid) return;
     const gftid = trimOrNull(match.google_ftid);
 
     // COALESCE so enrichment only fills empty columns — never overwrites data the
