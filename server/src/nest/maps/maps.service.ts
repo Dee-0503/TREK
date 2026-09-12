@@ -42,7 +42,7 @@ import {
   type OverpassPoi,
 } from './maps.helpers';
 import { ProviderRouter } from './providers/provider-router';
-import type { ProviderContext } from './providers/provider-router';
+import type { ProviderContext, RouteProviderContext } from './providers/provider-router';
 import { AmapProvider } from './providers/amap.provider';
 // ── Google API call counter ───────────────────────────────────────────────────
 
@@ -648,7 +648,7 @@ export class MapsService {
   async route(
     profile: 'driving' | 'walking' | 'cycling',
     waypoints: { lat: number; lng: number }[],
-    context: ProviderContext = {},
+    context: RouteProviderContext = {},
     signal?: AbortSignal,
   ): Promise<MapsRouteResult> {
     const selected = this.providerRouter?.resolveRouteProviderForProfile(profile, context) ?? 'osrm';

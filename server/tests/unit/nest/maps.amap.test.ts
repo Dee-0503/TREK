@@ -126,7 +126,27 @@ describe('AmapProvider mocked HTTP adapter', () => {
     expect(fetchFollow).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects malformed POI fields and details coordinates explicitly', async () => {
+  it('normalizes each AMap route response into accurate legs for three waypoints', async () => {
+    readJson
+      .mockResolvedValueOnce({ status: '1', route: { paths: [{ distance: '1000', duration: '60', steps: [{ polyline: '121,31;121.01,31.01' }] }] } })
+      .mockResolvedValueOnce({ status: '1', route: { paths: [{ distance: '2500', duration: '180', steps: [{ polyline: '121.01,31.01;121.02,31.02' }] }] } });
+    const waypoints = [{ lat: 31, lng: 121 }, { lat: 31.01, lng: 121.01 }, { lat: 31.02, lng: 121.02 }];
+    const result = await new AmapProvider().route('driving', waypoints);
+    expect(fetchFollow).toHaveBeenCalledTimes(2);
+    expect(result.distance).toBe(3500);
+    expect(result.duration).toBe(240);
+    expect(result.legs.map((leg) => [leg.distance, leg.duration])).toEqual([[1000, 60], [2500, 180]]);
+    expect(result.coordinates).toHaveLength(3);
+  });
+
+  it.each([
+    [{ status: '1', route: { paths: [] } }, 'empty_route'],
+    [{ status: '1', route: { paths: [{ distance: '1', duration: '1', steps: [{ polyline: 'bad' }] }] } }, 'invalid_response'],
+  ])('classifies malformed route payloads as %s', async (payload, code) => {
+    readJson.mockResolvedValue(payload);
+    await expect(new AmapProvider().route('driving', [{ lat: 31, lng: 121 }, { lat: 31.01, lng: 121.01 }])).rejects.toMatchObject({ status: 502, code });
+  });
+
     readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, name: undefined }] });
     await expect(new AmapProvider().search('missing-name')).rejects.toMatchObject({ code: 'invalid_response', status: 502 });
     readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, id: 'B126', location: 'bad' }] });

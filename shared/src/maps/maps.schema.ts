@@ -15,6 +15,10 @@ export const geographicContextSchema = z.object({
 });
 export type GeographicContext = z.infer<typeof geographicContextSchema>;
 
+/** Route providers are deliberately narrower than place providers. */
+export const routeProviderOverrideSchema = z.enum(['amap', 'osrm']);
+export type RouteProviderOverride = z.infer<typeof routeProviderOverrideSchema>;
+
 const requestContext = {
   countryCode: geographicContextSchema.shape.countryCode,
   latitude: geographicContextSchema.shape.latitude,
@@ -115,7 +119,7 @@ export const mapsRouteRequestSchema = z.object({
   profile: z.enum(['driving', 'walking', 'cycling']),
   waypoints: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).min(2),
   countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
-  providerOverride: providerOverrideSchema.optional(),
+  providerOverride: routeProviderOverrideSchema.optional(),
 });
 export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
 
@@ -123,14 +127,6 @@ export const mapsRouteResultSchema = routeWithLegsSchema;
 export type MapsRouteResult = RouteWithLegs;
 
 const latLng = z.object({ lat: z.number(), lng: z.number() });
-
-export type ProviderOverride = 'google' | 'amap' | 'osm';
-export type GeographicContext = {
-  countryCode?: string;
-  latitude?: number;
-  longitude?: number;
-  override?: ProviderOverride;
-};
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),

@@ -160,28 +160,43 @@ export class AmapProvider implements MapsProvider, RouteProvider {
 
   async route(profile: RouteProfile, waypoints: RouteWaypoint[], options: { signal?: AbortSignal } = {}): Promise<import('@trek/shared').RouteWithLegs> {
     if (waypoints.length < 2) throw error(400, 'insufficient_waypoints', 'At least 2 waypoints required');
-    const providerPoints = waypoints.map(AmapCoordinates.toProvider);
     const path = profile === 'driving' ? '/v5/direction/driving' : profile === 'walking' ? '/v5/direction/walking' : '/v5/direction/bicycling';
-    const first = providerPoints[0];
-    const last = providerPoints[providerPoints.length - 1];
-    if (!first || !last) throw error(400, 'insufficient_waypoints', 'At least 2 waypoints required');
-    const params: Record<string, string> = {
-      origin: `${first.lng},${first.lat}`,
-      destination: `${last.lng},${last.lat}`,
-      waypoints: providerPoints.slice(1, -1).map(p => `${p.lng},${p.lat}`).join(';'),
-    };
-    const data = await this.request(path, params, amapRouteResponseSchema, options.signal);
-    const pathData = data.route.paths[0];
-    const coordinates = pathData.steps?.flatMap(step => step.polyline.split(';').map(pair => {
-      const [lng, lat] = pair.split(',').map(Number);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
-      const internal = AmapCoordinates.toInternal({ lat, lng });
-      return [internal.lat, internal.lng] as [number, number];
-    })) ?? [];
-    if (coordinates.length < 2) throw error(502, 'empty_route', 'AMap returned an empty route');
-    const distance = Number(pathData.distance); const duration = Number(pathData.duration);
-    if (!Number.isFinite(distance) || !Number.isFinite(duration)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
-    const legs = waypoints.slice(0, -1).map((from, i) => { const to = waypoints[i + 1]; const legDistance = distance / (waypoints.length - 1); const legDuration = duration / (waypoints.length - 1); return { mid: [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2] as [number, number], from: [from.lat, from.lng] as [number, number], to: [to.lat, to.lng] as [number, number], distance: legDistance, duration: legDuration, walkingText: `${Math.floor(legDistance / 5000 * 3.6 / 60)} min`, drivingText: `${Math.floor(legDuration / 60)} min`, distanceText: `${Math.round(legDistance)} m`, durationText: `${Math.floor(legDuration / 60)} min` }; });
+    const results = await Promise.all(waypoints.slice(0, -1).map(async (from, index) => {
+      const to = waypoints[index + 1];
+      const providerFrom = AmapCoordinates.toProvider(from);
+      const providerTo = AmapCoordinates.toProvider(to);
+      const data = await this.request(path, {
+        origin: `${providerFrom.lng},${providerFrom.lat}`,
+        destination: `${providerTo.lng},${providerTo.lat}`,
+        waypoints: '',
+      }, amapRouteResponseSchema, options.signal);
+      const pathData = data.route.paths[0];
+      const coordinates = pathData.steps?.flatMap(step => step.polyline.split(';').map(pair => {
+        const [lng, lat] = pair.split(',').map(Number);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
+        const internal = AmapCoordinates.toInternal({ lat, lng });
+        return [internal.lat, internal.lng] as [number, number];
+      })) ?? [];
+      if (coordinates.length < 2) throw error(502, 'empty_route', 'AMap returned an empty route');
+      const distance = Number(pathData.distance);
+      const duration = Number(pathData.duration);
+      if (!Number.isFinite(distance) || !Number.isFinite(duration)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
+      return { coordinates, distance, duration, from, to };
+    }));
+    const coordinates = results.flatMap((result, index) => index === 0 ? result.coordinates : result.coordinates.slice(1));
+    const distance = results.reduce((total, result) => total + result.distance, 0);
+    const duration = results.reduce((total, result) => total + result.duration, 0);
+    const legs = results.map(({ from, to, distance: legDistance, duration: legDuration }) => ({
+      mid: [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2] as [number, number],
+      from: [from.lat, from.lng] as [number, number],
+      to: [to.lat, to.lng] as [number, number],
+      distance: legDistance,
+      duration: legDuration,
+      walkingText: `${Math.floor(legDistance / 5000 * 3.6 / 60)} min`,
+      drivingText: `${Math.floor(legDuration / 60)} min`,
+      distanceText: `${Math.round(legDistance)} m`,
+      durationText: `${Math.floor(legDuration / 60)} min`,
+    }));
     return { coordinates, distance, duration, routeSource: { provider: 'amap', fallback: false }, legs };
   }
   async search(query: string, options: Record<string, unknown> = {}): Promise<MapsSearchResult> {

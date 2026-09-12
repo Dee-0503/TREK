@@ -43,4 +43,11 @@ describe('ProviderRouter', () => {
     expect(new ProviderRouter().resolveRouteProvider({ countryCode: 'CN' })).toBe('amap');
     expect(new ProviderRouter().resolveRouteProvider({ countryCode: 'US' })).toBe('osrm');
   });
+
+  it('accepts only route-provider overrides and never maps google to AMap', () => {
+    vi.stubEnv('AMAP_API_KEY', 'test-key');
+    expect(new ProviderRouter().resolveRouteProvider({ override: 'amap' })).toBe('amap');
+    expect(new ProviderRouter().resolveRouteProvider({ override: 'osrm', countryCode: 'CN' })).toBe('osrm');
+    expect(new ProviderRouter().resolveRouteProvider({ override: 'google' as never, countryCode: 'CN' })).toBe('amap');
+  });
 });

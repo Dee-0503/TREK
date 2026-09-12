@@ -25,6 +25,7 @@ import VectorBasemap from './VectorBasemap'
 import { useSettingsStore } from '../../store/settingsStore'
 import { MapLayerSwitcher } from './MapLayerSwitcher'
 import { computeMapViewport, TILE_SIZE_RASTER, type ViewportPadding } from '../../utils/mapViewport'
+import { formatRouteSourceLabel } from './routeSourcePresentation'
 
 function categoryIconSvg(iconName: string | null | undefined, size: number): string {
   const IconComponent = (iconName && CATEGORY_ICON_MAP[iconName]) || CATEGORY_ICON_MAP['MapPin']
@@ -540,9 +541,7 @@ export const MapView = memo(function MapView({
   routeVias = [],
   routeSource = null,
 }: any) {
-  const routeSourceLabel = routeSource
-    ? `${routeSource.provider === 'amap' ? 'AMap' : 'OSRM'}${routeSource.fallback ? ` fallback (${routeSource.fallbackReason ?? 'provider failure'})` : ''}`
-    : null
+  const routeSourceLabel = formatRouteSourceLabel(routeSource)
   // that is decides which layer draws it. A saved raster template still wins,
   // the default is a vector style.
   const basemap = useMemo(() => resolveBasemap(tileUrl, OFM_POSITRON), [tileUrl])

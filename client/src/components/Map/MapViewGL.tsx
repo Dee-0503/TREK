@@ -23,6 +23,7 @@ import { resolveTrackColor, hasManualTrackColor } from './trackColors'
 import { buildPoiPopupHtml } from './placePopup'
 import { pluginsApi, type PluginMapMarker, type PluginMapLayer } from '../../api/client'
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../constants/mapDefaults'
+import { formatRouteSourceLabel } from './routeSourcePresentation'
 import { computeMapViewport, TILE_SIZE_GL } from '../../utils/mapViewport'
 
 function categoryIconSvg(iconName: string | null | undefined, size: number): string {
@@ -442,9 +443,7 @@ export function MapViewGL({
   onMapReady,
 }: Props) {
   const rawMapboxStyle = useSettingsStore(s => s.settings.mapbox_style || MAPBOX_DEFAULT_STYLE)
-  const routeSourceLabel = routeSource
-    ? `${routeSource.provider === 'amap' ? 'AMap' : 'OSRM'}${routeSource.fallback ? ` fallback (${routeSource.fallbackReason ?? 'provider failure'})` : ''}`
-    : null
+  const routeSourceLabel = formatRouteSourceLabel(routeSource)
 
   const rawMaplibreStyle = useSettingsStore(s => s.settings.maplibre_style || '')
   const mapboxToken = useSettingsStore(s => s.settings.mapbox_access_token || '')

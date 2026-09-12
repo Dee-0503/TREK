@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import type { GeographicContext, MapProvider, ProviderOverride } from '@trek/shared';
+import type { GeographicContext, MapProvider, ProviderOverride, RouteProviderOverride } from '@trek/shared';
 import { readEnv } from '../../../app-config';
 
 export type ProviderContext = GeographicContext & { override?: ProviderOverride };
+export type RouteProviderContext = GeographicContext & { override?: RouteProviderOverride };
 
 /** Deterministic server-side selection of the configured maps provider. */
 @Injectable()
@@ -11,15 +12,15 @@ export class ProviderRouter {
     return this.resolve(context, this.enabledPlaceProviders());
   }
 
-  resolveRouteProvider(context: ProviderContext = {}): 'amap' | 'osrm' {
+  resolveRouteProvider(context: RouteProviderContext = {}): 'amap' | 'osrm' {
     if (context.override === 'amap' && this.isEnabled('amap')) return 'amap';
-    if ((context.override === 'osm' || context.override === 'openstreetmap') && this.isEnabled('osm')) return 'osrm';
+    if (context.override === 'osrm') return 'osrm';
     if (this.isMainlandChina(context) && this.isEnabled('amap')) return 'amap';
     return 'osrm';
   }
 
   /** Route selection is deliberately narrower than place selection: transit and plugins never enter AMap. */
-  resolveRouteProviderForProfile(profile: string, context: ProviderContext = {}): 'amap' | 'osrm' {
+  resolveRouteProviderForProfile(profile: string, context: RouteProviderContext = {}): 'amap' | 'osrm' {
     if (profile !== 'driving' && profile !== 'walking' && profile !== 'cycling') return 'osrm';
     return this.resolveRouteProvider(context);
   }
