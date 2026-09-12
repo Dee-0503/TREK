@@ -35,6 +35,8 @@ export interface PlaceMatchCandidate {
   google_place_id?: string | null;
   google_ftid?: string | null;
   osm_id?: string | null;
+  provider?: string | null;
+  provider_place_id?: string | null;
 }
 
 /** One way to look for an existing place, to be tried in order. */
@@ -51,7 +53,10 @@ export function normalizePlaceName(name: string | null | undefined): string | nu
 
 /** The provider ids a candidate carries, trimmed, in provider order, blanks dropped. */
 export function externalIdsOf(candidate: PlaceMatchCandidate): string[] {
-  return [candidate.google_place_id, candidate.google_ftid, candidate.osm_id]
+  const provider = typeof candidate.provider === 'string' ? candidate.provider.trim() : '';
+  const providerId = typeof candidate.provider_place_id === 'string' ? candidate.provider_place_id.trim() : '';
+  const qualified = provider && providerId ? `${provider}:${providerId}` : null;
+  return [qualified, candidate.google_place_id, candidate.google_ftid, candidate.osm_id]
     .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
     .map((id) => id.trim());
 }

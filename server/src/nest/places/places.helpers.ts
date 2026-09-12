@@ -126,7 +126,7 @@ export async function reclaimPhotoCache(cache: PlacePhotoCacheService, googlePla
 export interface DedupSet {
   names: Set<string>;
   coords: Array<{ lat: number; lng: number }>;
-  /** Provider ids (google_place_id, google_ftid, osm_id) of the places already in the trip. */
+  /** Provider-qualified ids plus legacy ids for compatibility. */
   externalIds: Set<string>;
 }
 
@@ -219,12 +219,15 @@ export interface EnrichablePlace {
   name: string;
   lat: number;
   lng: number;
+  provider?: string | null;
+  provider_place_id?: string | null;
   google_place_id?: string | null;
   google_ftid?: string | null;
   address?: string | null;
   website?: string | null;
   phone?: string | null;
-  image_url?: string | null;
+  /** Provider-neutral identity returned by maps search. */
+  providerIdentity?: { provider?: string; providerPlaceId?: string };
 }
 
 /** How close a search hit must be to the imported coordinates to be trusted. */
@@ -256,11 +259,15 @@ export function pickEnrichmentMatch(
 ): Record<string, unknown> | null {
   let best: { c: Record<string, unknown>; dist: number } | null = null;
   for (const c of candidates || []) {
-    const gpid = c.google_place_id;
+    const providerIdentity = c.providerIdentity;
+    const identity = typeof c.provider_place_id === 'string' && c.provider_place_id.trim()
+      ? c.provider_place_id.trim()
+      : typeof providerIdentity === 'object' && providerIdentity !== null && typeof providerIdentity.providerPlaceId === 'string'
+        ? providerIdentity.providerPlaceId.trim()
+        : typeof c.google_place_id === 'string' && c.google_place_id.trim() ? c.google_place_id.trim() : null;
     const lat = c.lat;
     const lng = c.lng;
-    if (typeof gpid !== 'string' || !gpid) continue;
-    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+    if (!identity || typeof lat !== 'number' || typeof lng !== 'number') continue;
     const dist = haversineMetres(target.lat, target.lng, lat, lng);
     if (dist > maxMeters) continue;
     if (!best || dist < best.dist) best = { c, dist };

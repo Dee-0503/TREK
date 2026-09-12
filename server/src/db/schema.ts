@@ -425,6 +425,8 @@ function createTables(db: Database.Database): void {
       google_place_id TEXT,
       google_ftid TEXT,
       osm_id TEXT,
+      provider TEXT,
+      provider_place_id TEXT,
       website TEXT,
       phone TEXT,
       status TEXT NOT NULL DEFAULT 'idea',

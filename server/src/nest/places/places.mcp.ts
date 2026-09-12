@@ -67,7 +67,8 @@ export class PlacesMcp {
       category_id: z.number().int().positive().optional().describe('Category ID — use list_categories to see available options'),
       google_place_id: z.string().optional().describe('Google Place ID from search_place — enables opening hours display'),
       google_ftid: z.string().optional().describe('Google Maps feature ID from search_place — enables direct Google Maps links'),
-      osm_id: z.string().optional().describe('OpenStreetMap ID from search_place (e.g. "way:12345") — enables opening hours if no Google ID'),
+      provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).optional().describe('Maps provider for provider_place_id'),
+      provider_place_id: z.string().optional().describe('Provider-qualified place identity from search_place; never put an AMap ID in google_place_id'),
       notes: z.string().max(2000).optional(),
       website: placeWebsiteSchema.optional(),
       phone: z.string().max(50).optional(),
@@ -79,9 +80,9 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async createPlace(
-    { tripId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency }: {
+    { tripId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, provider, provider_place_id, notes, website, phone, image_url, price, currency }: {
       tripId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
-      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
+      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string;
       notes?: string; website?: string; phone?: string; image_url?: string; price?: number; currency?: string;
     },
     ctx: McpContext,
@@ -123,7 +124,7 @@ export class PlacesMcp {
   async createAndAssignPlace(
     { tripId, dayId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
       tripId: number; dayId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
-      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
+      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: string; provider_place_id?: string;
       place_notes?: string; website?: string; phone?: string; image_url?: string; assignment_notes?: string;
       price?: number; currency?: string;
     },
@@ -135,7 +136,7 @@ export class PlacesMcp {
     if (!this.assignments.dayExists(dayId, tripId)) return { content: [{ type: 'text' as const, text: 'Day not found.' }], isError: true };
     try {
       const result = this.db.transaction(() => {
-        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
+        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, provider, provider_place_id, notes: place_notes, website, phone, image_url, price, currency });
         const assignment = this.assignments.createAssignment(dayId, place.id, assignment_notes ?? null);
         return { place, assignment };
       });
@@ -172,7 +173,8 @@ export class PlacesMcp {
       transport_mode: z.enum(['walking', 'driving', 'cycling', 'transit', 'flight']).optional(),
       osm_id: z.string().optional().describe('OpenStreetMap ID (e.g. "way:12345")'),
       google_place_id: z.string().optional().describe('Google Place ID (e.g. "ChIJd8BlQ2BZwokRAFUEcm_qrcA")'),
-      google_ftid: z.string().optional().describe('Google Maps feature ID (e.g. "0x89c259b7abdd4769:0x103aaf1c8bf8a050")'),
+      provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).optional(),
+      provider_place_id: z.string().optional(),
     },
     annotations: TOOL_ANNOTATIONS_WRITE,
     access: { group: 'places', mode: 'write' },
