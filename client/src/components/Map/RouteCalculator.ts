@@ -286,7 +286,7 @@ export async function calculateSegments(
  */
 export async function calculateRouteWithLegs(
   waypoints: Waypoint[],
-  { signal, profile = 'driving', tripId, dayId, countryCode }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string } = {}
+  { signal, profile = 'driving', tripId, dayId, countryCode, providerOverride }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string; providerOverride?: 'amap' | 'osm' } = {}
 ): Promise<SharedRouteWithLegs> {
   if (!waypoints || waypoints.length < 2) {
     return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }
@@ -344,8 +344,8 @@ export async function calculateRouteWithLegs(
   }
 
   const osrmProfile = (profile === 'walking' || profile === 'cycling') ? profile : 'driving'
-  if (osrmProfile === profile && countryCode === 'CN') {
-    const result = await mapsApi.route({ profile: osrmProfile, waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode })
+  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && countryCode === 'CN') {
+    const result = await mapsApi.route({ profile: osrmProfile as 'driving' | 'walking' | 'cycling', waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode, providerOverride }, signal)
     const legs: RouteSegment[] = result.legs.map(leg => ({ ...leg }))
     const routed: SharedRouteWithLegs = { ...result, legs }
     routeCache.set(cacheKey, routed)

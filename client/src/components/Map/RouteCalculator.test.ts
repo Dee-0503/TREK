@@ -389,6 +389,18 @@ afterEach(() => {
 })
 
 describe('calculateRouteWithLegs', () => {
+  it('FE-COMP-ROUTECALCULATOR-050: forwards geographic context and provider override to the route API', async () => {
+    const routeSpy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
+      coordinates: [[31.23, 121.47], [31.24, 121.48]], distance: 1000, duration: 120,
+      routeSource: { provider: 'amap', fallback: false }, legs: [],
+    })
+    const wps = freshWaypoints()
+    await calculateRouteWithLegs(wps, { profile: 'driving', countryCode: 'CN', providerOverride: 'amap' })
+    expect(routeSpy).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving', countryCode: 'CN', providerOverride: 'amap',
+    }))
+  })
+
   it('FE-COMP-ROUTECALCULATOR-033: returns an empty route for fewer than 2 waypoints without calling OSRM', async () => {
     const result = await calculateRouteWithLegs([wp1])
     expect(result).toEqual({ coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] })

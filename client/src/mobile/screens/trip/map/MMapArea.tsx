@@ -52,6 +52,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         days={planner.days}
         selectedDayId={planner.selectedDayId}
         routeSegments={planner.routeSegments}
+        routeSource={planner.routeSource}
         selectedPlaceId={planner.selectedPlaceId}
         onMarkerClick={planner.handleMarkerClick}
         // Tap on empty map = deselect, same contract as desktop.

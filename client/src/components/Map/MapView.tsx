@@ -538,8 +538,11 @@ export const MapView = memo(function MapView({
   onViewportChange,
   tripId,
   routeVias = [],
+  routeSource = null,
 }: any) {
-  // The caller hands over whatever the user configured; what kind of basemap
+  const routeSourceLabel = routeSource
+    ? `${routeSource.provider === 'amap' ? 'AMap' : 'OSRM'}${routeSource.fallback ? ` fallback (${routeSource.fallbackReason ?? 'provider failure'})` : ''}`
+    : null
   // that is decides which layer draws it. A saved raster template still wins,
   // the default is a vector style.
   const basemap = useMemo(() => resolveBasemap(tileUrl, OFM_POSITRON), [tileUrl])
@@ -827,6 +830,11 @@ export const MapView = memo(function MapView({
   return (
     <>
     <div className="w-full h-full relative">
+    {routeSourceLabel && (
+      <div role="status" aria-live="polite" className="absolute top-3 left-1/2 z-[30] -translate-x-1/2 rounded-full bg-surface-elevated px-3 py-1 text-content-secondary shadow-sm">
+        Route source: {routeSourceLabel}
+      </div>
+    )}
     <MapContainer
       id="trek-map"
       center={initialView.center}

@@ -7,7 +7,7 @@ import { getDayBookendHotels, shouldDrawMorningLeg, shouldDrawEveningLeg, type C
 import { withinDriveRange } from '../utils/geo'
 import { resolveLegMode } from '../components/Planner/legMode'
 import type { TripStoreState } from '../store/tripStore'
-import type { RouteSegment, RouteResult, RouteVia, Accommodation } from '../types'
+import type { RouteSegment, RouteResult, RouteVia, Accommodation, RouteWithLegs } from '../types'
 
 const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other']
 
@@ -18,9 +18,15 @@ const NO_ACCOMMODATIONS: Accommodation[] = []
  * day assignments, draws a straight-line route immediately, then upgrades it to real OSRM
  * road geometry with per-segment durations. Aborts in-flight requests when the day changes.
  */
-export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: number | null, enabled: boolean = true, profile: RouteProfileKey = 'driving', accommodations: Accommodation[] = NO_ACCOMMODATIONS) {
+export interface RouteCalculationContext {
+  countryCode?: string
+  providerOverride?: 'amap' | 'osm'
+}
+
+export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: number | null, enabled: boolean = true, profile: RouteProfileKey = 'driving', accommodations: Accommodation[] = NO_ACCOMMODATIONS, routeContext: RouteCalculationContext = {}) {
   const [route, setRoute] = useState<[number, number][][] | null>(null)
   const [routeInfo, setRouteInfo] = useState<RouteResult | null>(null)
+  const [routeSource, setRouteSource] = useState<RouteWithLegs['routeSource'] | null>(null)
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([])
   // Charging stops / rest areas a plugin route places on the drawn line.
   const [routeVias, setRouteVias] = useState<RouteVia[]>([])
@@ -41,7 +47,7 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
   const updateRouteForDay = useCallback(async (dayId: number | null) => {
     if (routeAbortRef.current) routeAbortRef.current.abort()
     // Route is manual: only compute when explicitly enabled (the "show route" toggle).
-    if (!dayId || !enabled) { setRoute(null); setRouteSegments([]); setRouteVias([]); return }
+    if (!dayId || !enabled) { setRoute(null); setRouteSegments([]); setRouteVias([]); setRouteInfo(null); setRouteSource(null); return }
     // Read directly from store (not a render-phase ref) so callers after optimistic
     // updates or non-optimistic deletes always see the latest assignments.
     const currentAssignments = useTripStore.getState().assignments || {}
@@ -216,7 +222,7 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
     const straightLines = (): [number, number][][] =>
       runsWithHotel.map(r => r.map(p => [p.lat, p.lng] as [number, number]))
 
-    if (runsWithHotel.length === 0) { setRoute(null); setRouteSegments([]); setRouteVias([]); return }
+    if (runsWithHotel.length === 0) { setRoute(null); setRouteSegments([]); setRouteVias([]); setRouteInfo(null); setRouteSource(null); return }
 
     // Draw straight lines immediately for snappiness, then upgrade to the real
     // OSRM (or plugin-provided) road geometry.
@@ -234,6 +240,7 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
       const polylines: [number, number][][] = []
       const allLegs: RouteSegment[] = []
       const allVias: RouteVia[] = []
+      const allRouteSources: RouteWithLegs['routeSource'][] = []
       for (const run of runsWithHotel) {
         const polyline: [number, number][] = []
         // Append a leg's coordinates, dropping the point shared with the previous
@@ -257,9 +264,10 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
           const chunk = run.slice(i, end + 1)
           const straight = (): [number, number][] => chunk.map(p => [p.lat, p.lng] as [number, number])
           try {
-            const r = await calculateRouteWithLegs(chunk.map(p => ({ lat: p.lat, lng: p.lng })), { signal: controller.signal, profile: mode, tripId, dayId })
+            const r = await calculateRouteWithLegs(chunk.map(p => ({ lat: p.lat, lng: p.lng })), { signal: controller.signal, profile: mode, tripId, dayId, ...routeContext })
             pushCoords(r.coordinates.length >= 2 ? r.coordinates : straight())
             for (const leg of r.legs) allLegs.push({ ...leg, mode })
+            allRouteSources.push(r.routeSource)
             if (r.vias) allVias.push(...r.vias)
           } catch (err) {
             if (err instanceof Error && err.name === 'AbortError') throw err
@@ -270,12 +278,18 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
         }
         if (polyline.length >= 2) polylines.push(polyline)
       }
-      if (!controller.signal.aborted) { setRoute(polylines); setRouteSegments(allLegs); setRouteVias(allVias) }
+      if (!controller.signal.aborted) {
+        setRoute(polylines)
+        setRouteSegments(allLegs)
+        setRouteInfo(null)
+        setRouteSource(allRouteSources.length ? allRouteSources[allRouteSources.length - 1] : null)
+        setRouteVias(allVias)
+      }
     } catch (err: unknown) {
       // Aborted (day changed) — newer call owns the state. Anything else: keep straight lines.
-      if (!(err instanceof Error) || err.name !== 'AbortError') { setRouteSegments([]); setRouteVias([]) }
+      if (!(err instanceof Error) || err.name !== 'AbortError') { setRouteSegments([]); setRouteVias([]); setRouteSource(null) }
     }
-  }, [enabled, profile, accommodations, optimizeFromAccommodation, distanceUnit, selectedDayDefaultMode])
+  }, [enabled, profile, accommodations, optimizeFromAccommodation, distanceUnit, selectedDayDefaultMode, routeContext.countryCode, routeContext.providerOverride])
 
   // Stable signature for transport reservations on the selected day — changes when a transport
   // is added, removed, or repositioned, ensuring route recalc fires even on transport-only reorders.
@@ -296,10 +310,10 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
   // Recalculate when assignments or transport positions for the SELECTED day change
   const selectedDayAssignments = selectedDayId ? tripStore.assignments?.[String(selectedDayId)] : null
   useEffect(() => {
-    if (!selectedDayId) { setRoute(null); setRouteSegments([]); setRouteVias([]); return }
+    if (!selectedDayId) { setRoute(null); setRouteSegments([]); setRouteVias([]); setRouteInfo(null); setRouteSource(null); return }
     updateRouteForDay(selectedDayId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDayId, selectedDayAssignments, transportSignature, enabled, profile, accommodations, optimizeFromAccommodation, distanceUnit, selectedDayDefaultMode])
+  }, [selectedDayId, selectedDayAssignments, transportSignature, enabled, profile, accommodations, optimizeFromAccommodation, distanceUnit, selectedDayDefaultMode, routeContext.countryCode, routeContext.providerOverride])
 
-  return { route, routeSegments, routeVias, routeInfo, setRoute, setRouteInfo, updateRouteForDay }
+  return { route, routeSegments, routeVias, routeInfo, routeSource, setRoute, setRouteInfo, updateRouteForDay }
 }

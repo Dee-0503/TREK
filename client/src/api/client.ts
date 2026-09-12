@@ -1035,8 +1035,8 @@ export const memoriesApi = {
 
 export const mapsApi = {
   search: (query: string, lang?: string) => apiClient.post(`/maps/search?lang=${lang || 'en'}`, { query }).then(r => checkInDev(mapsSearchResultSchema, r.data, 'maps.search')),
-  route: (body: { profile: 'driving' | 'walking' | 'cycling'; waypoints: { lat: number; lng: number }[]; countryCode?: string; providerOverride?: 'amap' | 'osm' }) =>
-    apiClient.post('/maps/route', body).then(r => checkInDev(mapsRouteResultSchema, r.data, 'maps.route')),
+  route: (body: { profile: 'driving' | 'walking' | 'cycling'; waypoints: { lat: number; lng: number }[]; countryCode?: string; providerOverride?: 'amap' | 'osm' }, signal?: AbortSignal) =>
+    apiClient.post('/maps/route', body, { signal }).then(r => checkInDev(mapsRouteResultSchema, r.data, 'maps.route')),
   autocomplete: (input: string, lang?: string, locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } }, signal?: AbortSignal, sessionToken?: string) =>
       apiClient.post('/maps/autocomplete', { input, lang, locationBias, sessionToken }, { signal }).then(r => checkInDev(mapsAutocompleteResultSchema, r.data, 'maps.autocomplete')),
   details: (placeId: string, lang?: string, sessionToken?: string) => apiClient.get(`/maps/details/${encodeURIComponent(placeId)}`, { params: { lang, sessionToken } }).then(r => checkInDev(mapsPlaceDetailsResultSchema, r.data, 'maps.details')),

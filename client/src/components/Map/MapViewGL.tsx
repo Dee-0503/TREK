@@ -99,6 +99,7 @@ interface Props {
   routeVias?: RouteVia[]
   route?: [number, number][][] | null
   routeSegments?: RouteSegment[]
+  routeSource?: { provider: 'amap' | 'osrm'; fallback: boolean; fallbackReason?: string }
   selectedPlaceId?: number | null
   onMarkerClick?: (id: number) => void
   hoverDisabled?: boolean
@@ -412,6 +413,7 @@ export function MapViewGL({
   routeVias = NO_ROUTE_VIAS,
   route = null,
   routeSegments = NO_ROUTE_SEGMENTS,
+  routeSource = null,
   selectedPlaceId = null,
   hoverDisabled = false,
   onMarkerClick,
@@ -440,6 +442,10 @@ export function MapViewGL({
   onMapReady,
 }: Props) {
   const rawMapboxStyle = useSettingsStore(s => s.settings.mapbox_style || MAPBOX_DEFAULT_STYLE)
+  const routeSourceLabel = routeSource
+    ? `${routeSource.provider === 'amap' ? 'AMap' : 'OSRM'}${routeSource.fallback ? ` fallback (${routeSource.fallbackReason ?? 'provider failure'})` : ''}`
+    : null
+
   const rawMaplibreStyle = useSettingsStore(s => s.settings.maplibre_style || '')
   const mapboxToken = useSettingsStore(s => s.settings.mapbox_access_token || '')
   const mapbox3d = useSettingsStore(s => s.settings.mapbox_3d_enabled !== false)
@@ -1543,6 +1549,11 @@ export function MapViewGL({
 
   return (
     <div className="w-full h-full relative">
+      {routeSourceLabel && (
+        <div role="status" aria-live="polite" className="absolute top-3 left-1/2 z-[30] -translate-x-1/2 rounded-full bg-surface-elevated px-3 py-1 text-content-secondary shadow-sm">
+          Route source: {routeSourceLabel}
+        </div>
+      )}
       <div ref={containerRef} className="w-full h-full" />
       {isMobile && (
         <LocationButton

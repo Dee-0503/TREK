@@ -48,6 +48,7 @@ const MOCK_ROUTE_WITH_LEGS = {
   coordinates: [] as [number, number][],
   distance: 343000,
   duration: 12600,
+  routeSource: { provider: 'osrm' as const, fallback: false },
   legs: MOCK_SEGMENTS,
 };
 
@@ -58,6 +59,25 @@ describe('useRouteCalculation', () => {
     useTripStore.setState({ assignments: {} } as any);
     (calculateRouteWithLegs as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_ROUTE_WITH_LEGS);
   });
+
+  it('FE-HOOK-ROUTE-035: forwards geographic context and exposes route source metadata', async () => {
+    const p1 = buildPlace({ lat: 31.23, lng: 121.47 })
+    const p2 = buildPlace({ lat: 31.24, lng: 121.48 })
+    const store = buildMockStore({ '5': [
+      buildAssignment({ day_id: 5, order_index: 0, place: p1 }),
+      buildAssignment({ day_id: 5, order_index: 1, place: p2 }),
+    ] })
+    ;(calculateRouteWithLegs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...MOCK_ROUTE_WITH_LEGS,
+      routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' },
+    })
+
+    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', [], { countryCode: 'CN', providerOverride: 'amap' }))
+    await act(async () => {})
+
+    expect((calculateRouteWithLegs as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(expect.objectContaining({ countryCode: 'CN', providerOverride: 'amap' }))
+    expect(result.current.routeSource).toEqual({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })
+  })
 
   it('FE-HOOK-ROUTE-001: with no selectedDayId, route is null', () => {
     const store = buildMockStore({});
