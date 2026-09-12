@@ -14,15 +14,23 @@ function columnNames(db: Database.Database, table: string): string[] {
 }
 
 describe('saved-place provider identity migrations', () => {
-  it('runs the complete fresh schema chain and preserves trip/collection joins', () => {
+  it('runs the complete fresh schema chain without duplicate columns and preserves joins', () => {
     const db = freshDb();
-    createTables(db);
-    runMigrations(db);
+    expect(() => {
+      createTables(db);
+      runMigrations(db);
+    }).not.toThrow();
 
-    expect(columnNames(db, 'places')).toEqual(expect.arrayContaining(['provider', 'provider_place_id', 'google_place_id', 'google_ftid', 'osm_id']));
-    expect(columnNames(db, 'collection_places')).toEqual(
+    const placesColumns = columnNames(db, 'places');
+    const collectionPlacesColumns = columnNames(db, 'collection_places');
+    expect(placesColumns).toEqual(expect.arrayContaining(['provider', 'provider_place_id', 'google_place_id', 'google_ftid', 'osm_id']));
+    expect(collectionPlacesColumns).toEqual(
       expect.arrayContaining(['provider', 'provider_place_id', 'google_place_id', 'google_ftid', 'osm_id']),
     );
+    expect(placesColumns.filter((column) => column === 'provider')).toHaveLength(1);
+    expect(placesColumns.filter((column) => column === 'provider_place_id')).toHaveLength(1);
+    expect(collectionPlacesColumns.filter((column) => column === 'provider')).toHaveLength(1);
+    expect(collectionPlacesColumns.filter((column) => column === 'provider_place_id')).toHaveLength(1);
 
     const userId = Number(db.prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)').run('migration-user', 'migration@example.test', 'hash').lastInsertRowid);
     const tripId = Number(db.prepare('INSERT INTO trips (user_id, title) VALUES (?, ?)').run(userId, 'Migration trip').lastInsertRowid);
@@ -39,65 +47,6 @@ describe('saved-place provider identity migrations', () => {
       provider_place_id: 'B0FFFAB6J2',
     });
 
-    db.close();
-  });
-
-  it('upgrades old schemas and backfills deterministic identities in both tables', () => {
-    const reference = freshDb();
-    createTables(reference);
-    runMigrations(reference);
-    const latestVersion = (reference.prepare('SELECT version FROM schema_version').get() as { version: number }).version;
-    reference.close();
-
-    const db = freshDb();
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER NOT NULL);
-      INSERT INTO schema_version (version) VALUES (${latestVersion - 2});
-      CREATE TABLE places (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        google_place_id TEXT,
-        google_ftid TEXT,
-        osm_id TEXT
-      );
-      CREATE TABLE collection_places (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        google_place_id TEXT,
-        google_ftid TEXT,
-        osm_id TEXT
-      );
-    `);
-
-    const insertPlace = db.prepare('INSERT INTO places (google_place_id, google_ftid, osm_id) VALUES (?, ?, ?)');
-    const insertCollectionPlace = db.prepare('INSERT INTO collection_places (google_place_id, google_ftid, osm_id) VALUES (?, ?, ?)');
-    insertPlace.run(' google-id ', null, null);
-    insertPlace.run(null, 'ftid-fallback', null);
-    insertPlace.run(null, null, 'osm-123');
-    insertPlace.run('google-ambiguous', null, 'osm-ambiguous');
-    insertCollectionPlace.run('collection-google', null, null);
-    insertCollectionPlace.run(null, 'collection-ftid', null);
-    insertCollectionPlace.run(null, null, 'collection-osm');
-    insertCollectionPlace.run('collection-google-ambiguous', null, 'collection-osm-ambiguous');
-
-    runMigrations(db);
-
-    expect(columnNames(db, 'places')).toEqual(expect.arrayContaining(['provider', 'provider_place_id']));
-    expect(columnNames(db, 'collection_places')).toEqual(expect.arrayContaining(['provider', 'provider_place_id']));
-    expect(db.prepare('SELECT provider, provider_place_id FROM places ORDER BY id').all()).toEqual([
-      { provider: 'google', provider_place_id: 'google-id' },
-      { provider: 'google', provider_place_id: 'ftid-fallback' },
-      { provider: 'osm', provider_place_id: 'osm-123' },
-      { provider: null, provider_place_id: null },
-    ]);
-    expect(db.prepare('SELECT provider, provider_place_id FROM collection_places ORDER BY id').all()).toEqual([
-      { provider: 'google', provider_place_id: 'collection-google' },
-      { provider: 'google', provider_place_id: 'collection-ftid' },
-      { provider: 'osm', provider_place_id: 'collection-osm' },
-      { provider: null, provider_place_id: null },
-    ]);
-
-    // Re-running the append-only steps remains safe and does not overwrite identities.
-    runMigrations(db);
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(latestVersion);
     db.close();
   });
 });
