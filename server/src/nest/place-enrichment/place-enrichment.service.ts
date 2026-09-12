@@ -290,6 +290,12 @@ export class PlaceEnrichmentService {
     // comes along with the request. Refetching cost 12.8 seconds on a large
     // OSM relation, and it ran in parallel with the client's own lookup.
     const details = req.details ?? (await this.readDetails(userId, placeId, lang));
+    const canonicalCachePlaceId = req.placeId?.trim()
+      ? providerNamespacedDetailCacheKey(
+          (details?.provider as string | undefined) ?? (details?.source as string | undefined),
+          req.placeId.trim(),
+        )
+      : placeId;
     const identity = await this.resolveIdentity(req, details);
 
     const [photos, description] = await Promise.all([
@@ -317,7 +323,7 @@ export class PlaceEnrichmentService {
       hours: collectHours(details) ?? collectHours(osmDetails),
       rating: collectRating(details) ?? collectRating(osmDetails),
     };
-    this.writeCache(placeId, lang, result);
+    this.writeCache(canonicalCachePlaceId, lang, result);
     return result;
   }
 
