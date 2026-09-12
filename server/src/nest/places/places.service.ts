@@ -578,7 +578,7 @@ export class PlacesService {
       )
       ORDER BY id ASC
       LIMIT 1
-    `, tripId, strategy.id, strategy.id, strategy.id, strategy.id, strategy.id);
+    `, tripId, strategy.id, strategy.id, strategy.id, strategy.id);
       } else if (strategy.by === 'name') {
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places
@@ -1248,10 +1248,13 @@ export class PlacesService {
     const match = pickEnrichmentMatch(results, { lat: place.lat, lng: place.lng });
     if (!match) return;
 
-    const providerId = trimOrNull(match.provider_place_id) ?? trimOrNull((match.providerIdentity as { providerPlaceId?: unknown } | undefined)?.providerPlaceId);
     const provider = trimOrNull(match.provider)
       ?? trimOrNull((match.providerIdentity as { provider?: unknown } | undefined)?.provider)
       ?? (trimOrNull(match.google_place_id) ? 'google' : null);
+    const rawProviderId = trimOrNull(match.provider_place_id) ?? trimOrNull((match.providerIdentity as { providerPlaceId?: unknown } | undefined)?.providerPlaceId);
+    const providerId = provider && rawProviderId?.toLowerCase().startsWith(`${provider}:`)
+      ? rawProviderId.slice(provider.length + 1)
+      : rawProviderId;
     const gpid = trimOrNull(match.google_place_id);
     const gftid = trimOrNull(match.google_ftid);
 

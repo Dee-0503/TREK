@@ -65,7 +65,10 @@ export function normalizePlaceIdentity(
   const parsed = (mode === 'create' ? placeCreateIdentitySchema : placeUpdateIdentitySchema).parse(value);
   const provider = parsed.provider ?? null;
   const provider_place_id = parsed.provider_place_id?.trim() || null;
-  return { provider, provider_place_id: provider ? provider_place_id : null };
+  const rawProviderPlaceId = provider && provider_place_id?.toLowerCase().startsWith(`${provider}:`)
+    ? provider_place_id.slice(provider.length + 1)
+    : provider_place_id;
+  return { provider, provider_place_id: provider ? rawProviderPlaceId : null };
 }
 
 /** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */

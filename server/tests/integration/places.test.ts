@@ -321,7 +321,7 @@ describe('Update place', () => {
       .send({ provider: 'unknown', provider_place_id: 'B0' });
     expect(unknown.status).toBe(400);
   });
-  it('PLACE-005 — PUT returns 404 for non-existent place', async () => {
+
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 

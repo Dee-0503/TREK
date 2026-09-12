@@ -3237,8 +3237,6 @@ function runMigrations(db: Database.Database): void {
           image_url TEXT,
           google_place_id TEXT,
           google_ftid TEXT,
-          provider TEXT,
-          provider_place_id TEXT,
           osm_id TEXT,
           website TEXT,
           phone TEXT,
@@ -4259,74 +4257,22 @@ function runMigrations(db: Database.Database): void {
         db.exec('ALTER TABLE journey_entries ADD COLUMN stats_excluded INTEGER NOT NULL DEFAULT 0');
       }
     },
-    /**
-     * Provider-neutral saved-place identity columns. These are deliberately
-     * separate from the legacy Google/OSM columns so existing API consumers
-     * keep working while new providers get a namespaced identity.
-     *
-     * Appended LAST: the array is index-addressed against schema_version.
-     */
+    /** Provider-neutral saved-place identity; legacy columns remain readable. */
     () => {
-      for (const table of ['places', 'collection_places']) {
-        const exists = db
-          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-          .get(table);
-        if (!exists) continue;
-        const columns = new Set(
-          (db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map((column) => column.name),
-        );
-        if (!columns.has('provider')) db.exec(`ALTER TABLE ${table} ADD COLUMN provider TEXT`);
-        if (!columns.has('provider_place_id')) db.exec(`ALTER TABLE ${table} ADD COLUMN provider_place_id TEXT`);
-      }
+      const placeColumns = db.prepare("SELECT name FROM pragma_table_info('places')").all() as Array<{ name: string }>;
+      if (!placeColumns.some(c => c.name === 'provider')) db.exec('ALTER TABLE places ADD COLUMN provider TEXT');
+      if (!placeColumns.some(c => c.name === 'provider_place_id')) db.exec('ALTER TABLE places ADD COLUMN provider_place_id TEXT');
+      const collectionColumns = db.prepare("SELECT name FROM pragma_table_info('collection_places')").all() as Array<{ name: string }>;
+      if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider')) db.exec('ALTER TABLE collection_places ADD COLUMN provider TEXT');
+      if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider_place_id')) db.exec('ALTER TABLE collection_places ADD COLUMN provider_place_id TEXT');
+      db.exec("UPDATE places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_places_provider_identity ON places(provider, provider_place_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_collection_places_provider_identity ON collection_places(collection_id, provider, provider_place_id)');
     },
-    /**
-     * Backfill deterministic provider identities while retaining legacy fields.
-     * A row carrying both Google and OSM identities is intentionally left
-     * nullable because its provider cannot be inferred safely.
-     *
-     * Appended LAST: the array is index-addressed against schema_version.
-     */
-    () => {
-      for (const table of ['places', 'collection_places']) {
-        const exists = db
-          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-          .get(table);
-        if (!exists) continue;
-        const columns = new Set(
-          (db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map((column) => column.name),
-        );
-        if (!columns.has('provider') || !columns.has('provider_place_id')) continue;
-        const hasGooglePlaceId = columns.has('google_place_id');
-        const hasGoogleFtid = columns.has('google_ftid');
-        const hasOsmId = columns.has('osm_id');
-        if (!hasGooglePlaceId && !hasGoogleFtid && !hasOsmId) continue;
-
-        const googlePlaceId = hasGooglePlaceId ? 'NULLIF(TRIM(google_place_id), \'\')' : 'NULL';
-        const googleFtid = hasGoogleFtid ? 'NULLIF(TRIM(google_ftid), \'\')' : 'NULL';
-        const osmId = hasOsmId ? 'NULLIF(TRIM(osm_id), \'\')' : 'NULL';
-        const googleId = `COALESCE(${googlePlaceId}, ${googleFtid})`;
-        const googlePresent = `(${googlePlaceId} IS NOT NULL OR ${googleFtid} IS NOT NULL)`;
-        const osmPresent = `${osmId} IS NOT NULL`;
-
-        db.exec(`
-          UPDATE ${table}
-          SET provider = CASE
-                WHEN ${googlePresent} AND NOT ${osmPresent} THEN 'google'
-                WHEN ${osmPresent} AND NOT ${googlePresent} THEN 'osm'
-                ELSE NULL
-              END,
-              provider_place_id = CASE
-                WHEN ${googlePresent} AND NOT ${osmPresent} THEN ${googleId}
-                WHEN ${osmPresent} AND NOT ${googlePresent} THEN ${osmId}
-                ELSE NULL
-              END
-          WHERE provider IS NULL OR provider_place_id IS NULL
-        `);
-      }
-    },
-  ];
-
-  if (currentVersion < migrations.length) {
+  ];  if (currentVersion < migrations.length) {
     for (let i = currentVersion; i < migrations.length; i++) {
       console.log(`[DB] Running migration ${i + 1}/${migrations.length}`);
       try {
