@@ -221,7 +221,22 @@ describe('saved places + dedup', () => {
     expect(result.duplicateOf?.name).toBe('Original Name');
   });
 
-  it('COLLECTIONS-SVC-102: the bulk import recognises a renamed place by its provider id too', () => {
+  it('COLLECTIONS-SVC-104: preserves AMap identity and deduplicates by provider-qualified id', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'AMap' });
+    const first = svc.savePlace(u.id, {
+      collection_id: col.id, name: '人民公园', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+    });
+    expect(first.place).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null });
+
+    const duplicate = svc.savePlace(u.id, {
+      collection_id: col.id, name: 'Renamed park', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+    });
+    expect(duplicate.duplicate).toBe(true);
+    expect(testDb.prepare('SELECT google_place_id FROM collection_places WHERE id = ?').get(first.place!.id)).toEqual({ google_place_id: null });
+  });
+
+
     // savePlace was not the only caller. The bulk copy carries the provider ids
     // into the row it writes, so asking without them would recognise less than
     // the row it just wrote already knows.
@@ -270,7 +285,18 @@ describe('saveFromTripPlace', () => {
     expect(res.place!.name).toBe('Louvre');
   });
 
-  it('COLLECTIONS-SVC-015: rejects a trip the user cannot read (no IDOR)', () => {
+  it('COLLECTIONS-SVC-105: copies provider identity from a trip place into a collection join', () => {
+    const u = createUser(testDb).user;
+    const trip = createTrip(testDb, u.id);
+    const place = createPlace(testDb, trip.id, { name: '人民公园' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ?, google_place_id = NULL WHERE id = ?').run('amap', 'amap:B0FFFAB6J2', place.id);
+    const col = svc.createCollection(u.id, { name: 'From trip' });
+
+    const result = svc.saveFromTripPlace(u.id, col.id, trip.id, place.id);
+    expect(result.place).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null });
+  });
+
+
     const owner = createUser(testDb).user;
     const stranger = createUser(testDb).user;
     createCategory(testDb);

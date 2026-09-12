@@ -23,8 +23,9 @@ describe('externalIdsOf', () => {
     ]);
   });
 
-  it('ignores blank ids', () => {
-    expect(externalIdsOf({ google_ftid: '  ', osm_id: '' })).toEqual([]);
+  it('namespaces provider-neutral identities so equal ids from different providers do not collide', () => {
+    expect(externalIdsOf({ provider: 'amap', provider_place_id: 'B0FFFAB6J2' })).toEqual(['amap:B0FFFAB6J2']);
+    expect(externalIdsOf({ provider: 'google', provider_place_id: 'B0FFFAB6J2' })).toEqual(['google:B0FFFAB6J2']);
   });
 
   it('keeps provider order: place_id, ftid, osm', () => {

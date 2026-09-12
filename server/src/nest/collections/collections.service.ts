@@ -441,7 +441,15 @@ export class CollectionsService {
     for (const strategy of placeMatchStrategies(candidate)) {
       let hit: { id: number; name: string } | undefined;
       if (strategy.by === 'externalId') {
-        hit = this.db.get<{ id: number; name: string }>(`
+        const [provider, providerPlaceId] = strategy.id.split(':', 2);
+        if (provider && providerPlaceId) {
+          hit = this.db.get<{ id: number; name: string }>(`
+      SELECT id, name FROM collection_places
+      WHERE collection_id = ? AND provider = ? AND provider_place_id = ?
+      ORDER BY id ASC LIMIT 1
+    `, collectionId, provider, providerPlaceId);
+        }
+        hit ??= this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
       WHERE collection_id = ? AND (google_place_id = ? OR google_ftid = ? OR osm_id = ?)
       ORDER BY id ASC LIMIT 1
@@ -516,6 +524,7 @@ export class CollectionsService {
     if (!body.force) {
       const dup = this.findDuplicateCollectionPlace(body.collection_id, {
         name: body.name, lat: body.lat, lng: body.lng,
+        provider: body.provider, provider_place_id: body.provider_place_id,
         google_place_id: body.google_place_id, google_ftid: body.google_ftid, osm_id: body.osm_id,
       });
       if (dup) return { duplicate: true, duplicateOf: dup };
@@ -529,14 +538,15 @@ export class CollectionsService {
     INSERT INTO collection_places (
       collection_id, owner_id, saved_by, name, description, lat, lng, address,
       category_id, price, currency, notes, image_url, google_place_id, google_ftid,
-      osm_id, website, phone, status, source_trip_id, source_place_id, links
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      osm_id, provider, provider_place_id, website, phone, status, source_trip_id, source_place_id, links
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
         body.collection_id, ownerId, userId,
         body.name, body.description ?? null, body.lat ?? null, body.lng ?? null, body.address ?? null,
         body.category_id ?? null, body.price ?? null, body.currency ?? null, body.notes ?? null,
         body.image_url ?? null, body.google_place_id ?? null, body.google_ftid ?? null,
-        body.osm_id ?? null, body.website ?? null, body.phone ?? null,
+        body.osm_id ?? null, body.provider ?? null, body.provider_place_id ?? null,
+        body.website ?? null, body.phone ?? null,
         body.status ?? 'idea', body.source_trip_id ?? null, body.source_place_id ?? null,
         serializeLinks(body.links),
       );
@@ -585,6 +595,8 @@ export class CollectionsService {
       google_place_id: (place.google_place_id as string | null) ?? null,
       google_ftid: (place.google_ftid as string | null) ?? null,
       osm_id: (place.osm_id as string | null) ?? null,
+      provider: (place.provider as string | null) ?? null,
+      provider_place_id: (place.provider_place_id as string | null) ?? null,
       website: (place.website as string | null) ?? null,
       phone: (place.phone as string | null) ?? null,
       source_trip_id: tripId,
@@ -651,9 +663,8 @@ export class CollectionsService {
     INSERT INTO collection_places (
       collection_id, owner_id, saved_by, name, description, lat, lng, address,
       category_id, price, currency, notes, image_url, google_place_id, google_ftid,
-      osm_id, website, phone, status, source_trip_id, source_place_id, links
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idea', ?, ?, NULL)
-  `);
+      osm_id, provider, provider_place_id, website, phone, status, source_trip_id, source_place_id, links
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idea', ?, ?, ?, ?, ?)`);
     let copied = 0;
     const skipped: { id: number; name: string }[] = [];
     // The whole batch is one logical write — atomic since the post-fold quirk pass.
@@ -672,6 +683,8 @@ export class CollectionsService {
           google_place_id: (p.google_place_id as string | null) ?? null,
           google_ftid: (p.google_ftid as string | null) ?? null,
           osm_id: (p.osm_id as string | null) ?? null,
+          provider: (p.provider as string | null) ?? null,
+          provider_place_id: (p.provider_place_id as string | null) ?? null,
         };
         if (!force && this.findDuplicateCollectionPlace(collectionId, candidate)) {
           skipped.push({ id: placeId, name });
@@ -682,8 +695,9 @@ export class CollectionsService {
           name, (p.description as string | null) ?? null, lat, lng, (p.address as string | null) ?? null,
           (p.category_id as number | null) ?? null, (p.price as number | null) ?? null, (p.currency as string | null) ?? null, (p.notes as string | null) ?? null,
           (p.image_url as string | null) ?? null, (p.google_place_id as string | null) ?? null, (p.google_ftid as string | null) ?? null,
-          (p.osm_id as string | null) ?? null, (p.website as string | null) ?? null, (p.phone as string | null) ?? null,
-          tripId, placeId,
+          (p.osm_id as string | null) ?? null, (p.provider as string | null) ?? null, (p.provider_place_id as string | null) ?? null,
+          (p.website as string | null) ?? null, (p.phone as string | null) ?? null,
+          tripId, placeId, null,
         );
         this.copyTripRatings(placeId, Number(res.lastInsertRowid), collectionId);
         copied++;

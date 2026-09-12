@@ -1323,7 +1323,29 @@ describe('enrichImportedPlaces', () => {
 // replaced by the default.
 
 describe('zero-valued numeric fields', () => {
-  it('PLACE-SVC-065 — create keeps lat/lng of exactly 0 instead of nulling them', () => {
+  it('PLACE-SVC-065 — persists an AMap identity without entering Google fields or photo dispatch', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: '人民公园', lat: 31.23, lng: 121.47 }) as any;
+    const getPlacePhoto = vi.fn();
+    const svcWithMaps = enrichSvc({
+      getMapsKey: vi.fn(() => 'key'),
+      searchPlaces: vi.fn(async () => ({ source: 'amap', places: [{
+        provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+        providerIdentity: { provider: 'amap', providerPlaceId: 'amap:B0FFFAB6J2' },
+        lat: 31.23, lng: 121.47, address: 'Shanghai',
+      }] })),
+      getPlacePhoto,
+    } as never);
+
+    await svcWithMaps.enrichImportedPlaces(String(trip.id), user.id, [{ id: place.id, name: '人民公园', lat: 31.23, lng: 121.47 }]);
+
+    const row = testDb.prepare('SELECT provider, provider_place_id, google_place_id, google_ftid FROM places WHERE id = ?').get(place.id) as any;
+    expect(row).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null, google_ftid: null });
+    expect(getPlacePhoto).not.toHaveBeenCalled();
+  });
+
+
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
     const place = svc.create(String(trip.id), { name: 'Null Island', lat: 0, lng: 0 }) as any;

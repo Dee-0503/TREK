@@ -1247,7 +1247,9 @@ export class PlacesService {
     if (!match) return;
 
     const providerId = trimOrNull(match.provider_place_id) ?? trimOrNull((match.providerIdentity as { providerPlaceId?: unknown } | undefined)?.providerPlaceId);
-    const provider = trimOrNull(match.provider) ?? trimOrNull((match.providerIdentity as { provider?: unknown } | undefined)?.provider);
+    const provider = trimOrNull(match.provider)
+      ?? trimOrNull((match.providerIdentity as { provider?: unknown } | undefined)?.provider)
+      ?? (trimOrNull(match.google_place_id) ? 'google' : null);
     const gpid = trimOrNull(match.google_place_id);
     if (!providerId && !gpid) return;
     const gftid = trimOrNull(match.google_ftid);
@@ -1272,12 +1274,17 @@ export class PlacesService {
     // resolves with photoUrl: null. A missing photo (or a provider outage, which
     // still throws) must never abort the rest of the enrichment.
     try {
-      const photo = await this.maps.getPlacePhoto(userId, gpid, place.lat, place.lng, place.name);
-      if (photo?.photoUrl) {
-        this.dbs.run(
-          'UPDATE places SET image_url = COALESCE(image_url, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ? AND trip_id = ?',
-          photo.photoUrl, place.id, tripId,
-        );
+      // Only Google identities enter the Google photo endpoint. Other providers
+      // may still contribute details, website, phone, and opening hours, but
+      // their payloads are never treated as Google photo ids.
+      if (provider === 'google' && gpid) {
+        const photo = await this.maps.getPlacePhoto(userId, gpid, place.lat, place.lng, place.name);
+        if (photo?.photoUrl) {
+          this.dbs.run(
+            'UPDATE places SET image_url = COALESCE(image_url, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ? AND trip_id = ?',
+            photo.photoUrl, place.id, tripId,
+          );
+        }
       }
     } catch {
       /* no photo — leave image_url as-is */
@@ -1297,7 +1304,9 @@ export class PlacesService {
   async enrichImportedPlaces(tripId: string, userId: number, places: EnrichablePlace[], lang?: string): Promise<void> {
     try {
       if (!places.length) return;
-      if (!this.maps.getMapsKey(userId)) return;
+      // Provider-neutral enrichment also supports configured AMap/OSM routing;
+      // the search call itself decides which provider to use. A Google key is
+      // no longer a prerequisite for saved-place identity enrichment.
       await mapWithConcurrency(places, ENRICH_CONCURRENCY, async (place) => {
         try {
           await this.enrichOne(tripId, userId, place, lang);
