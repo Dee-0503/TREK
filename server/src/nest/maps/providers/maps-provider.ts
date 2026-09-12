@@ -3,7 +3,11 @@ import type {
   MapsPlaceDetailsResult,
   MapsReverseResult,
   MapsSearchResult,
+  RouteWithLegs,
 } from '@trek/shared';
+
+export type RouteProfile = 'driving' | 'walking' | 'cycling';
+export type RouteWaypoint = { lat: number; lng: number };
 
 /**
  * Provider boundary for place lookup operations. Implementations normalize their
@@ -16,4 +20,9 @@ export interface MapsProvider {
   autocomplete(input: string, options?: Record<string, unknown>): Promise<MapsAutocompleteResult>;
   getDetails(providerPlaceId: string, options?: Record<string, unknown>): Promise<MapsPlaceDetailsResult>;
   reverseGeocode(coordinates: { lat: number; lng: number }, options?: Record<string, unknown>): Promise<MapsReverseResult>;
+}
+
+export interface RouteProvider {
+  readonly id: 'amap' | 'osrm';
+  route(profile: RouteProfile, waypoints: RouteWaypoint[], options?: { signal?: AbortSignal }): Promise<RouteWithLegs>;
 }

@@ -13,7 +13,7 @@ import { safeFetchFollow } from '../../../utils/ssrfGuard';
 import { readCappedJson } from '../../../utils/cappedFetch';
 import { toApiLang } from '../maps.helpers';
 import { AmapCoordinates } from './amap.coordinates';
-import type { MapsProvider } from './maps-provider';
+import type { MapsProvider, RouteProvider, RouteProfile, RouteWaypoint } from './maps-provider';
 
 type AmapError = Error & { status: number; code: string };
 
@@ -47,6 +47,14 @@ const amapSearchResponseSchema = amapResponseSchema.extend({ pois: z.array(amapP
 const amapAutocompleteResponseSchema = amapResponseSchema.extend({ tips: z.array(amapTipSchema) });
 const amapDetailsResponseSchema = amapResponseSchema.extend({ pois: z.array(amapPoiSchema).min(1) });
 const amapReverseResponseSchema = amapResponseSchema.extend({ regeocode: amapRegeocodeSchema });
+
+const amapRouteResponseSchema = amapResponseSchema.extend({
+  route: z.object({
+    paths: z.array(z.object({
+      distance: z.string(), duration: z.string(), steps: z.array(z.object({ polyline: z.string().min(1) }).passthrough()).optional(),
+    }).passthrough()).min(1),
+  }).passthrough(),
+});
 
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_CACHE_ENTRIES = 128;
@@ -144,12 +152,38 @@ function canonical(value: unknown): string {
 }
 
 @Injectable()
-export class AmapProvider implements MapsProvider {
+export class AmapProvider implements MapsProvider, RouteProvider {
   readonly id = 'amap' as const;
 
   private get base(): string { return readEnv().maps.amapApiBase; }
   private get key(): string | undefined { return readEnv().maps.amapApiKey; }
 
+  async route(profile: RouteProfile, waypoints: RouteWaypoint[], options: { signal?: AbortSignal } = {}): Promise<import('@trek/shared').RouteWithLegs> {
+    if (waypoints.length < 2) throw error(400, 'insufficient_waypoints', 'At least 2 waypoints required');
+    const providerPoints = waypoints.map(AmapCoordinates.toProvider);
+    const path = profile === 'driving' ? '/v5/direction/driving' : profile === 'walking' ? '/v5/direction/walking' : '/v5/direction/bicycling';
+    const first = providerPoints[0];
+    const last = providerPoints[providerPoints.length - 1];
+    if (!first || !last) throw error(400, 'insufficient_waypoints', 'At least 2 waypoints required');
+    const params: Record<string, string> = {
+      origin: `${first.lng},${first.lat}`,
+      destination: `${last.lng},${last.lat}`,
+      waypoints: providerPoints.slice(1, -1).map(p => `${p.lng},${p.lat}`).join(';'),
+    };
+    const data = await this.request(path, params, amapRouteResponseSchema, options.signal);
+    const pathData = data.route.paths[0];
+    const coordinates = pathData.steps?.flatMap(step => step.polyline.split(';').map(pair => {
+      const [lng, lat] = pair.split(',').map(Number);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
+      const internal = AmapCoordinates.toInternal({ lat, lng });
+      return [internal.lat, internal.lng] as [number, number];
+    })) ?? [];
+    if (coordinates.length < 2) throw error(502, 'empty_route', 'AMap returned an empty route');
+    const distance = Number(pathData.distance); const duration = Number(pathData.duration);
+    if (!Number.isFinite(distance) || !Number.isFinite(duration)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
+    const legs = waypoints.slice(0, -1).map((from, i) => { const to = waypoints[i + 1]; const legDistance = distance / (waypoints.length - 1); const legDuration = duration / (waypoints.length - 1); return { mid: [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2] as [number, number], from: [from.lat, from.lng] as [number, number], to: [to.lat, to.lng] as [number, number], distance: legDistance, duration: legDuration, walkingText: `${Math.floor(legDistance / 5000 * 3.6 / 60)} min`, drivingText: `${Math.floor(legDuration / 60)} min`, distanceText: `${Math.round(legDistance)} m`, durationText: `${Math.floor(legDuration / 60)} min` }; });
+    return { coordinates, distance, duration, routeSource: { provider: 'amap', fallback: false }, legs };
+  }
   async search(query: string, options: Record<string, unknown> = {}): Promise<MapsSearchResult> {
     return this.cached('search', { query: query.trim(), options }, async () => {
       const data = await this.request('/v5/place/text', {
@@ -201,11 +235,11 @@ export class AmapProvider implements MapsProvider {
     return params;
   }
 
-  private async request<T extends z.ZodTypeAny>(path: string, params: Record<string, string>, schema: T): Promise<z.infer<T>> {
+  private async request<T extends z.ZodTypeAny>(path: string, params: Record<string, string>, schema: T, signal?: AbortSignal): Promise<z.infer<T>> {
     if (!this.key) throw error(503, 'not_configured', 'AMap provider is not configured');
     const url = new URL(`${this.base}${path}`); for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
     let response: Response;
-    try { response = await safeFetchFollow(url.toString(), { signal: AbortSignal.timeout(readEnv().maps.amapTimeoutMs) }); }
+    try { response = await safeFetchFollow(url.toString(), { signal: signal ?? AbortSignal.timeout(readEnv().maps.amapTimeoutMs) }); }
     catch (caught) {
       const message = caught instanceof Error ? caught.message.toLowerCase() : '';
       if (caught instanceof Error && caught.name === 'SsrfBlockedError') throw error(403, 'ssrf_blocked', 'AMap request blocked by SSRF policy');

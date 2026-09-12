@@ -111,6 +111,14 @@ export const routeResultSchema = z.object({
 });
 export type RouteResult = z.infer<typeof routeResultSchema>;
 
+export const mapsRouteRequestSchema = z.object({
+  profile: z.enum(['driving', 'walking', 'cycling']),
+  waypoints: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).min(2),
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  providerOverride: providerOverrideSchema.optional(),
+});
+export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
+
 const latLng = z.object({ lat: z.number(), lng: z.number() });
 
 export type ProviderOverride = 'google' | 'amap' | 'osm';

@@ -18,6 +18,12 @@ export class ProviderRouter {
     return 'osrm';
   }
 
+  /** Route selection is deliberately narrower than place selection: transit and plugins never enter AMap. */
+  resolveRouteProviderForProfile(profile: string, context: ProviderContext = {}): 'amap' | 'osrm' {
+    if (profile !== 'driving' && profile !== 'walking' && profile !== 'cycling') return 'osrm';
+    return this.resolveRouteProvider(context);
+  }
+
   private resolve(context: ProviderContext, enabled: MapProvider[]): MapProvider {
     if (context.override) {
       const override = context.override === 'openstreetmap' ? 'osm' : context.override;
