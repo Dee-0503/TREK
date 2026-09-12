@@ -18,8 +18,8 @@ describe('normalizePlaceName', () => {
 describe('externalIdsOf', () => {
   it('collects the provider ids that carry a value, trimmed', () => {
     expect(externalIdsOf({ google_place_id: ' ChIJ_a ', google_ftid: '0x1:0x2', osm_id: null })).toEqual([
-      'ChIJ_a',
-      '0x1:0x2',
+      'google:ChIJ_a',
+      'google:0x1:0x2',
     ]);
   });
 
@@ -33,8 +33,25 @@ describe('externalIdsOf', () => {
   it('keeps provider-qualified ids intact when the provider id contains extra colons', () => {
     expect(externalIdsOf({ provider: 'osm', provider_place_id: 'node:42:way' })).toEqual(['osm:node:42:way']);
   });
+
+  it('keeps provider-qualified legacy ids distinct when bare values match', () => {
+    expect(externalIdsOf({ google_place_id: 'same-id', osm_id: 'same-id' })).toEqual([
+      'google:same-id',
+      'osm:same-id',
+    ]);
+  });
+
+  it('keeps extra colons inside provider-qualified ids', () => {
+    expect(externalIdsOf({ google_ftid: '0x1:0x2:0x3' })).toEqual(['google:0x1:0x2:0x3']);
+  });
+
   it('keeps provider order: place_id, ftid, osm', () => {
-    expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual(['google:p', 'google:f', 'osm:node/42']);
+    expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual([
+      'google:p',
+      'google:f',
+      'osm:node/42',
+    ]);
+  });
   });
 });
 
