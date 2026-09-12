@@ -453,7 +453,7 @@ export class CollectionsService {
       SELECT id, name FROM collection_places
       WHERE collection_id = ? AND (google_place_id = ? OR google_ftid = ? OR osm_id = ?)
       ORDER BY id ASC LIMIT 1
-    `, collectionId, strategy.id, strategy.id, strategy.id);
+    `, collectionId, providerPlaceId, providerPlaceId, providerPlaceId);
       } else if (strategy.by === 'name') {
         hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
@@ -967,12 +967,12 @@ export class CollectionsService {
     // Visibility on every SOURCE place — no cross-user exfiltration via copy.
     const sources: Array<{ id: number; name: string; description: string | null; lat: number | null; lng: number | null;
       address: string | null; category_id: number | null; price: number | null; currency: string | null;
-      notes: string | null; image_url: string | null; google_place_id: string | null; google_ftid: string | null;
-      osm_id: string | null; website: string | null; phone: string | null; collection_id: number }> = [];
+      notes: string | null; image_url: string | null; provider: string | null; provider_place_id: string | null;
+      google_place_id: string | null; google_ftid: string | null; osm_id: string | null; website: string | null; phone: string | null; collection_id: number }> = [];
     for (const pid of body.place_ids) {
       const row = this.db.get<(typeof sources)[number]>(`
       SELECT id, collection_id, name, description, lat, lng, address, category_id, price, currency,
-             notes, image_url, google_place_id, google_ftid, osm_id, website, phone
+             notes, image_url, provider, provider_place_id, google_place_id, google_ftid, osm_id, website, phone
       FROM collection_places WHERE id = ?
     `, pid);
       if (!row) httpError(404, 'Place not found');
@@ -984,8 +984,9 @@ export class CollectionsService {
     // trip is still recognised by its provider id when it is copied again (#1550).
     const existing = this.db.all<{
       name: string | null; lat: number | null; lng: number | null;
+      provider: string | null; provider_place_id: string | null;
       google_place_id: string | null; google_ftid: string | null; osm_id: string | null;
-    }>('SELECT name, lat, lng, google_place_id, google_ftid, osm_id FROM places WHERE trip_id = ?', body.trip_id);
+    }>('SELECT name, lat, lng, provider, provider_place_id, google_place_id, google_ftid, osm_id FROM places WHERE trip_id = ?', body.trip_id);
     const dedup: DedupSet = { names: new Set(), coords: [], externalIds: new Set() };
     for (const r of existing) {
       for (const id of externalIdsOf(r)) dedup.externalIds.add(id);
@@ -995,8 +996,8 @@ export class CollectionsService {
 
     const insertPlace = this.db.prepare(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price,
-      currency, notes, image_url, google_place_id, google_ftid, website, phone, osm_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      currency, notes, image_url, provider, provider_place_id, google_place_id, google_ftid, website, phone, osm_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     const insertTag = this.db.prepare('INSERT OR IGNORE INTO place_tags (place_id, tag_id) VALUES (?, ?)');
     const insertRating = this.db.prepare('INSERT OR IGNORE INTO place_ratings (place_id, user_id, rating) VALUES (?, ?, ?)');
@@ -1007,7 +1008,7 @@ export class CollectionsService {
     this.db.transaction(() => {
       for (const s of sources) {
         if (!body.force && isPlaceDuplicate({
-          name: s.name, lat: s.lat, lng: s.lng,
+          name: s.name, lat: s.lat, lng: s.lng, provider: s.provider, provider_place_id: s.provider_place_id,
           google_place_id: s.google_place_id, google_ftid: s.google_ftid, osm_id: s.osm_id,
         }, dedup)) {
           skipped.push({ id: s.id, name: s.name });
@@ -1015,7 +1016,7 @@ export class CollectionsService {
         }
         const res = insertPlace.run(
           body.trip_id, s.name, s.description, s.lat, s.lng, s.address, s.category_id, s.price,
-          s.currency, s.notes, s.image_url, s.google_place_id, s.google_ftid, s.website, s.phone, s.osm_id,
+          s.currency, s.notes, s.image_url, s.provider, s.provider_place_id, s.google_place_id, s.google_ftid, s.website, s.phone, s.osm_id,
         );
         const newPlaceId = Number(res.lastInsertRowid);
         const tagIds = this.db.all<{ tag_id: number }>('SELECT tag_id FROM collection_place_tags WHERE collection_place_id = ?', s.id);

@@ -572,9 +572,9 @@ export class PlacesService {
       SELECT id, google_ftid FROM places
       WHERE trip_id = ? AND (
         (provider IS NOT NULL AND provider_place_id IS NOT NULL AND provider || ':' || provider_place_id = ?)
-        OR 'google:' || google_place_id = ?
-        OR 'google:' || google_ftid = ?
-        OR 'osm:' || osm_id = ?
+        OR (provider = 'google' AND google_place_id = ?)
+        OR (provider = 'google' AND google_ftid = ?)
+        OR (provider = 'osm' AND osm_id = ?)
       )
       ORDER BY id ASC
       LIMIT 1

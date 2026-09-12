@@ -4266,9 +4266,11 @@ function runMigrations(db: Database.Database): void {
       if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider')) db.exec('ALTER TABLE collection_places ADD COLUMN provider TEXT');
       if (collectionColumns.length > 0 && !collectionColumns.some(c => c.name === 'provider_place_id')) db.exec('ALTER TABLE collection_places ADD COLUMN provider_place_id TEXT');
       db.exec("UPDATE places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
-      db.exec("UPDATE places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
+      db.exec("UPDATE places SET provider = 'google', provider_place_id = google_ftid WHERE provider IS NULL AND google_ftid IS NOT NULL AND trim(google_ftid) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '') AND NOT (google_ftid IS NOT NULL AND trim(google_ftid) <> '')");
       db.exec("UPDATE collection_places SET provider = 'google', provider_place_id = google_place_id WHERE provider IS NULL AND google_place_id IS NOT NULL AND trim(google_place_id) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
-      db.exec("UPDATE collection_places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'google', provider_place_id = google_ftid WHERE provider IS NULL AND google_ftid IS NOT NULL AND trim(google_ftid) <> '' AND NOT (osm_id IS NOT NULL AND trim(osm_id) <> '')");
+      db.exec("UPDATE collection_places SET provider = 'osm', provider_place_id = osm_id WHERE provider IS NULL AND osm_id IS NOT NULL AND trim(osm_id) <> '' AND NOT (google_place_id IS NOT NULL AND trim(google_place_id) <> '') AND NOT (google_ftid IS NOT NULL AND trim(google_ftid) <> '')");
       db.exec('CREATE INDEX IF NOT EXISTS idx_places_provider_identity ON places(provider, provider_place_id)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_collection_places_provider_identity ON collection_places(collection_id, provider, provider_place_id)');
     },
