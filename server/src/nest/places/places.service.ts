@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { XMLValidator } from 'fast-xml-parser';
-import { TRACK_COLORS, placeMatchStrategies, type PlaceMatchCandidate } from '@trek/shared';
+import { TRACK_COLORS, placeMatchStrategies, placeProviderSchema, type PlaceMatchCandidate, type PlaceProvider } from '@trek/shared';
 import type { TrekWsPayload, TrekWsTripEventName } from '@trek/shared';
 import { RealtimeService } from '../realtime/realtime.service';
 import { DatabaseService, type TripAccess } from '../database/database.service';
@@ -66,7 +66,7 @@ export interface PlaceCreateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider; provider_place_id?: string; website?: string; phone?: string;
   transport_mode?: string; route_geometry?: string; route_color?: string; tags?: number[];
 }
 
@@ -76,7 +76,7 @@ export interface PlaceUpdateInput {
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
   duration_minutes?: number; notes?: string; image_url?: string;
-  google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
+  google_place_id?: string; google_ftid?: string; osm_id?: string; provider?: PlaceProvider; provider_place_id?: string; website?: string; phone?: string;
   transport_mode?: string; route_color?: string | null; tags?: number[];
 }
 
@@ -223,16 +223,17 @@ export class PlacesService {
     const {
       name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone,
       transport_mode, route_geometry, route_color, tags = [],
     } = body;
+    const canonicalProvider = provider == null ? null : placeProviderSchema.parse(provider);
 
     const result = this.dbs.run(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone, transport_mode,
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone, transport_mode,
       route_geometry, route_color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
       // lat/lng/price/duration_minutes use an explicit undefined check, not `||`:
       // 0 is a legitimate value for all four (Null Island, a free entry, a
@@ -240,7 +241,7 @@ export class PlacesService {
       tripId, name, description || null, lat ?? null, lng ?? null, address || null,
       category_id || null, price ?? null, currency || null,
       place_time || null, end_time || null, duration_minutes ?? 60, notes || null, image_url || null,
-      google_place_id || null, google_ftid || null, osm_id || null, website || null, phone || null, transport_mode || 'walking',
+      google_place_id || null, google_ftid || null, osm_id || null, canonicalProvider, provider_place_id || null, website || null, phone || null, transport_mode || 'walking',
       route_geometry || null, route_color || null,
     );
 

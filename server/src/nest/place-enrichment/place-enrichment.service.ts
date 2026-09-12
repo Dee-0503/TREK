@@ -84,8 +84,11 @@ export function candidateKey(placeId: string, identity: string): string {
   return `${placeId}~p${digest}`;
 }
 
-/**
- * What the free sources need to know about a place, kept apart from whatever
+export function providerNamespacedDetailCacheKey(provider: string | null | undefined, placeId: string): string {
+  const canonical = provider === 'openstreetmap' ? 'osm' : provider;
+  return canonical ? `${canonical}:${placeId}` : `coords:${placeId}`;
+}
+
  * the maps provider returned. See `resolveIdentity` for why they do not merge.
  */
 interface PlaceIdentity extends WikiIdentity {
@@ -272,8 +275,11 @@ export class PlaceEnrichmentService {
 
     const placeId = req.placeId?.trim() || `coords:${req.lat}:${req.lng}`;
     const lang = req.lang;
+    const cachePlaceId = req.placeId?.trim()
+      ? providerNamespacedDetailCacheKey((req.details?.provider as string | undefined) ?? (req.details?.source as string | undefined), req.placeId.trim())
+      : placeId;
 
-    const cached = await this.readCache(placeId, lang);
+    const cached = await this.readCache(cachePlaceId, lang);
     if (cached) return cached;
 
     // One details lookup feeds all three halves: the pictures need its Commons

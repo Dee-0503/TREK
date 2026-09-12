@@ -16,15 +16,10 @@ import { z } from 'zod';
 
 const open = z.record(z.string(), z.unknown());
 
-/** One canonical provider identity shape used by maps and place contracts. */
-export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']);
+export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']).transform((provider) =>
+  provider === 'openstreetmap' ? 'osm' : provider,
+);
 export type PlaceProvider = z.infer<typeof placeProviderSchema>;
-
-export const placeProviderIdentitySchema = z.object({
-  provider: placeProviderSchema,
-  providerPlaceId: z.string().min(1),
-});
-export type PlaceProviderIdentity = z.infer<typeof placeProviderIdentitySchema>;
 
 /** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */
 export const hexColorSchema = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
@@ -107,11 +102,11 @@ export const placeSchema = z.object({
   duration_minutes: z.number().nullable().optional(),
   notes: z.string().nullable().optional(),
   image_url: z.string().nullable().optional(),
+  provider: placeProviderSchema.nullable().optional(),
+  provider_place_id: z.string().nullable().optional(),
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
-  provider: placeProviderSchema.nullable().optional(),
-  provider_place_id: z.string().nullable().optional(),
   route_geometry: z.string().nullable().optional(),
   // Manual track colour (#776). null = inherit the category colour like before.
   route_color: hexColorSchema.nullable().optional(),
@@ -154,9 +149,6 @@ export const assignmentPlaceSchema = z.object({
   transport_mode: z.string().nullable().optional(),
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
-  osm_id: z.string().nullable().optional(),
-  provider: placeProviderSchema.nullable().optional(),
-  provider_place_id: z.string().nullable().optional(),
   // Carried on the embedded place so the day-plan thumbnail can auto-fetch an
   // OSM photo the same way the sidebar/inspector do (#1136 follow-up).
   osm_id: z.string().nullable().optional(),
