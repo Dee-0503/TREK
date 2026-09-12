@@ -1805,6 +1805,10 @@ export class MapsService {
     // pseudo-ids and legacy image URLs have no details source at all. Neither may be
     // forwarded to Google, which bills the 400 INVALID_ARGUMENT it answers with.
     if (!isGooglePlaceId(placeId)) {
+      if (placeId.startsWith('amap:') && this.amapProvider) {
+        const result = await this.amapProvider.getDetails(placeId, { lang, context });
+        return { place: result.place as Record<string, unknown> };
+      }
       return OSM_PLACE_ID.test(placeId) ? this.getPlaceDetails(userId, placeId, lang, undefined, context) : { place: null };
     }
 

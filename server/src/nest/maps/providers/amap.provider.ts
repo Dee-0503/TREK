@@ -18,8 +18,8 @@ import type { MapsProvider } from './maps-provider';
 type AmapError = Error & { status: number; code: string };
 
 const amapPoiSchema = z.object({
-  id: z.string().optional(), name: z.string().optional(), address: z.string().optional(),
-  location: z.string().optional(), type: z.string().optional(), tel: z.string().optional(),
+  id: z.string().min(1), name: z.string().min(1), address: z.string().optional(),
+  location: z.string().regex(/^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$/), type: z.string().optional(), tel: z.string().optional(),
   website: z.string().optional(),
   business: z.object({
     opentime_today: z.string().optional(),
@@ -28,7 +28,7 @@ const amapPoiSchema = z.object({
 }).passthrough();
 
 const amapTipSchema = z.object({
-  id: z.string().optional(), name: z.string().optional(), address: z.string().optional(),
+  id: z.string().min(1), name: z.string().min(1), address: z.string().optional(),
   location: z.string().optional(), district: z.string().optional(),
 }).passthrough();
 
@@ -94,9 +94,9 @@ function publicPlace(id: string, poi: z.infer<typeof amapPoiSchema>, pos: { lat:
 
 function parseHours(business: { opentime_today?: string; opentime_week?: string | string[] } | undefined): PlaceHours | undefined {
   if (!business) return undefined;
-  const raw = business.opentime_week ?? business.opentime_today;
-  const lines = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[;；]/).map((part) => part.trim()).filter(Boolean) : [];
-  if (!lines.length) return undefined;
+  const parseLines = (raw: string | string[] | undefined): PlaceHours | undefined => {
+    const lines = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[;；]/).map((part) => part.trim()).filter(Boolean) : [];
+    if (!lines.length) return undefined;
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const descriptions = days.map((day) => `${day}: ?`);
   const periods: PlaceHours['periods'] = [];
@@ -118,6 +118,8 @@ function parseHours(business: { opentime_today?: string; opentime_week?: string 
   }
   if (!descriptions.some((line) => !line.endsWith('?'))) return undefined;
   return { weekdayDescriptions: descriptions, periods: periods.length ? periods : null };
+  };
+  return parseLines(business.opentime_week) ?? parseLines(business.opentime_today);
 }
 
 function dayIndex(value: string | undefined): number | null {
@@ -133,8 +135,15 @@ function dayRange(start: number, end: number): number[] {
   return result;
 }
 
-@Injectable()
-export class AmapProvider implements MapsProvider {
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+
   readonly id = 'amap' as const;
 
   private get base(): string { return readEnv().maps.amapApiBase; }
@@ -145,7 +154,7 @@ export class AmapProvider implements MapsProvider {
       const data = await this.request('/v5/place/text', {
         keywords: query.trim(), show_fields: 'business', ...this.contextParams(options),
       }, amapSearchResponseSchema);
-      return { places: data.pois.flatMap((raw) => { const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location); if (!poi.id || !pos) return []; return [{ ...publicPlace(poi.id, poi, pos) }]; }), source: 'amap' };
+      return { places: data.pois.map((raw) => { const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location); if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response'); return publicPlace(poi.id, poi, pos); }), source: 'amap' };
     });
   }
 
@@ -154,7 +163,7 @@ export class AmapProvider implements MapsProvider {
       const data = await this.request('/v3/assistant/inputtips', {
         keywords: input.trim(), ...this.contextParams(options),
       }, amapAutocompleteResponseSchema);
-      return { suggestions: data.tips.flatMap((raw) => { const tip = amapTipSchema.parse(raw); if (!tip.id || !tip.name) return []; return [{ placeId: namespacedId(tip.id), mainText: tip.name, secondaryText: [tip.address, tip.district].filter(Boolean).join(', ') }]; }), source: 'amap' };
+      return { suggestions: data.tips.map((raw) => { const tip = amapTipSchema.parse(raw); return { placeId: namespacedId(tip.id), mainText: tip.name, secondaryText: [tip.address, tip.district].filter(Boolean).join(', ') }; }), source: 'amap' };
     });
   }
 
@@ -163,7 +172,7 @@ export class AmapProvider implements MapsProvider {
     if (!id || /[^A-Za-z0-9_-]/.test(id)) throw error(400, 'invalid_id', 'Invalid AMap place identifier');
     return this.cached('details', { id, options }, async () => {
       const data = await this.request('/v5/place/detail', { id, show_fields: 'business', ...this.contextParams(options) }, amapDetailsResponseSchema);
-      const poi = amapPoiSchema.parse(data.pois[0]); const pos = coordinate(poi.location); if (!pos) return { place: null };
+      const poi = amapPoiSchema.parse(data.pois[0]); const pos = coordinate(poi.location); if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response');
       return { place: publicPlace(id, poi, pos) };
     });
   }
@@ -222,7 +231,7 @@ export class AmapProvider implements MapsProvider {
   private statusForInfo(info?: string): number { const text = (info ?? '').toLowerCase(); return text.includes('key') || text.includes('permission') ? 403 : text.includes('limit') ? 429 : 502; }
 
   private cached<T>(operation: string, identity: unknown, fn: () => Promise<T>): Promise<T> {
-    const key = `${this.id}:${operation}:${JSON.stringify(identity)}`;
+    const key = `${this.id}:${operation}:${canonical(identity)}`;
     const ttl = readEnv().maps.amapCacheTtlSeconds * 1000; const hit = cache.get(key);
     if (hit && Date.now() - hit.fetchedAt < ttl) return Promise.resolve(hit.value as T);
     const running = inflight.get(key); if (running) return running as Promise<T>;

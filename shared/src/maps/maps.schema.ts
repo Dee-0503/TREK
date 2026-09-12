@@ -113,6 +113,14 @@ export type RouteResult = z.infer<typeof routeResultSchema>;
 
 const latLng = z.object({ lat: z.number(), lng: z.number() });
 
+export type ProviderOverride = 'google' | 'amap' | 'osm';
+export type GeographicContext = {
+  countryCode?: string;
+  latitude?: number;
+  longitude?: number;
+  override?: ProviderOverride;
+};
+
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
   ...requestContext,
@@ -120,6 +128,8 @@ export const mapsSearchRequestSchema = z.object({
   // foreign-region queries. z.number() is finite-only (zod v4), matching the
   // legacy Number.isFinite() check; radius was never validated beyond "number".
   locationBias: latLng.extend({ radius: z.number().optional() }).optional(),
+  countryCode: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+  providerOverride: z.enum(['google', 'amap', 'osm']).optional(),
 });
 export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 

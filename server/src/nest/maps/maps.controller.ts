@@ -104,12 +104,13 @@ export class MapsController {
     @CurrentUser() user: User,
     @Body() body: MapsSearchDto,
     @Query('lang') lang?: string,
-    @Query('countryCode') countryCode?: string,
-    @Query('latitude') latitude?: string,
-    @Query('longitude') longitude?: string,
-    @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsSearchResult> {
-    const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
+    const context: GeographicContext & { override?: ProviderOverride } = {
+      countryCode: body.countryCode?.toUpperCase(),
+      latitude: body.locationBias?.lat,
+      longitude: body.locationBias?.lng,
+      override: body.providerOverride,
+    };
     try {
       return await this.maps.search(user.id, body.query, lang, body.locationBias, context);
     } catch (err: unknown) {

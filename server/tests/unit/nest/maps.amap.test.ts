@@ -118,12 +118,25 @@ describe('AmapProvider mocked HTTP adapter', () => {
     expect(fetchFollow).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps canonical cache identity distinct for endpoint, provider, context, language and fields', async () => {
+  it('deduplicates identities whose property insertion order differs', async () => {
     readJson.mockResolvedValue({ status: '1', pois: [] });
     const provider = new AmapProvider();
-    await provider.search('canonical', { lang: 'en' });
-    await provider.search('canonical', { lang: 'zh-CN' });
-    expect(fetchFollow).toHaveBeenCalledTimes(2);
-    expect(fetchFollow.mock.calls[0][0]).not.toBe(fetchFollow.mock.calls[1][0]);
+    await provider.search('ordered', { lang: 'en', context: { countryCode: 'CN', latitude: 1, longitude: 2 } });
+    await provider.search('ordered', { context: { longitude: 2, latitude: 1, countryCode: 'CN' }, lang: 'en' });
+    expect(fetchFollow).toHaveBeenCalledTimes(1);
   });
+
+  it('rejects malformed POI fields and details coordinates explicitly', async () => {
+    readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, name: undefined }] });
+    await expect(new AmapProvider().search('missing-name')).rejects.toMatchObject({ code: 'invalid_response', status: 502 });
+    readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, id: 'B126', location: 'bad' }] });
+    await expect(new AmapProvider().getDetails('amap:B126')).rejects.toMatchObject({ code: 'invalid_response', status: 502 });
+  });
+
+  it('falls back to today when weekly hours are unparseable', async () => {
+    readJson.mockResolvedValue({ status: '1', pois: [{ ...poi, id: 'B127', business: { opentime_week: 'not hours', opentime_today: '今日 10:00-20:00' } }] });
+    const result = await new AmapProvider().search('hours-fallback');
+    expect(result.places[0].opening_hours?.[0]).toContain('10:00-20:00');
+  });
+
 });
