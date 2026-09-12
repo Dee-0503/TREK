@@ -492,7 +492,17 @@ describe('calculateRouteWithLegs', () => {
   })
 })
 
-describe('calculateRouteWithLegs plugin profiles', () => {
+  it('FE-COMP-ROUTECALCULATOR-050: explicit AMap override routes through the server without country context', async () => {
+    const spy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
+      coordinates: [[1, 2], [3, 4]], distance: 100, duration: 10,
+      routeSource: { provider: 'amap', fallback: false }, legs: [],
+    })
+    const result = await calculateRouteWithLegs(freshWaypoints(), { profile: 'driving', providerOverride: 'amap' })
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ providerOverride: 'amap' }), expect.anything())
+    expect(result.routeSource).toEqual({ provider: 'amap', fallback: false })
+  })
+
+
   it('FE-COMP-ROUTECALCULATOR-043: refuses a plugin route without a trip context', async () => {
     const spy = vi.spyOn(pluginsApi, 'pluginRoute')
     await expect(

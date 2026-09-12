@@ -49,6 +49,8 @@ export const routeSourceSchema = z.object({
   provider: z.enum(['amap', 'osrm']),
   fallback: z.boolean(),
   fallbackReason: z.string().optional(),
+  /** All distinct fallback reasons when a route combines multiple chunks. */
+  fallbackReasons: z.array(z.string()).optional(),
 });
 export type RouteSource = z.infer<typeof routeSourceSchema>;
 

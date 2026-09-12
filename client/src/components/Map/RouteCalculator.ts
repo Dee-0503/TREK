@@ -300,7 +300,7 @@ export async function calculateRouteWithLegs(
   // the same coordinates on a different day), so its key includes tripId/dayId;
   // the built-in OSRM profiles are context-free and leave those out.
   const pluginScope = profile.startsWith('plugin:') ? `:${tripId ?? ''}:${dayId ?? ''}` : ''
-  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}`
+  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}:${countryCode ?? ''}:${providerOverride ?? ''}`
   const cached = routeCache.get(cacheKey)
   if (cached) return cached
 
@@ -345,7 +345,7 @@ export async function calculateRouteWithLegs(
   }
 
   const osrmProfile = (profile === 'walking' || profile === 'cycling') ? profile : 'driving'
-  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && countryCode === 'CN') {
+  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && (countryCode === 'CN' || providerOverride !== undefined)) {
     const result = await mapsApi.route({ profile: osrmProfile as 'driving' | 'walking' | 'cycling', waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode, providerOverride }, signal)
     const legs: RouteSegment[] = result.legs.map(leg => ({ ...leg }))
     const routed: SharedRouteWithLegs = { ...result, legs }

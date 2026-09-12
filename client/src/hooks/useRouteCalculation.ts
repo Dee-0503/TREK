@@ -14,12 +14,29 @@ const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cr
 
 function aggregateRouteSources(sources: RouteWithLegs['routeSource'][]): RouteWithLegs['routeSource'] | null {
   if (!sources.length) return null
-  const fallback = sources.find(source => source.fallback)
   const providers = new Set(sources.map(source => source.provider))
+  const reasons = [...new Set(sources.flatMap(source => [
+    ...(source.fallbackReasons ?? []),
+    ...(source.fallbackReason ? [source.fallbackReason] : []),
+  ]))]
+  const fallback = sources.some(source => source.fallback)
   if (providers.size > 1) {
-    return { provider: 'osrm', fallback: true, fallbackReason: 'mixed_provider' }
+    return {
+      provider: 'osrm',
+      fallback: true,
+      fallbackReason: 'mixed_provider',
+      ...(reasons.length ? { fallbackReasons: reasons } : {}),
+    }
   }
-  if (fallback) return { provider: fallback.provider, fallback: true, fallbackReason: fallback.fallbackReason ?? 'provider_failure' }
+  if (fallback) {
+    const source = sources.find(item => item.fallback) ?? sources[0]
+    return {
+      ...source,
+      fallback: true,
+      fallbackReason: source.fallbackReason ?? reasons[0] ?? 'provider_failure',
+      ...(reasons.length > 1 ? { fallbackReasons: reasons } : {}),
+    }
+  }
   return sources[0]
 }
 
