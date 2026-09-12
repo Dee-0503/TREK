@@ -119,6 +119,9 @@ export const mapsRouteRequestSchema = z.object({
 });
 export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
 
+export const mapsRouteResultSchema = routeWithLegsSchema;
+export type MapsRouteResult = RouteWithLegs;
+
 const latLng = z.object({ lat: z.number(), lng: z.number() });
 
 export type ProviderOverride = 'google' | 'amap' | 'osm';

@@ -9,6 +9,7 @@ import type {
   MapsPlacePhotoResult,
   MapsReverseResult,
   MapsResolveUrlResult,
+  MapsRouteResult,
   MapPlaceProjection,
 } from '@trek/shared';
 import { readEnv, getAppUrl } from '../../app-config';
@@ -644,7 +645,52 @@ export class MapsService {
     return this.resolveMapsKey(userId).key;
   }
 
-  // ── Nominatim search ───────────────────────────────────────────────────────
+  async route(
+    profile: 'driving' | 'walking' | 'cycling',
+    waypoints: { lat: number; lng: number }[],
+    context: ProviderContext = {},
+    signal?: AbortSignal,
+  ): Promise<MapsRouteResult> {
+    const selected = this.providerRouter?.resolveRouteProviderForProfile(profile, context) ?? 'osrm';
+    const amap = selected === 'amap' ? this.amapProvider : undefined;
+    if (amap) {
+      try {
+        return await amap.route(profile, waypoints, { signal });
+      } catch (err) {
+        const reason = err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : 'provider_failure';
+        try {
+          const fallback = await this.routeOsrm(profile, waypoints, signal);
+          return { ...fallback, routeSource: { provider: 'osrm', fallback: true, fallbackReason: `amap_${reason}` } };
+        } catch (osrmError) {
+          throw osrmError;
+        }
+      }
+    }
+    return this.routeOsrm(profile, waypoints, signal);
+  }
+
+  private async routeOsrm(profile: 'driving' | 'walking' | 'cycling', waypoints: { lat: number; lng: number }[], signal?: AbortSignal): Promise<MapsRouteResult> {
+    const base = profile === 'walking'
+      ? 'https://routing.openstreetmap.de/routed-foot/route/v1/foot'
+      : profile === 'cycling'
+        ? 'https://routing.openstreetmap.de/routed-bike/route/v1/bike'
+        : 'https://routing.openstreetmap.de/routed-car/route/v1/driving';
+    const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';');
+    const response = await fetch(`${base}/${coords}?overview=full&geometries=geojson&annotations=distance,duration`, { signal: signal ?? AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('Route could not be calculated');
+    const data = await response.json() as { code?: string; routes?: { geometry?: { coordinates?: [number, number][] }; distance?: number; duration?: number; legs?: { distance: number; duration: number }[] }[] };
+    if (data.code !== 'Ok' || !data.routes?.[0]?.geometry?.coordinates || !data.routes[0].legs) throw new Error('No route found');
+    const route = data.routes[0];
+    const coordinates = route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+    const legs = route.legs.map((leg, i) => {
+      const from = waypoints[i]; const to = waypoints[i + 1];
+      return { mid: [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2] as [number, number], from: [from.lat, from.lng] as [number, number], to: [to.lat, to.lng] as [number, number], distance: leg.distance, duration: leg.duration, walkingText: `${Math.floor(leg.distance / 5000 * 3.6 / 60)} min`, drivingText: `${Math.floor(leg.duration / 60)} min`, distanceText: `${Math.round(leg.distance)} m`, durationText: `${Math.floor(leg.duration / 60)} min` };
+    });
+    return { coordinates, distance: route.distance ?? 0, duration: route.duration ?? 0, routeSource: { provider: 'osrm', fallback: false }, legs };
+  }
+
 
   /**
    * `lane` defaults to interactive because most callers are a keystroke.

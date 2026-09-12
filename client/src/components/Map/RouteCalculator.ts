@@ -1,5 +1,5 @@
 import { useSettingsStore } from '../../store/settingsStore'
-import { pluginsApi } from '../../api/client'
+import { pluginsApi, mapsApi } from '../../api/client'
 import type { DistanceUnit, RouteResult, RouteSegment, Waypoint, RouteAnchors, RouteWithLegs as SharedRouteWithLegs } from '../../types'
 import { formatDistance } from '../../utils/units'
 
@@ -286,7 +286,7 @@ export async function calculateSegments(
  */
 export async function calculateRouteWithLegs(
   waypoints: Waypoint[],
-  { signal, profile = 'driving', tripId, dayId }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null } = {}
+  { signal, profile = 'driving', tripId, dayId, countryCode }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string } = {}
 ): Promise<SharedRouteWithLegs> {
   if (!waypoints || waypoints.length < 2) {
     return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }
@@ -303,9 +303,6 @@ export async function calculateRouteWithLegs(
   const cached = routeCache.get(cacheKey)
   if (cached) return cached
 
-  // Plugin profile (`plugin:<id>/<profile>`): the server invokes that routeProvider
-  // and normalizes its answer; null means the provider failed or refused, and the
-  // throw makes callers fall back to straight lines exactly like an OSRM outage.
   const pluginProfile = parsePluginProfile(profile)
   if (pluginProfile) {
     if (tripId == null) throw new Error('Plugin routing needs a trip context')
@@ -347,6 +344,13 @@ export async function calculateRouteWithLegs(
   }
 
   const osrmProfile = (profile === 'walking' || profile === 'cycling') ? profile : 'driving'
+  if (osrmProfile === profile && countryCode === 'CN') {
+    const result = await mapsApi.route({ profile: osrmProfile, waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode })
+    const legs: RouteSegment[] = result.legs.map(leg => ({ ...leg }))
+    const routed: SharedRouteWithLegs = { ...result, legs }
+    routeCache.set(cacheKey, routed)
+    return routed
+  }
   const url = `${OSRM_PROFILE_BASE[osrmProfile]}/${coords}?overview=full&geometries=geojson&annotations=distance,duration`
   const response = await fetch(url, { signal })
   if (!response.ok) throw new Error('Route could not be calculated')

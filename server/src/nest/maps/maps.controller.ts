@@ -29,7 +29,7 @@ import { StorageService } from '../storage/storage.service';
 import { isClientAbortError } from '../storage/storage.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { MapsSearchDto, MapsAutocompleteDto, MapsResolveUrlDto } from './maps.dto';
+import { MapsSearchDto, MapsAutocompleteDto, MapsResolveUrlDto, MapsRouteDto } from './maps.dto';
 
 /** Google's session-token shape: URL-safe ASCII, at most 36 characters. The
  *  autocomplete body is validated by the Zod pipe; the details query is not,
@@ -289,7 +289,21 @@ export class MapsController {
     }
   }
 
-  @Post('resolve-url')
+  @Post('route')
+  @HttpCode(200)
+  async route(@Body() body: MapsRouteDto): Promise<import('@trek/shared').MapsRouteResult> {
+    try {
+      return await this.maps.route(body.profile, body.waypoints, {
+        countryCode: body.countryCode,
+        override: body.providerOverride,
+        latitude: body.waypoints[0]?.lat,
+        longitude: body.waypoints[0]?.lng,
+      });
+    } catch (err: unknown) {
+      throw toHttpException(err, 'Route could not be calculated', 500);
+    }
+  }
+
   @HttpCode(200)
   async resolveUrl(@Body() body: MapsResolveUrlDto): Promise<MapsResolveUrlResult> {
     try {
