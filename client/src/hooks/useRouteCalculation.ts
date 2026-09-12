@@ -11,6 +11,7 @@ import type { RouteSegment, RouteResult, RouteVia, Accommodation, RouteWithLegs 
 import type { RouteProviderOverride } from '@trek/shared'
 
 const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other']
+const NO_ACCOMMODATIONS: Accommodation[] = []
 
 function aggregateRouteSources(sources: RouteWithLegs['routeSource'][]): RouteWithLegs['routeSource'] | null {
   if (!sources.length) return null
