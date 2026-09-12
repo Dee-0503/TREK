@@ -235,6 +235,23 @@ describe('saved places + dedup', () => {
     expect(duplicate.duplicate).toBe(true);
     expect(testDb.prepare('SELECT google_place_id FROM collection_places WHERE id = ?').get(first.place!.id)).toEqual({ google_place_id: null });
   });
+  it('COLLECTIONS-SVC-106: bulk save and copy preserve provider identity and SQL bindings', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Provider SQL' });
+    const trip = createTrip(testDb, u.id);
+    const source = createPlace(testDb, trip.id, { name: 'AMap source' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ?, google_place_id = NULL WHERE id = ?').run('amap', 'B0FFFAB6J2', source.id);
+
+    const saved = svc.saveFromTripPlaces(u.id, col.id, trip.id, [source.id]);
+    expect(saved.copied).toBe(1);
+    expect(testDb.prepare('SELECT provider, provider_place_id, google_place_id FROM collection_places WHERE collection_id = ?').get(col.id)).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+
+    const target = createTrip(testDb, u.id);
+    const copied = svc.copyToTrip(u.id, { trip_id: target.id, place_ids: [Number(testDb.prepare('SELECT id FROM collection_places WHERE collection_id = ?').get(col.id).id)] });
+    expect(copied.copied).toBe(1);
+    expect(testDb.prepare('SELECT provider, provider_place_id, google_place_id FROM places WHERE trip_id = ?').get(target.id)).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+  });
+
   it('COLLECTIONS-SVC-102: saveFromTripPlaces skips a place already saved by provider identity', () => {
     // savePlace was not the only caller. The bulk copy carries the provider ids
     // into the row it writes, so asking without them would recognise less than

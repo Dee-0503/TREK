@@ -438,6 +438,8 @@ export class CollectionsService {
     collectionId: number,
     candidate: PlaceMatchCandidate,
   ): { id: number; name: string } | null {
+    const candidateProvider = typeof candidate.provider === 'string' && candidate.provider === 'openstreetmap' ? 'osm' : candidate.provider;
+    const providerScope = candidateProvider ? ' AND (provider = ? OR provider IS NULL)' : '';
     for (const strategy of placeMatchStrategies(candidate)) {
       let hit: { id: number; name: string } | undefined;
       if (strategy.by === 'externalId') {
@@ -472,10 +474,10 @@ export class CollectionsService {
       } else {
         hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
-      WHERE collection_id = ? AND lat IS NOT NULL AND lng IS NOT NULL
+      WHERE collection_id = ?${providerScope} AND lat IS NOT NULL AND lng IS NOT NULL
         AND abs(lat - ?) <= ? AND abs(lng - ?) <= ?
       ORDER BY id ASC LIMIT 1
-    `, collectionId, strategy.lat, strategy.tolerance, strategy.lng, strategy.tolerance);
+    `, ...(candidateProvider ? [collectionId, candidateProvider, strategy.lat, strategy.tolerance, strategy.lng, strategy.tolerance] : [collectionId, strategy.lat, strategy.tolerance, strategy.lng, strategy.tolerance]));
       }
       if (hit) return hit;
     }
@@ -675,7 +677,7 @@ export class CollectionsService {
       collection_id, owner_id, saved_by, name, description, lat, lng, address,
       category_id, price, currency, notes, image_url, google_place_id, google_ftid,
       osm_id, provider, provider_place_id, website, phone, status, source_trip_id, source_place_id, links
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idea', ?, ?, ?, ?, ?)`);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     let copied = 0;
     const skipped: { id: number; name: string }[] = [];
     // The whole batch is one logical write — atomic since the post-fold quirk pass.
@@ -708,7 +710,7 @@ export class CollectionsService {
           (p.image_url as string | null) ?? null, (p.google_place_id as string | null) ?? null, (p.google_ftid as string | null) ?? null,
           (p.osm_id as string | null) ?? null, (p.provider as string | null) ?? null, (p.provider_place_id as string | null) ?? null,
           (p.website as string | null) ?? null, (p.phone as string | null) ?? null,
-          tripId, placeId, null,
+          'idea', tripId, placeId, null,
         );
         this.copyTripRatings(placeId, Number(res.lastInsertRowid), collectionId);
         copied++;
@@ -889,8 +891,8 @@ export class CollectionsService {
     if (!this.db.canAccessTrip(tripId, userId)) httpError(404, 'Trip not found');
 
     const sources = placeIds.length
-      ? this.db.all<{ id: number; name: string; lat: number | null; lng: number | null; google_place_id: string | null; google_ftid: string | null; osm_id: string | null }>(`
-        SELECT id, name, lat, lng, google_place_id, google_ftid, osm_id
+      ? this.db.all<{ id: number; name: string; lat: number | null; lng: number | null; provider: string | null; provider_place_id: string | null; google_place_id: string | null; google_ftid: string | null; osm_id: string | null }>(`
+        SELECT id, name, lat, lng, provider, provider_place_id, google_place_id, google_ftid, osm_id
         FROM places WHERE trip_id = ? AND id IN (${placeIds.map(() => '?').join(',')})
       `, tripId, ...placeIds)
       : [];
@@ -926,15 +928,23 @@ export class CollectionsService {
   private matchingCollectionPlaces(
     collectionIds: number[],
     tripId: number,
-    place: { id: number; lat: number | null; lng: number | null; google_place_id: string | null; google_ftid: string | null; osm_id: string | null },
+    place: { id: number; lat: number | null; lng: number | null; provider: string | null; provider_place_id: string | null; google_place_id: string | null; google_ftid: string | null; osm_id: string | null },
   ): Array<{ id: number }> {
     const conditions: string[] = ['(cp.source_trip_id = ? AND cp.source_place_id = ?)'];
     const params: (string | number)[] = [...collectionIds, tripId, place.id];
-    if (place.google_place_id) { conditions.push('cp.google_place_id = ?'); params.push(place.google_place_id); }
-    if (place.google_ftid) { conditions.push('cp.google_ftid = ?'); params.push(place.google_ftid); }
-    if (place.osm_id) { conditions.push('cp.osm_id = ?'); params.push(place.osm_id); }
+    if (place.provider && place.provider_place_id) {
+        const provider = place.provider === 'openstreetmap' ? 'osm' : place.provider;
+        conditions.push('(cp.provider = ? AND cp.provider_place_id = ?)');
+        params.push(provider, place.provider_place_id);
+    }
+    if (place.google_place_id) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_place_id = ?"); params.push(place.google_place_id); }
+    if (place.google_ftid) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_ftid = ?"); params.push(place.google_ftid); }
+    if (place.osm_id) { conditions.push("(cp.provider = 'osm' OR cp.provider = 'openstreetmap' OR cp.provider IS NULL) AND cp.osm_id = ?"); params.push(place.osm_id); }
     if (place.lat != null && place.lng != null) {
-      conditions.push('(cp.lat IS NOT NULL AND cp.lng IS NOT NULL AND abs(cp.lat - ?) <= ? AND abs(cp.lng - ?) <= ?)');
+      const provider = place.provider === 'openstreetmap' ? 'osm' : place.provider;
+      const providerScope = provider ? ' AND (cp.provider = ? OR cp.provider IS NULL)' : '';
+      conditions.push(`(cp.lat IS NOT NULL AND cp.lng IS NOT NULL${providerScope} AND abs(cp.lat - ?) <= ? AND abs(cp.lng - ?) <= ?)`);
+      if (provider) params.push(provider);
       params.push(place.lat, COORD_DEDUP_TOLERANCE, place.lng, COORD_DEDUP_TOLERANCE);
     }
     return this.db.all<{ id: number }>(`
@@ -1050,7 +1060,7 @@ export class CollectionsService {
 
   findMembership(
     userId: number,
-    query: { google_place_id?: string; google_ftid?: string; name?: string; lat?: number; lng?: number },
+    query: { provider?: string; provider_place_id?: string; google_place_id?: string; google_ftid?: string; osm_id?: string; name?: string; lat?: number; lng?: number },
   ): CollectionMembership {
     const ids = this.accessibleCollectionIds(userId);
     if (ids.length === 0) return { saved: false, lists: [] };
@@ -1058,15 +1068,23 @@ export class CollectionsService {
 
     const conditions: string[] = [];
     const params: (string | number)[] = [...ids];
-    if (query.google_place_id) { conditions.push('cp.google_place_id = ?'); params.push(query.google_place_id); }
-    if (query.google_ftid) { conditions.push('cp.google_ftid = ?'); params.push(query.google_ftid); }
+    if (query.provider && query.provider_place_id) {
+      conditions.push('(cp.provider = ? AND cp.provider_place_id = ?)');
+      params.push(query.provider, query.provider_place_id);
+    }
+    if (query.google_place_id) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_place_id = ?"); params.push(query.google_place_id); }
+    if (query.google_ftid) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_ftid = ?"); params.push(query.google_ftid); }
+    if (query.osm_id) { conditions.push("(cp.provider = 'osm' OR cp.provider = 'openstreetmap' OR cp.provider IS NULL) AND cp.osm_id = ?"); params.push(query.osm_id); }
     // Coordinate proximity is the location signal. A bare NAME match is deliberately
     // NOT a condition on its own — "Starbucks" (or any repeated name) would otherwise
     // false-positive the inspector's "already saved" bookmark. When coords are given
     // the name still effectively matches via the same-location row below; without an
     // id or coords there is nothing strong enough to claim it's the same place.
     if (query.lat != null && query.lng != null) {
-      conditions.push('(cp.lat IS NOT NULL AND cp.lng IS NOT NULL AND abs(cp.lat - ?) <= ? AND abs(cp.lng - ?) <= ?)');
+      const provider = query.provider === 'openstreetmap' ? 'osm' : query.provider;
+      const providerScope = provider ? ' AND (cp.provider = ? OR cp.provider IS NULL)' : '';
+      conditions.push(`(cp.lat IS NOT NULL AND cp.lng IS NOT NULL${providerScope} AND abs(cp.lat - ?) <= ? AND abs(cp.lng - ?) <= ?)`);
+      if (provider) params.push(provider);
       params.push(query.lat, COORD_DEDUP_TOLERANCE, query.lng, COORD_DEDUP_TOLERANCE);
     }
     if (conditions.length === 0) return { saved: false, lists: [] };

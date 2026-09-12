@@ -256,15 +256,21 @@ export class CollectionsController {
   @Get('membership')
   membership(
     @CurrentUser() user: User,
+    @Query('provider') provider?: string,
+    @Query('provider_place_id') providerPlaceId?: string,
     @Query('google_place_id') googlePlaceId?: string,
     @Query('google_ftid') googleFtid?: string,
+    @Query('osm_id') osmId?: string,
     @Query('name') name?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
   ) {
     return this.collections.findMembership(user.id, {
+      provider,
+      provider_place_id: providerPlaceId,
       google_place_id: googlePlaceId,
       google_ftid: googleFtid,
+      osm_id: osmId,
       name,
       lat: lat != null && lat !== '' ? Number(lat) : undefined,
       lng: lng != null && lng !== '' ? Number(lng) : undefined,

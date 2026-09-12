@@ -114,10 +114,13 @@ export class CollectionsMcp {
 
   @Tool({
     name: 'find_place_in_collections',
-    description: 'Answer "is this place already on one of my lists?" across the whole library in one call, and name the lists it is on with its status in each. Prefer this over walking get_collection list by list: it applies the same provider-id and coordinate-proximity match the app\'s own saved indicator uses, which a name comparison over the returned places cannot reproduce. Identify the place by google_place_id / google_ftid (from search_place) or by lat+lng; without one of those there is no signal strong enough to claim it is the same place and nothing is reported as saved.',
+    description: 'Answer "is this place already on one of my lists?" across the whole library in one call, using provider identity or legacy Google/OSM identity plus coordinate proximity.',
     inputSchema: {
-      google_place_id: z.string().max(200).optional().describe('Google Places id of the place to look up'),
-      google_ftid: z.string().max(200).optional().describe('Google feature id (ftid) of the place to look up'),
+      provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).optional().describe('Canonical provider identity'),
+      provider_place_id: z.string().max(200).optional().describe('Provider-specific place ID'),
+      google_place_id: z.string().max(200).optional().describe('Legacy Google Places ID'),
+      google_ftid: z.string().max(200).optional().describe('Legacy Google feature ID'),
+      osm_id: z.string().max(200).optional().describe('Legacy OpenStreetMap ID'),
       name: z.string().max(200).optional().describe('Place name. Carried for parity with the REST lookup and never matched on alone, since every repeated name (any "Starbucks") would answer to it.'),
       lat: z.number().min(-90).max(90).optional().describe('Latitude; pass together with lng to match by location'),
       lng: z.number().min(-180).max(180).optional().describe('Longitude; pass together with lat to match by location'),
@@ -127,7 +130,7 @@ export class CollectionsMcp {
     access: { group: 'collections', mode: 'read' },
   })
   async findPlaceInCollections(
-    query: { google_place_id?: string; google_ftid?: string; name?: string; lat?: number; lng?: number },
+    query: { provider?: string; provider_place_id?: string; google_place_id?: string; google_ftid?: string; osm_id?: string; name?: string; lat?: number; lng?: number },
     ctx: McpContext,
   ) {
     try { return ok(this.collections.findMembership(ctx.userId, query)); } catch (err) { return fail(err); }
