@@ -21,6 +21,53 @@ export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetm
 );
 export type PlaceProvider = z.infer<typeof placeProviderSchema>;
 
+/** Provider identity used by map search/result contracts. */
+export const placeProviderIdentitySchema = z.object({
+  provider: placeProviderSchema,
+  providerPlaceId: z.string().trim().min(1),
+});
+
+const placeIdentityFieldsSchema = z.object({
+  provider: placeProviderSchema.optional().nullable(),
+  provider_place_id: z.string().trim().min(1).optional().nullable(),
+});
+
+function validatePlaceIdentityPair(
+  value: { provider?: PlaceProvider | null; provider_place_id?: string | null },
+  ctx: z.RefinementCtx,
+  allowProviderOnly: boolean,
+): void {
+  const hasProvider = value.provider != null;
+  const hasId = value.provider_place_id != null;
+  if (hasId && !hasProvider) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['provider'], message: 'provider is required with provider_place_id' });
+  } else if (!allowProviderOnly && hasProvider !== hasId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['provider_place_id'], message: 'provider and provider_place_id must be provided together' });
+  }
+}
+
+/** Provider identity fields shared by REST and MCP place mutations. */
+export const placeCreateIdentitySchema = placeIdentityFieldsSchema.superRefine((value, ctx) => {
+  validatePlaceIdentityPair(value, ctx, false);
+});
+export const placeUpdateIdentitySchema = placeIdentityFieldsSchema.superRefine((value, ctx) => {
+  // A provider-only patch deliberately clears the previous provider ID when
+  // switching providers; an ID-only patch can never be unambiguously routed.
+  validatePlaceIdentityPair(value, ctx, true);
+});
+export type PlaceCreateIdentity = z.infer<typeof placeCreateIdentitySchema>;
+export type PlaceUpdateIdentity = z.infer<typeof placeUpdateIdentitySchema>;
+
+export function normalizePlaceIdentity(
+  value: { provider?: unknown; provider_place_id?: unknown },
+  mode: 'create' | 'update',
+): { provider: PlaceProvider | null; provider_place_id: string | null } {
+  const parsed = (mode === 'create' ? placeCreateIdentitySchema : placeUpdateIdentitySchema).parse(value);
+  const provider = parsed.provider ?? null;
+  const provider_place_id = parsed.provider_place_id?.trim() || null;
+  return { provider, provider_place_id: provider ? provider_place_id : null };
+}
+
 /** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */
 export const hexColorSchema = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
@@ -159,10 +206,12 @@ export const assignmentPlaceSchema = z.object({
 });
 export type AssignmentPlace = z.infer<typeof assignmentPlaceSchema>;
 
-export const placeCreateRequestSchema = open.and(z.object({ name: z.string().min(1) }));
+export const placeCreateRequestSchema = open
+  .and(z.object({ name: z.string().min(1) }))
+  .and(placeCreateIdentitySchema);
 export type PlaceCreateRequest = z.infer<typeof placeCreateRequestSchema>;
 
-export const placeUpdateRequestSchema = open;
+export const placeUpdateRequestSchema = open.and(placeUpdateIdentitySchema);
 export type PlaceUpdateRequest = z.infer<typeof placeUpdateRequestSchema>;
 
 // Collaborative ratings (#1435): one 1-5 star vote per user and place.

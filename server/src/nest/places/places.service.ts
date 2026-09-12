@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { XMLValidator } from 'fast-xml-parser';
-import { TRACK_COLORS, placeMatchStrategies, placeProviderSchema, type PlaceMatchCandidate, type PlaceProvider } from '@trek/shared';
+import { TRACK_COLORS, placeMatchStrategies, normalizePlaceIdentity, type PlaceMatchCandidate, type PlaceProvider } from '@trek/shared';
 import type { TrekWsPayload, TrekWsTripEventName } from '@trek/shared';
 import { RealtimeService } from '../realtime/realtime.service';
 import { DatabaseService, type TripAccess } from '../database/database.service';
@@ -226,7 +226,7 @@ export class PlacesService {
       duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone,
       transport_mode, route_geometry, route_color, tags = [],
     } = body;
-    const canonicalProvider = provider == null ? null : placeProviderSchema.parse(provider);
+    const identity = normalizePlaceIdentity({ provider, provider_place_id }, 'create');
 
     const result = this.dbs.run(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
@@ -241,7 +241,7 @@ export class PlacesService {
       tripId, name, description || null, lat ?? null, lng ?? null, address || null,
       category_id || null, price ?? null, currency || null,
       place_time || null, end_time || null, duration_minutes ?? 60, notes || null, image_url || null,
-      google_place_id || null, google_ftid || null, osm_id || null, canonicalProvider, provider_place_id || null, website || null, phone || null, transport_mode || 'walking',
+      google_place_id || null, google_ftid || null, osm_id || null, identity.provider, identity.provider_place_id, website || null, phone || null, transport_mode || 'walking',
       route_geometry || null, route_color || null,
     );
 
@@ -309,12 +309,13 @@ export class PlacesService {
       duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, provider, provider_place_id, website, phone,
       transport_mode, route_color, tags,
     } = body;
-    const canonicalProvider = provider === undefined
-      ? existingPlace.provider
-      : provider == null || provider === '' ? null : placeProviderSchema.parse(provider);
-    const canonicalProviderId = provider_place_id === undefined
+    const identityPatch = provider !== undefined || provider_place_id !== undefined
+      ? normalizePlaceIdentity({ provider, provider_place_id }, 'update')
+      : { provider: existingPlace.provider ?? null, provider_place_id: existingPlace.provider_place_id ?? null };
+    const canonicalProvider = provider === undefined ? existingPlace.provider : identityPatch.provider;
+    const canonicalProviderId = provider === undefined && provider_place_id === undefined
       ? existingPlace.provider_place_id
-      : provider_place_id?.trim() || null;
+      : identityPatch.provider_place_id;
 
     this.dbs.run(`
     UPDATE places SET

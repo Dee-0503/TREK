@@ -66,8 +66,8 @@ export class PlacesMcp {
       lng: z.number().optional(),
       address: z.string().max(500).optional(),
       category_id: z.number().int().positive().optional().describe('Category ID — use list_categories to see available options'),
-      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
-      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      provider: placeProviderSchema.nullable().optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().trim().min(1).nullable().optional().describe('Provider-qualified place ID from search_place'),
       google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID from search_place — enables direct Google Maps links'),
       osm_id: z.string().optional().describe('OpenStreetMap ID from search_place (e.g. "way:12345") — enables opening hours if no Google ID'),
@@ -109,8 +109,8 @@ export class PlacesMcp {
       lng: z.number().optional(),
       address: z.string().max(500).optional(),
       category_id: z.number().int().positive().optional().describe('Category ID — use list_categories to see available options'),
-      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
-      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      provider: placeProviderSchema.nullable().optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().trim().min(1).nullable().optional().describe('Provider-qualified place ID from search_place'),
       google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID from search_place — enables direct Google Maps links'),
       osm_id: z.string().optional().describe('OpenStreetMap ID from search_place (e.g. "way:12345")'),
@@ -126,9 +126,9 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async createAndAssignPlace(
-    { tripId, dayId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
+    { tripId, dayId, name, description, lat, lng, address, category_id, provider, provider_place_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
       tripId: number; dayId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
-      category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
+      category_id?: number; provider?: 'google' | 'amap' | 'osm'; provider_place_id?: string | null; google_place_id?: string; google_ftid?: string; osm_id?: string;
       place_notes?: string; website?: string; phone?: string; image_url?: string; assignment_notes?: string;
       price?: number; currency?: string;
     },
@@ -140,7 +140,7 @@ export class PlacesMcp {
     if (!this.assignments.dayExists(dayId, tripId)) return { content: [{ type: 'text' as const, text: 'Day not found.' }], isError: true };
     try {
       const result = this.db.transaction(() => {
-        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
+        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, provider, provider_place_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
         const assignment = this.assignments.createAssignment(dayId, place.id, assignment_notes ?? null);
         return { place, assignment };
       });
@@ -175,8 +175,8 @@ export class PlacesMcp {
       phone: z.string().max(50).optional(),
       image_url: placeImageUrlSchema.nullable().optional().describe('Thumbnail for the place: an /uploads/ path, an /api/maps/place-photo/ path, an inline data: image, or an https URL. Pass null to remove the current picture'),
       transport_mode: z.enum(['walking', 'driving', 'cycling', 'transit', 'flight']).optional(),
-      provider: placeProviderSchema.optional().describe('Place provider from search_place (google, amap, or osm)'),
-      provider_place_id: z.string().min(1).optional().describe('Provider-qualified place ID from search_place'),
+      provider: placeProviderSchema.nullable().optional().describe('Place provider from search_place (google, amap, or osm)'),
+      provider_place_id: z.string().trim().min(1).nullable().optional().describe('Provider-qualified place ID from search_place'),
       google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID (e.g. "0x89c259b7abdd4769:0x103aaf1c8bf8a050")'),
     },
@@ -189,7 +189,7 @@ export class PlacesMcp {
       address?: string; category_id?: number; price?: number; currency?: string; place_time?: string;
       end_time?: string; duration_minutes?: number; notes?: string; website?: string; phone?: string;
       image_url?: string | null;
-      transport_mode?: 'walking' | 'driving' | 'cycling' | 'transit' | 'flight'; provider?: 'google' | 'amap' | 'osm'; provider_place_id?: string; osm_id?: string;
+      transport_mode?: 'walking' | 'driving' | 'cycling' | 'transit' | 'flight'; provider?: 'google' | 'amap' | 'osm'; provider_place_id?: string | null; osm_id?: string;
       google_place_id?: string; google_ftid?: string;
     },
     ctx: McpContext,

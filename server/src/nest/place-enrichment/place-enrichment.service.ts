@@ -84,9 +84,22 @@ export function candidateKey(placeId: string, identity: string): string {
   return `${placeId}~p${digest}`;
 }
 
-export function providerNamespacedDetailCacheKey(provider: string | null | undefined, placeId: string): string {
+export function providerNamespacedDetailCacheKey(provider: string | null | undefined, placeId: string): string | null {
   const canonical = provider === 'openstreetmap' ? 'osm' : provider;
-  return canonical ? `${canonical}:${placeId}` : `coords:${placeId}`;
+  return canonical && ['google', 'amap', 'osm'].includes(canonical) ? `${canonical}:${placeId}` : null;
+}
+
+function detailCacheIdentity(req: MapsPlaceEnrichmentRequest): string | null {
+  const rawPlaceId = req.placeId?.trim();
+  if (!rawPlaceId) return null;
+  const explicitProvider = (req.details?.provider ?? req.details?.source) as string | undefined;
+  const fromPayload = providerNamespacedDetailCacheKey(explicitProvider, rawPlaceId);
+  if (fromPayload) return fromPayload;
+  const separator = rawPlaceId.indexOf(':');
+  if (separator > 0) {
+    return providerNamespacedDetailCacheKey(rawPlaceId.slice(0, separator), rawPlaceId.slice(separator + 1));
+  }
+  return null;
 }
 
 /**
@@ -276,9 +289,8 @@ export class PlaceEnrichmentService {
 
     const placeId = req.placeId?.trim() || `coords:${req.lat}:${req.lng}`;
     const lang = req.lang;
-    const cachePlaceId = req.placeId?.trim()
-      ? providerNamespacedDetailCacheKey((req.details?.provider as string | undefined) ?? (req.details?.source as string | undefined), req.placeId.trim())
-      : placeId;
+    const coordinateCachePlaceId = `coords:${req.lat}:${req.lng}`;
+    const cachePlaceId = detailCacheIdentity(req) ?? coordinateCachePlaceId;
 
     const cached = await this.readCache(cachePlaceId, lang);
     if (cached) return cached;
@@ -324,7 +336,7 @@ export class PlaceEnrichmentService {
       hours: collectHours(details) ?? collectHours(osmDetails),
       rating: collectRating(details) ?? collectRating(osmDetails),
     };
-    this.writeCache(canonicalCachePlaceId, lang, result);
+    if (canonicalCachePlaceId) this.writeCache(canonicalCachePlaceId, lang, result);
     return result;
   }
 

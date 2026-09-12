@@ -1,5 +1,6 @@
 import { placeProviderSchema, type PlaceProvider } from './place.schema';
 
+/**
  *
  * There are two consumers with nothing in common but this decision: the bulk
  * place importers ask it of an in-memory set they already built for the trip

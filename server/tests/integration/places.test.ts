@@ -302,6 +302,25 @@ describe('Update place', () => {
     expect(cleared.body.place.provider_place_id).toBeNull();
   });
 
+  it('rejects incomplete provider identity pairs and blank create IDs', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const blank = await request(app).post(`/api/trips/${trip.id}/places`).set('Cookie', authCookie(user.id))
+      .send({ name: 'Blank', provider: 'amap', provider_place_id: '   ' });
+    expect(blank.status).toBe(400);
+    const place = createPlace(testDb, trip.id, { name: 'Pair' });
+    const onlyProvider = await request(app).put(`/api/trips/${trip.id}/places/${place.id}`).set('Cookie', authCookie(user.id))
+      .send({ provider: 'amap' });
+    expect(onlyProvider.status).toBe(200);
+    expect(onlyProvider.body.place.provider).toBe('amap');
+    expect(onlyProvider.body.place.provider_place_id).toBeNull();
+    const onlyId = await request(app).put(`/api/trips/${trip.id}/places/${place.id}`).set('Cookie', authCookie(user.id))
+      .send({ provider_place_id: 'B0' });
+    expect(onlyId.status).toBe(400);
+    const unknown = await request(app).put(`/api/trips/${trip.id}/places/${place.id}`).set('Cookie', authCookie(user.id))
+      .send({ provider: 'unknown', provider_place_id: 'B0' });
+    expect(unknown.status).toBe(400);
+  });
 
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
