@@ -322,6 +322,7 @@ describe('Update place', () => {
     expect(unknown.status).toBe(400);
   });
 
+  it('PLACE-005 — PUT returns 404 for a non-existent place', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 

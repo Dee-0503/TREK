@@ -291,7 +291,7 @@ describe('Places e2e (real auth guard + temp SQLite)', () => {
     expect(updated.body.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0NEW', google_place_id: null });
   });
 
-
+  it('404 trip when not accessible', async () => {
     canAccessTrip.mockReturnValue(undefined);
     const res = await request(server).get('/api/trips/5/places').set('Cookie', sessionCookie(1));
     expect(res.status).toBe(404);

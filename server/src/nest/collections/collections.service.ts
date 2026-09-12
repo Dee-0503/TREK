@@ -449,11 +449,20 @@ export class CollectionsService {
       ORDER BY id ASC LIMIT 1
     `, collectionId, provider, providerPlaceId);
         }
-        hit ??= this.db.get<{ id: number; name: string }>(`
+
+        if (!hit && provider === 'google') {
+          hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
-      WHERE collection_id = ? AND (google_place_id = ? OR google_ftid = ? OR osm_id = ?)
+      WHERE collection_id = ? AND (google_place_id = ? OR google_ftid = ?)
       ORDER BY id ASC LIMIT 1
-    `, collectionId, providerPlaceId, providerPlaceId, providerPlaceId);
+    `, collectionId, providerPlaceId, providerPlaceId);
+        } else if (!hit && (provider === 'osm' || provider === 'openstreetmap')) {
+          hit = this.db.get<{ id: number; name: string }>(`
+      SELECT id, name FROM collection_places
+      WHERE collection_id = ? AND osm_id = ?
+      ORDER BY id ASC LIMIT 1
+    `, collectionId, providerPlaceId);
+        }
       } else if (strategy.by === 'name') {
         hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
@@ -624,9 +633,10 @@ export class CollectionsService {
       place_id: number; name: string; address: string | null; lat: number | null; lng: number | null;
       category_id: number | null; image_url: string | null; day_number: number | null; date: string | null;
       google_place_id: string | null; google_ftid: string | null; osm_id: string | null;
+      provider: string | null; provider_place_id: string | null;
     }>(`
       SELECT p.id AS place_id, p.name, p.address, p.lat, p.lng, p.category_id, p.image_url,
-             p.google_place_id, p.google_ftid, p.osm_id,
+             p.provider, p.provider_place_id, p.google_place_id, p.google_ftid, p.osm_id,
              (SELECT MIN(d.day_number) FROM day_assignments da
                 JOIN days d ON d.id = da.day_id
                WHERE da.place_id = p.id AND d.trip_id = p.trip_id) AS day_number,

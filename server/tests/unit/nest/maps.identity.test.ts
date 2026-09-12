@@ -22,7 +22,7 @@ vi.mock('../../../src/utils/ssrfGuard', () => ({
 import { db } from '../../../src/db/database';
 import { DatabaseService } from '../../../src/nest/database/database.service';
 import { MapsService } from '../../../src/nest/maps/maps.service';
-import { toWikiLang, haversineMetres, namesOverlap } from '../../../src/nest/maps/maps.helpers';
+import { toWikiLang, haversineMetres, namesOverlap, isGooglePlaceId } from '../../../src/nest/maps/maps.helpers';
 
 const svcOf = () => new MapsService(new DatabaseService(db as never), {} as never);
 
@@ -192,7 +192,15 @@ describe('resolveOsmIdentity', () => {
   });
 });
 
-describe('fetchWikidataSitelinks', () => {
+describe('place-id provider routing', () => {
+  it('MAPS-174: never classifies an AMap identity as a Google place id', () => {
+    expect(isGooglePlaceId('amap:ChIJ-amap')).toBe(false);
+    expect(isGooglePlaceId('amap:123456')).toBe(false);
+    expect(isGooglePlaceId('ChIJ-google')).toBe(true);
+  });
+});
+
+
   it('MAPS-171: asks only for the sites it will use', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

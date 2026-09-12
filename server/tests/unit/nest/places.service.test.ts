@@ -1345,7 +1345,7 @@ describe('zero-valued numeric fields', () => {
     expect(getPlacePhoto).not.toHaveBeenCalled();
   });
 
-
+  it('PLACE-SVC-065 — create preserves zero coordinates', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
     const place = svc.create(String(trip.id), { name: 'Null Island', lat: 0, lng: 0 }) as any;

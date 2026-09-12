@@ -23,6 +23,7 @@ import {
   googleMapsHexId,
   externalIdsOf,
   isPlaceDuplicate,
+  pickEnrichmentMatch,
   KMZ_DECOMPRESSED_SIZE_LIMIT,
   mapWithConcurrency,
   trackInsertedInDedupSet,
@@ -175,7 +176,26 @@ describe('googleMapsHexId / googleMapsFeatureIdFromItem', () => {
   });
 });
 
-// ── Enrichment plumbing ───────────────────────────────────────────────────────
+describe('pickEnrichmentMatch provider identity', () => {
+  it('accepts nested AMap providerIdentity candidates', () => {
+    const match = pickEnrichmentMatch([
+      {
+        providerIdentity: { provider: 'amap', providerPlaceId: '  raw-amap-id  ' },
+        lat: 31.2304,
+        lng: 121.4737,
+      },
+    ], { lat: 31.2304, lng: 121.4737 });
+
+    expect(match?.providerIdentity).toEqual({ provider: 'amap', providerPlaceId: '  raw-amap-id  ' });
+  });
+
+  it('ignores coordinate-only candidates without provider identity', () => {
+    expect(pickEnrichmentMatch([
+      { lat: 31.2304, lng: 121.4737 },
+    ], { lat: 31.2304, lng: 121.4737 })).toBeNull();
+  });
+});
+
 
 describe('mapWithConcurrency / trimOrNull', () => {
   it('visits every item and never runs more than `limit` at once', async () => {
