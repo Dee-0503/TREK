@@ -143,7 +143,8 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-
+@Injectable()
+export class AmapProvider implements MapsProvider {
   readonly id = 'amap' as const;
 
   private get base(): string { return readEnv().maps.amapApiBase; }
