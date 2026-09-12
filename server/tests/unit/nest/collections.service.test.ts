@@ -368,7 +368,33 @@ describe('status + updatePlace move', () => {
 // ── copy to trip ─────────────────────────────────────────────────────────────
 
 describe('copyToTrip', () => {
-  it('COLLECTIONS-SVC-020: reduced INSERT (itinerary defaults), skips dups, copies tags', () => {
+  it('COLLECTIONS-SVC-020A: bulk copy preserves AMap identity and provider duplicate matching', () => {
+    const u = createUser(testDb).user;
+    const trip = createTrip(testDb, u.id);
+    const col = svc.createCollection(u.id, { name: 'AMap collection' });
+    const saved = svc.savePlace(u.id, {
+      collection_id: col.id,
+      name: '人民公园',
+      provider: 'amap',
+      provider_place_id: 'B0FFFAB6J2',
+      google_place_id: null,
+    }).place!;
+
+    const copied = svc.copyToTrip(u.id, { trip_id: trip.id, place_ids: [saved.id] });
+    expect(copied).toEqual({ copied: 1, skipped: [] });
+
+    const inserted = testDb.prepare(
+      'SELECT provider, provider_place_id, google_place_id FROM places WHERE trip_id = ? AND name = ?',
+    ).get(trip.id, '人民公园') as { provider: string | null; provider_place_id: string | null; google_place_id: string | null };
+    expect(inserted).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+
+    // Rename the source and copy it again: only provider identity can match now.
+    testDb.prepare('UPDATE collection_places SET name = ? WHERE id = ?').run('Renamed park', saved.id);
+    const duplicate = svc.copyToTrip(u.id, { trip_id: trip.id, place_ids: [saved.id] });
+    expect(duplicate).toEqual({ copied: 0, skipped: [{ id: saved.id, name: 'Renamed park' }] });
+  });
+
+
     const u = createUser(testDb).user;
     createCategory(testDb);
     const trip = createTrip(testDb, u.id);
