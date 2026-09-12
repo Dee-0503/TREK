@@ -1344,8 +1344,7 @@ describe('zero-valued numeric fields', () => {
     expect(row).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null, google_ftid: null });
     expect(getPlacePhoto).not.toHaveBeenCalled();
   });
-
-
+  it('PLACE-SVC-065 — create keeps lat/lng of exactly 0 instead of nulling them', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
     const place = svc.create(String(trip.id), { name: 'Null Island', lat: 0, lng: 0 }) as any;
@@ -1356,6 +1355,7 @@ describe('zero-valued numeric fields', () => {
     expect(noCoords.lat).toBeNull();
     expect(noCoords.lng).toBeNull();
   });
+
 
   it('PLACE-SVC-066 — create keeps duration_minutes and price of 0', () => {
     const { user } = createUser(testDb);

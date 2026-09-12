@@ -583,6 +583,7 @@ describe('result cache', () => {
     expect(mockDbGet).toHaveBeenCalledWith(expect.stringContaining('place_details_cache'), `coords:${req.lat}:${req.lng}`, '', 2);
     expect(mockDbRun).toHaveBeenCalledWith(expect.stringContaining('INSERT OR REPLACE INTO place_details_cache'), `coords:${req.lat}:${req.lng}`, '', 2, expect.any(String), expect.any(Number));
   });
+  it('ENRICH-022: refetches once the entry is older than a week', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
     const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
     mockDbGet.mockImplementation((sql: string) =>
@@ -593,6 +594,7 @@ describe('result cache', () => {
 
     expect(maps.fetchCommonsCandidates).toHaveBeenCalled();
   });
+
 
   it('ENRICH-023: rebuilds when the nightly sweep removed a cached candidate', async () => {
     // The sweep deletes every picture nobody picked, so this is the normal state

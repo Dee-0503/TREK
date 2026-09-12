@@ -235,8 +235,7 @@ describe('saved places + dedup', () => {
     expect(duplicate.duplicate).toBe(true);
     expect(testDb.prepare('SELECT google_place_id FROM collection_places WHERE id = ?').get(first.place!.id)).toEqual({ google_place_id: null });
   });
-
-
+  it('COLLECTIONS-SVC-102: saveFromTripPlaces skips a place already saved by provider identity', () => {
     // savePlace was not the only caller. The bulk copy carries the provider ids
     // into the row it writes, so asking without them would recognise less than
     // the row it just wrote already knows.
@@ -252,6 +251,7 @@ describe('saved places + dedup', () => {
     expect(out.copied).toBe(0);
     expect(out.skipped.map(s => s.name)).toEqual(['Trattoria da Enzo']);
   });
+
 
   it('COLLECTIONS-SVC-103: the import picker marks that same place as already saved', () => {
     // The dialog and the import have to agree: a row shown as new that the import
@@ -295,8 +295,7 @@ describe('saveFromTripPlace', () => {
     const result = svc.saveFromTripPlace(u.id, col.id, trip.id, place.id);
     expect(result.place).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null });
   });
-
-
+  it('COLLECTIONS-SVC-014b: saveFromTripPlace rejects an inaccessible source trip', () => {
     const owner = createUser(testDb).user;
     const stranger = createUser(testDb).user;
     createCategory(testDb);
@@ -307,6 +306,7 @@ describe('saveFromTripPlace', () => {
     expect(() => svc.saveFromTripPlace(stranger.id, col.id, trip.id, place.id)).toThrow();
     try { svc.saveFromTripPlace(stranger.id, col.id, trip.id, place.id); } catch (e) { expect((e as { status: number }).status).toBe(404); }
   });
+
 });
 
 // ── status + move ────────────────────────────────────────────────────────────
@@ -393,8 +393,7 @@ describe('copyToTrip', () => {
     const duplicate = svc.copyToTrip(u.id, { trip_id: trip.id, place_ids: [saved.id] });
     expect(duplicate).toEqual({ copied: 0, skipped: [{ id: saved.id, name: 'Renamed park' }] });
   });
-
-
+  it('COLLECTIONS-SVC-020: copies places, skips duplicates, and copies tags', () => {
     const u = createUser(testDb).user;
     createCategory(testDb);
     const trip = createTrip(testDb, u.id);

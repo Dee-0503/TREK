@@ -997,7 +997,7 @@ export class CollectionsService {
     const insertPlace = this.db.prepare(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price,
       currency, notes, image_url, provider, provider_place_id, google_place_id, google_ftid, website, phone, osm_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     const insertTag = this.db.prepare('INSERT OR IGNORE INTO place_tags (place_id, tag_id) VALUES (?, ?)');
     const insertRating = this.db.prepare('INSERT OR IGNORE INTO place_ratings (place_id, user_id, rating) VALUES (?, ?, ?)');
