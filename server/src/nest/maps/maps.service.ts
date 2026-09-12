@@ -1666,7 +1666,8 @@ export class MapsService {
     context?: ProviderContext,
   ): Promise<{ place: Record<string, unknown> | null }> {
     // AMap ids are explicitly namespaced; only the AMap provider may resolve them.
-    if (placeId.startsWith('amap:') && this.amapProvider) {
+    if (placeId.startsWith('amap:')) {
+      if (!this.amapProvider) return { place: null };
       const result = await this.amapProvider.getDetails(placeId, { lang, context });
       return { place: result.place as Record<string, unknown> };
     }
@@ -1805,7 +1806,8 @@ export class MapsService {
     // pseudo-ids and legacy image URLs have no details source at all. Neither may be
     // forwarded to Google, which bills the 400 INVALID_ARGUMENT it answers with.
     if (!isGooglePlaceId(placeId)) {
-      if (placeId.startsWith('amap:') && this.amapProvider) {
+      if (placeId.startsWith('amap:')) {
+        if (!this.amapProvider) return { place: null };
         const result = await this.amapProvider.getDetails(placeId, { lang, context });
         return { place: result.place as Record<string, unknown> };
       }

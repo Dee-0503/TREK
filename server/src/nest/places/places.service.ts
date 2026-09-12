@@ -568,17 +568,20 @@ export class PlacesService {
     for (const strategy of placeMatchStrategies(place)) {
       let hit: { id: number; google_ftid: string | null } | undefined;
       if (strategy.by === 'externalId') {
+        const separator = strategy.id.indexOf(':');
+        const provider = separator >= 0 ? strategy.id.slice(0, separator) : '';
+        const providerPlaceId = separator >= 0 ? strategy.id.slice(separator + 1) : '';
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places
       WHERE trip_id = ? AND (
         (provider IS NOT NULL AND provider_place_id IS NOT NULL AND provider || ':' || provider_place_id = ?)
-        OR (provider = 'google' AND google_place_id = ?)
-        OR (provider = 'google' AND google_ftid = ?)
-        OR (provider = 'osm' AND osm_id = ?)
+        OR ((provider = 'google' OR provider IS NULL) AND google_place_id = ?)
+        OR ((provider = 'google' OR provider IS NULL) AND google_ftid = ?)
+        OR ((provider = 'osm' OR provider IS NULL) AND osm_id = ?)
       )
       ORDER BY id ASC
       LIMIT 1
-    `, tripId, strategy.id, strategy.id, strategy.id, strategy.id);
+    `, tripId, strategy.id, provider === 'google' ? providerPlaceId : null, provider === 'google' ? providerPlaceId : null, provider === 'osm' ? providerPlaceId : null);
       } else if (strategy.by === 'name') {
         hit = this.dbs.get<{ id: number; google_ftid: string | null }>(`
       SELECT id, google_ftid FROM places

@@ -201,6 +201,7 @@ describe('place-id provider routing', () => {
 });
 
 
+describe('wikidata sitelinks', () => {
   it('MAPS-171: asks only for the sites it will use', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -262,6 +262,17 @@ describe('saved places + dedup', () => {
     expect(duplicate.duplicate).toBe(true);
   });
 
+  it('COLLECTIONS-SVC-108b: legacy Google and OSM ids match provider-null rows', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Legacy null provider' });
+    const google = svc.savePlace(u.id, { collection_id: col.id, name: 'Google legacy', google_place_id: 'legacy-google' }).place!;
+    const osm = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM legacy', osm_id: 'node:legacy' }).place!;
+    testDb.prepare('UPDATE collection_places SET provider = NULL, provider_place_id = NULL WHERE id IN (?, ?)').run(google.id, osm.id);
+
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'Google renamed', provider: 'google', provider_place_id: 'legacy-google' }).duplicate).toBe(true);
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'OSM renamed', provider: 'openstreetmap', provider_place_id: 'node:legacy' }).duplicate).toBe(true);
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'AMap collision', provider: 'amap', provider_place_id: 'legacy-google' }).duplicate).toBe(false);
+  });
   it('COLLECTIONS-SVC-108: legacy fallback is provider-scoped and excludes AMap', () => {
     const u = createUser(testDb).user;
     const col = svc.createCollection(u.id, { name: 'Legacy scope' });

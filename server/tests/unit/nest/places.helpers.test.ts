@@ -145,7 +145,7 @@ describe('isPlaceDuplicate / trackInsertedInDedupSet', () => {
   });
 
   it('externalIdsOf trims and drops empties', () => {
-    expect(externalIdsOf({ google_place_id: ' ChIJ ', google_ftid: '', osm_id: null })).toEqual(['ChIJ']);
+    expect(externalIdsOf({ google_place_id: ' ChIJ ', google_ftid: '', osm_id: null })).toEqual(['google:ChIJ']);
     expect(externalIdsOf({})).toEqual([]);
   });
 });

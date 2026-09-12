@@ -237,6 +237,21 @@ describe('Tool: update_place', () => {
     });
   });
 
+  it('accepts osm_id on update_place and persists the legacy identity', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'OSM place' });
+
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({
+        name: 'update_place',
+        arguments: { tripId: trip.id, placeId: place.id, osm_id: 'way:12345' },
+      });
+      expect(result.isError).not.toBe(true);
+    });
+
+    expect(testDb.prepare('SELECT osm_id FROM places WHERE id = ?').get(place.id)).toEqual({ osm_id: 'way:12345' });
+  });
   it('broadcasts place:updated event', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);

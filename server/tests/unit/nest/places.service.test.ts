@@ -1675,6 +1675,19 @@ describe('findMatchingPlaceId', () => {
     }, dedup)).toBe(true);
   });
 
+  it('PLACES-SVC-010b — legacy Google and OSM ids match rows left provider-null by migration', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const google = createPlace(testDb, trip.id, { name: 'Legacy Google' });
+    const osm = createPlace(testDb, trip.id, { name: 'Legacy OSM' });
+    testDb.prepare('UPDATE places SET google_place_id = ? WHERE id = ?').run('ChIJ_legacy', google.id);
+    testDb.prepare('UPDATE places SET osm_id = ? WHERE id = ?').run('node:legacy', osm.id);
+
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'Renamed Google', provider: 'google', provider_place_id: 'ChIJ_legacy' })).toBe(google.id);
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'Renamed OSM', provider: 'openstreetmap', provider_place_id: 'node:legacy' })).toBe(osm.id);
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'AMap collision', provider: 'amap', provider_place_id: 'ChIJ_legacy' })).toBeNull();
+  });
+
   it('PLACES-SVC-011 — does NOT match a NAMED candidate to a different place at the same coordinates', () => {
     // The restaurant and the bar in the same building are two places. This is the
     // rule isPlaceDuplicate has always applied; the SQL copy used to disagree.

@@ -179,6 +179,7 @@ export class PlacesMcp {
       provider_place_id: z.string().trim().min(1).nullable().optional().describe('Provider-qualified place ID from search_place'),
       google_place_id: z.string().optional().describe('Legacy Google Place ID; prefer provider/provider_place_id'),
       google_ftid: z.string().optional().describe('Google Maps feature ID (e.g. "0x89c259b7abdd4769:0x103aaf1c8bf8a050")'),
+      osm_id: z.string().optional().describe('Legacy OpenStreetMap ID (e.g. "way:12345"); prefer provider/provider_place_id'),
     },
     annotations: TOOL_ANNOTATIONS_WRITE,
     access: { group: 'places', mode: 'write' },

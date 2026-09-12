@@ -1670,6 +1670,15 @@ describe('getPlaceDetails (fetch stubbed)', () => {
     await expect(svc.getPlaceDetailsExpanded(999, 'ChIJNotAnOsmId', 'en', false)).resolves.toEqual({ place: null });
   });
 
+  it('MAPS-041a: an AMap id never falls through to OSM when AMap is unavailable', async () => {
+    mockDbGet.mockReturnValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(svc.getPlaceDetails(999, 'amap:B0FFFAB6J2')).resolves.toEqual({ place: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('MAPS-041b: returns full Google place details on happy path', async () => {
     mockDbGet.mockReturnValueOnce({ maps_api_key: 'gkey' });
     vi.stubGlobal(

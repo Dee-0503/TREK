@@ -438,7 +438,9 @@ export class CollectionsService {
     collectionId: number,
     candidate: PlaceMatchCandidate,
   ): { id: number; name: string } | null {
-    const candidateProvider = typeof candidate.provider === 'string' && candidate.provider === 'openstreetmap' ? 'osm' : candidate.provider;
+    const candidateProvider = typeof candidate.provider === 'string'
+      ? (candidate.provider === 'openstreetmap' ? 'osm' : candidate.provider)
+      : candidate.provider;
     const providerScope = candidateProvider ? ' AND (provider = ? OR provider IS NULL)' : '';
     for (const strategy of placeMatchStrategies(candidate)) {
       let hit: { id: number; name: string } | undefined;
@@ -464,7 +466,7 @@ export class CollectionsService {
         } else if (!hit && provider === 'osm') {
           hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
-      WHERE collection_id = ? AND osm_id = ? AND provider = 'osm'
+      WHERE collection_id = ? AND osm_id = ? AND (provider = 'osm' OR provider IS NULL)
       ORDER BY id ASC LIMIT 1
     `, collectionId, providerPlaceId);
         }
@@ -1071,13 +1073,14 @@ export class CollectionsService {
 
     const conditions: string[] = [];
     const params: (string | number)[] = [...ids];
-    if (query.provider && query.provider_place_id) {
+    const queryProvider = query.provider === 'openstreetmap' ? 'osm' : query.provider;
+    if (queryProvider && query.provider_place_id) {
       conditions.push('(cp.provider = ? AND cp.provider_place_id = ?)');
-      params.push(query.provider, query.provider_place_id);
+      params.push(queryProvider, query.provider_place_id);
     }
     if (query.google_place_id) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_place_id = ?"); params.push(query.google_place_id); }
     if (query.google_ftid) { conditions.push("(cp.provider = 'google' OR cp.provider IS NULL) AND cp.google_ftid = ?"); params.push(query.google_ftid); }
-    if (query.osm_id) { conditions.push("(cp.provider = 'osm' OR cp.provider = 'openstreetmap' OR cp.provider IS NULL) AND cp.osm_id = ?"); params.push(query.osm_id); }
+    if (query.osm_id) { conditions.push("(cp.provider = 'osm' OR cp.provider IS NULL) AND cp.osm_id = ?"); params.push(query.osm_id); }
     // Coordinate proximity is the location signal. A bare NAME match is deliberately
     // NOT a condition on its own — "Starbucks" (or any repeated name) would otherwise
     // false-positive the inspector's "already saved" bookmark. When coords are given

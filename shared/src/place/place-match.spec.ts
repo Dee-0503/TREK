@@ -36,7 +36,7 @@ describe('externalIdsOf', () => {
   it('keeps provider order: place_id, ftid, osm', () => {
     expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual(['google:p', 'google:f', 'osm:node/42']);
   });
-
+});
 
 describe('placeMatchStrategies', () => {
   it('puts every provider id first, one strategy each, in provider order', () => {
