@@ -8,10 +8,20 @@ import { withinDriveRange } from '../utils/geo'
 import { resolveLegMode } from '../components/Planner/legMode'
 import type { TripStoreState } from '../store/tripStore'
 import type { RouteSegment, RouteResult, RouteVia, Accommodation, RouteWithLegs } from '../types'
+import type { RouteProviderOverride } from '@trek/shared'
 
 const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other']
 
-const NO_ACCOMMODATIONS: Accommodation[] = []
+function aggregateRouteSources(sources: RouteWithLegs['routeSource'][]): RouteWithLegs['routeSource'] | null {
+  if (!sources.length) return null
+  const fallback = sources.find(source => source.fallback)
+  const providers = new Set(sources.map(source => source.provider))
+  if (providers.size > 1) {
+    return { provider: 'osrm', fallback: true, fallbackReason: 'mixed_provider' }
+  }
+  if (fallback) return { provider: fallback.provider, fallback: true, fallbackReason: fallback.fallbackReason ?? 'provider_failure' }
+  return sources[0]
+}
 
 /**
  * Manages route calculation state for a selected day. Extracts geo-coded waypoints from
@@ -20,7 +30,7 @@ const NO_ACCOMMODATIONS: Accommodation[] = []
  */
 export interface RouteCalculationContext {
   countryCode?: string
-  providerOverride?: 'amap' | 'osm'
+  providerOverride?: RouteProviderOverride
 }
 
 export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: number | null, enabled: boolean = true, profile: RouteProfileKey = 'driving', accommodations: Accommodation[] = NO_ACCOMMODATIONS, routeContext: RouteCalculationContext = {}) {
@@ -282,7 +292,7 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
         setRoute(polylines)
         setRouteSegments(allLegs)
         setRouteInfo(null)
-        setRouteSource(allRouteSources.length ? allRouteSources[allRouteSources.length - 1] : null)
+        setRouteSource(aggregateRouteSources(allRouteSources))
         setRouteVias(allVias)
       }
     } catch (err: unknown) {

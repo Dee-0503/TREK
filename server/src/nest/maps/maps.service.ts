@@ -531,6 +531,10 @@ type LocationBias = { low: { lat: number; lng: number }; high: { lat: number; ln
  * inline; they're encapsulated here as `*Disabled()` helpers over the same
  * `app_settings` rows.
  */
+const FALLBACK_ROUTE_ERRORS = new Set([
+  'timeout', 'rate_limit', 'permission', 'unsupported', 'empty_route', 'invalid_response', 'server', 'connectivity', 'provider',
+])
+
 function projectPublicPlace(place: Record<string, unknown>): MapPlaceProjection {
   // Parsing with the shared response schema is the HTTP-boundary allowlist: Zod's
   // default stripping removes provider-owned fields rather than forwarding them.
@@ -660,6 +664,7 @@ export class MapsService {
         const reason = err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string'
           ? (err as { code: string }).code
           : 'provider_failure';
+        if (!FALLBACK_ROUTE_ERRORS.has(reason)) throw err;
         try {
           const fallback = await this.routeOsrm(profile, waypoints, signal);
           return { ...fallback, routeSource: { provider: 'osrm', fallback: true, fallbackReason: `amap_${reason}` } };

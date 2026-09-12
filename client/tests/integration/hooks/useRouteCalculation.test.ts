@@ -60,7 +60,28 @@ describe('useRouteCalculation', () => {
     (calculateRouteWithLegs as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_ROUTE_WITH_LEGS);
   });
 
-  it('FE-HOOK-ROUTE-035: forwards geographic context and exposes route source metadata', async () => {
+  it('aggregates fallback and mixed-provider route sources across chunks', async () => {
+    const p1 = buildPlace({ lat: 31.23, lng: 121.47 })
+    const p2 = buildPlace({ lat: 31.24, lng: 121.48 })
+    const p3 = buildPlace({ lat: 31.25, lng: 121.49 })
+    buildMockStore({ '5': [
+      buildAssignment({ day_id: 5, order_index: 0, place: p1 }),
+      buildAssignment({ day_id: 5, order_index: 1, place: p2 }),
+      buildAssignment({ day_id: 5, order_index: 2, place: p3 }),
+    ] })
+    ;(calculateRouteWithLegs as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'amap', fallback: false } })
+      .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' } })
+    const { result } = renderHook(() => useRouteCalculation(buildMockStore({ '5': [
+      buildAssignment({ day_id: 5, order_index: 0, place: p1 }),
+      buildAssignment({ day_id: 5, order_index: 1, place: p2 }),
+      buildAssignment({ day_id: 5, order_index: 2, place: p3 }),
+    ] }) as TripStoreState, 5))
+    await act(async () => {})
+    expect(result.current.routeSource).toEqual({ provider: 'osrm', fallback: true, fallbackReason: 'mixed_provider' })
+  })
+
+
     const p1 = buildPlace({ lat: 31.23, lng: 121.47 })
     const p2 = buildPlace({ lat: 31.24, lng: 121.48 })
     const store = buildMockStore({ '5': [

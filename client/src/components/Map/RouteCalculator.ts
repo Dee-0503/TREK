@@ -1,6 +1,7 @@
 import { useSettingsStore } from '../../store/settingsStore'
 import { pluginsApi, mapsApi } from '../../api/client'
 import type { DistanceUnit, RouteResult, RouteSegment, Waypoint, RouteAnchors, RouteWithLegs as SharedRouteWithLegs } from '../../types'
+import type { RouteProviderOverride } from '@trek/shared'
 import { formatDistance } from '../../utils/units'
 
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
@@ -286,7 +287,7 @@ export async function calculateSegments(
  */
 export async function calculateRouteWithLegs(
   waypoints: Waypoint[],
-  { signal, profile = 'driving', tripId, dayId, countryCode, providerOverride }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string; providerOverride?: 'amap' | 'osm' } = {}
+  { signal, profile = 'driving', tripId, dayId, countryCode, providerOverride }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string; providerOverride?: RouteProviderOverride } = {}
 ): Promise<SharedRouteWithLegs> {
   if (!waypoints || waypoints.length < 2) {
     return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }

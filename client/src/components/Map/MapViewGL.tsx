@@ -1549,7 +1549,7 @@ export function MapViewGL({
   return (
     <div className="w-full h-full relative">
       {routeSourceLabel && (
-        <div role="status" aria-live="polite" className="absolute top-3 left-1/2 z-[30] -translate-x-1/2 rounded-full bg-surface-elevated px-3 py-1 text-content-secondary shadow-sm">
+        <div role="status" aria-live="polite" aria-label={`Route source: ${routeSourceLabel}`} className="absolute top-3 left-1/2 z-[30] -translate-x-1/2 rounded-full bg-surface-elevated px-3 py-1 text-content-secondary shadow-sm">
           Route source: {routeSourceLabel}
         </div>
       )}
