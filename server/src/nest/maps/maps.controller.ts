@@ -14,12 +14,14 @@ import type { Response } from 'express';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type {
+  GeographicContext,
   MapsAutocompleteResult,
   MapsPlaceDetailsResult,
   MapsPlacePhotoResult,
   MapsResolveUrlResult,
   MapsReverseResult,
   MapsSearchResult,
+  ProviderOverride,
 } from '@trek/shared';
 import type { User } from '../../types';
 import { MapsService } from './maps.service';
@@ -33,6 +35,34 @@ import { MapsSearchDto, MapsAutocompleteDto, MapsResolveUrlDto } from './maps.dt
  *  autocomplete body is validated by the Zod pipe; the details query is not,
  *  so it is checked here rather than forwarded blindly. */
 const SESSION_TOKEN = /^[A-Za-z0-9_-]{1,36}$/;
+const PROVIDER_OVERRIDES = new Set<ProviderOverride>(['google', 'amap', 'osm']);
+
+function parseGeographicContext(values: {
+  countryCode?: string;
+  latitude?: string;
+  longitude?: string;
+  providerOverride?: string;
+}): GeographicContext & { override?: ProviderOverride } {
+  const context: GeographicContext & { override?: ProviderOverride } = {};
+  if (values.countryCode) {
+    if (!/^[A-Za-z]{2}$/.test(values.countryCode)) throw new HttpException({ error: 'Invalid countryCode' }, 400);
+    context.countryCode = values.countryCode.toUpperCase();
+  }
+  for (const [key, raw, min, max] of [
+    ['latitude', values.latitude, -90, 90],
+    ['longitude', values.longitude, -180, 180],
+  ] as const) {
+    if (raw === undefined) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < min || value > max) throw new HttpException({ error: `Invalid ${key}` }, 400);
+    context[key] = value;
+  }
+  if (values.providerOverride !== undefined) {
+    if (!PROVIDER_OVERRIDES.has(values.providerOverride as ProviderOverride)) throw new HttpException({ error: 'Invalid providerOverride' }, 400);
+    context.override = values.providerOverride as ProviderOverride;
+  }
+  return context;
+}
 
 /** Maps a thrown service error to the same status + { error } body Express sent. */
 function toHttpException(err: unknown, fallbackMessage: string, defaultStatus: number): HttpException {
@@ -74,9 +104,14 @@ export class MapsController {
     @CurrentUser() user: User,
     @Body() body: MapsSearchDto,
     @Query('lang') lang?: string,
+    @Query('countryCode') countryCode?: string,
+    @Query('latitude') latitude?: string,
+    @Query('longitude') longitude?: string,
+    @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsSearchResult> {
+    const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
     try {
-      return await this.maps.search(user.id, body.query, lang, body.locationBias);
+      return await this.maps.search(user.id, body.query, lang, body.locationBias, context);
     } catch (err: unknown) {
       console.error('Maps search error:', err);
       throw toHttpException(err, 'Search error', 500);
@@ -115,7 +150,12 @@ export class MapsController {
       return { suggestions: [], source: 'disabled' };
     }
     try {
-      return await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken);
+      return await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken, {
+        countryCode: body.countryCode,
+        latitude: body.locationBias?.low.lat,
+        longitude: body.locationBias?.low.lng,
+        override: body.providerOverride,
+      });
     } catch (err: unknown) {
       console.error('Maps autocomplete error:', err);
       throw toHttpException(err, 'Autocomplete error', 500);
@@ -133,14 +173,18 @@ export class MapsController {
     // it matches Google's shape, so a junk value bills per request instead of
     // breaking the lookup.
     @Query('sessionToken') sessionToken?: string,
+    @Query('countryCode') countryCode?: string,
+    @Query('latitude') latitude?: string,
+    @Query('longitude') longitude?: string,
+    @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsPlaceDetailsResult> {
     if (this.maps.detailsDisabled()) {
       return { place: null, disabled: true };
     }
     try {
       return expand
-        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1')
-        : await this.maps.details(user.id, placeId, lang, SESSION_TOKEN.test(sessionToken ?? '') ? sessionToken : undefined);
+        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1', parseGeographicContext({ countryCode, latitude, longitude, providerOverride }))
+        : await this.maps.details(user.id, placeId, lang, SESSION_TOKEN.test(sessionToken ?? '') ? sessionToken : undefined, parseGeographicContext({ countryCode, latitude, longitude, providerOverride }));
     } catch (err: unknown) {
       console.error('Maps details error:', err);
       throw toHttpException(err, 'Error fetching place details', 500);
@@ -228,12 +272,16 @@ export class MapsController {
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
     @Query('lang') lang?: string,
+    @Query('countryCode') countryCode?: string,
+    @Query('latitude') latitude?: string,
+    @Query('longitude') longitude?: string,
+    @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsReverseResult> {
     if (!lat || !lng) {
       throw new HttpException({ error: 'lat and lng required' }, 400);
     }
     try {
-      return await this.maps.reverse(lat, lng, lang);
+      return await this.maps.reverse(lat, lng, lang, parseGeographicContext({ countryCode, latitude, longitude, providerOverride }));
     } catch {
       // The legacy route swallows reverse-geocode failures into an empty result.
       return { name: null, address: null };

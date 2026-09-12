@@ -41,6 +41,7 @@ import {
   type OverpassPoi,
 } from './maps.helpers';
 import { ProviderRouter } from './providers/provider-router';
+import type { ProviderContext } from './providers/provider-router';
 import { AmapProvider } from './providers/amap.provider';
 // ── Google API call counter ───────────────────────────────────────────────────
 
@@ -583,20 +584,20 @@ export class MapsService {
 
   // ── Controller-facing surface (unchanged signatures) ───────────────────────
 
-  search(userId: number, query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }): Promise<MapsSearchResult> {
-    return this.searchPlaces(userId, query, lang, locationBias).then(projectPublicSearchResult);
+  search(userId: number, query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }, context?: ProviderContext): Promise<MapsSearchResult> {
+    return this.searchPlaces(userId, query, lang, locationBias, context).then(projectPublicSearchResult);
   }
 
-  autocomplete(userId: number, input: string, lang?: string, locationBias?: LocationBias, sessionToken?: string): Promise<MapsAutocompleteResult> {
-    return this.autocompletePlaces(userId, input, lang, locationBias, sessionToken) as Promise<MapsAutocompleteResult>;
+  autocomplete(userId: number, input: string, lang?: string, locationBias?: LocationBias, sessionToken?: string, context?: ProviderContext): Promise<MapsAutocompleteResult> {
+    return this.autocompletePlaces(userId, input, lang, locationBias, sessionToken, context) as Promise<MapsAutocompleteResult>;
   }
 
-  details(userId: number, placeId: string, lang?: string, sessionToken?: string): Promise<MapsPlaceDetailsResult> {
-    return this.getPlaceDetails(userId, placeId, lang, sessionToken).then(projectPublicDetailsResult);
+  details(userId: number, placeId: string, lang?: string, sessionToken?: string, context?: ProviderContext): Promise<MapsPlaceDetailsResult> {
+    return this.getPlaceDetails(userId, placeId, lang, sessionToken, context).then(projectPublicDetailsResult);
   }
 
-  detailsExpanded(userId: number, placeId: string, lang: string | undefined, refresh: boolean): Promise<MapsPlaceDetailsResult> {
-    return this.getPlaceDetailsExpanded(userId, placeId, lang, refresh).then(projectPublicDetailsResult);
+  detailsExpanded(userId: number, placeId: string, lang: string | undefined, refresh: boolean, context?: ProviderContext): Promise<MapsPlaceDetailsResult> {
+    return this.getPlaceDetailsExpanded(userId, placeId, lang, refresh, context).then(projectPublicDetailsResult);
   }
 
   photo(userId: number, placeId: string, lat: number, lng: number, name?: string): Promise<MapsPlacePhotoResult> {
@@ -607,8 +608,8 @@ export class MapsService {
     return this.photoCache.serveKey(placeId);
   }
 
-  reverse(lat: string, lng: string, lang?: string): Promise<MapsReverseResult> {
-    return this.reverseGeocode(lat, lng, lang) as Promise<MapsReverseResult>;
+  reverse(lat: string, lng: string, lang?: string, context?: ProviderContext): Promise<MapsReverseResult> {
+    return this.reverseGeocode(lat, lng, lang, { context }) as Promise<MapsReverseResult>;
   }
 
   resolveUrl(url: string): Promise<MapsResolveUrlResult> {
@@ -1490,14 +1491,13 @@ export class MapsService {
     query: string,
     lang?: string,
     locationBias?: { lat: number; lng: number; radius?: number },
+    context: ProviderContext = {},
   ): Promise<{ places: Record<string, unknown>[]; source: string }> {
-    const provider = this.providerRouter?.resolvePlaceProvider({
-      latitude: locationBias?.lat,
-      longitude: locationBias?.lng,
-    });
+    const resolutionContext = { ...context, latitude: context.latitude ?? locationBias?.lat, longitude: context.longitude ?? locationBias?.lng };
+    const provider = this.providerRouter?.resolvePlaceProvider(resolutionContext);
     if (provider === 'amap' && this.amapProvider) {
-      const result = await this.amapProvider.search(query, { lang, locationBias });
-      return { places: result.places, source: result.source };
+      const result = await this.amapProvider.search(query, { lang, locationBias, context: resolutionContext });
+      return { places: result.places as Record<string, unknown>[], source: result.source };
     }
     const { key: apiKey, source: keySource } = this.resolveMapsKey(userId);
 
@@ -1569,10 +1569,11 @@ export class MapsService {
     lang?: string,
     locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } },
     sessionToken?: string,
+    context: ProviderContext = {},
   ): Promise<{ suggestions: { placeId: string; mainText: string; secondaryText: string }[]; source: string }> {
-    const provider = this.providerRouter?.resolvePlaceProvider();
+    const provider = this.providerRouter?.resolvePlaceProvider(context);
     if (provider === 'amap' && this.amapProvider) {
-      const result = await this.amapProvider.autocomplete(input, { lang, locationBias });
+      const result = await this.amapProvider.autocomplete(input, { lang, locationBias, context });
       return { suggestions: result.suggestions, source: result.source };
     }
     const { key: apiKey, source: keySource } = this.resolveMapsKey(userId);
@@ -1662,10 +1663,12 @@ export class MapsService {
     placeId: string,
     lang?: string,
     sessionToken?: string,
+    context?: ProviderContext,
   ): Promise<{ place: Record<string, unknown> | null }> {
     // AMap ids are explicitly namespaced; only the AMap provider may resolve them.
     if (placeId.startsWith('amap:') && this.amapProvider) {
-      return this.amapProvider.getDetails(placeId, { lang });
+      const result = await this.amapProvider.getDetails(placeId, { lang, context });
+      return { place: result.place as Record<string, unknown> };
     }
     // OSM details: placeId is "node:123456" or "way:123456" etc.
     if (placeId.includes(':')) {
@@ -1794,6 +1797,7 @@ export class MapsService {
     placeId: string,
     lang?: string,
     refresh = false,
+    context?: ProviderContext,
   ): Promise<{ place: Record<string, unknown> | null }> {
     // Reviews and the editorial summary only exist at Google, but the id does not
     // have to be a Google one — the client sends whatever the place carries. OSM ids
@@ -1801,7 +1805,7 @@ export class MapsService {
     // pseudo-ids and legacy image URLs have no details source at all. Neither may be
     // forwarded to Google, which bills the 400 INVALID_ARGUMENT it answers with.
     if (!isGooglePlaceId(placeId)) {
-      return OSM_PLACE_ID.test(placeId) ? this.getPlaceDetails(userId, placeId, lang) : { place: null };
+      return OSM_PLACE_ID.test(placeId) ? this.getPlaceDetails(userId, placeId, lang, undefined, context) : { place: null };
     }
 
     const langKey = toApiLang(lang); // 'en' default — see getPlaceDetails
@@ -2052,11 +2056,11 @@ export class MapsService {
     lat: string,
     lng: string,
     lang?: string,
-    opts?: { lane?: GeoLane; timeoutMs?: number },
+    opts?: { lane?: GeoLane; timeoutMs?: number; context?: ProviderContext },
   ): Promise<{ name: string | null; address: string | null }> {
-    const provider = this.providerRouter?.resolvePlaceProvider();
+    const provider = this.providerRouter?.resolvePlaceProvider(opts?.context ?? {});
     if (provider === 'amap' && this.amapProvider) {
-      return this.amapProvider.reverseGeocode({ lat: Number(lat), lng: Number(lng) }, { lang });
+      return this.amapProvider.reverseGeocode({ lat: Number(lat), lng: Number(lng) }, { lang, context: opts?.context });
     }
     const params = new URLSearchParams({
       lat,
