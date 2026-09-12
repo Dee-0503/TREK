@@ -503,8 +503,9 @@ export class PlacesService {
     const rows = this.dbs.all<{
       name: string | null; lat: number | null; lng: number | null;
       google_place_id: string | null; google_ftid: string | null; osm_id: string | null;
+      provider: PlaceProvider | null; provider_place_id: string | null;
     }>(
-      'SELECT name, lat, lng, google_place_id, google_ftid, osm_id FROM places WHERE trip_id = ?', tripId,
+      'SELECT name, lat, lng, google_place_id, google_ftid, osm_id, provider, provider_place_id FROM places WHERE trip_id = ?', tripId,
     );
     const names = new Set<string>();
     const coords: Array<{ lat: number; lng: number }> = [];

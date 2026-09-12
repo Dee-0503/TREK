@@ -14,7 +14,7 @@ import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/plac
 import { UnsplashService } from '../../../src/nest/unsplash/unsplash.service';
 import { RuntimeEnvService } from '../../../src/nest/app-config/runtime-env.service';
 import { TRACK_COLORS, COORD_DEDUP_TOLERANCE } from '@trek/shared';
-import { ADDRESS_BACKFILL_MAX_PLACES } from '../../../src/nest/places/places.helpers';
+import { ADDRESS_BACKFILL_MAX_PLACES, isPlaceDuplicate } from '../../../src/nest/places/places.helpers';
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
@@ -1659,7 +1659,23 @@ describe('findMatchingPlaceId', () => {
     ).toBe(place.id);
   });
 
-  it('PLACES-SVC-010 — does NOT match a NAMED candidate to a different place at the same coordinates', () => {
+  it('PLACES-SVC-010 — buildDedupSet matches a saved AMap identity during import duplicate checks', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'Saved AMap Place' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ? WHERE id = ?').run('amap', 'B0FFF', place.id);
+
+    const dedup = (svc as unknown as { buildDedupSet: (tripId: string) => Parameters<typeof isPlaceDuplicate>[1] })
+      .buildDedupSet(String(trip.id));
+
+    expect(isPlaceDuplicate({
+      name: 'Renamed During Import',
+      provider: 'amap',
+      provider_place_id: 'B0FFF',
+    }, dedup)).toBe(true);
+  });
+
+  it('PLACES-SVC-011 — does NOT match a NAMED candidate to a different place at the same coordinates', () => {
     // The restaurant and the bar in the same building are two places. This is the
     // rule isPlaceDuplicate has always applied; the SQL copy used to disagree.
     const { user } = createUser(testDb);
