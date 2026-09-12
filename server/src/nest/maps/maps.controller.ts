@@ -152,8 +152,8 @@ export class MapsController {
     try {
       return await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken, {
         countryCode: body.countryCode,
-        latitude: body.latitude,
-        longitude: body.longitude,
+        latitude: body.locationBias?.low.lat,
+        longitude: body.locationBias?.low.lng,
         override: body.providerOverride,
       });
     } catch (err: unknown) {

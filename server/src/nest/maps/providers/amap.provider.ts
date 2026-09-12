@@ -181,7 +181,6 @@ export class AmapProvider implements MapsProvider {
     const context = typeof options.context === 'object' && options.context !== null ? options.context as Record<string, unknown> : options;
     const params: Record<string, string> = { key: this.key ?? '', output: 'JSON' };
     if (typeof options.lang === 'string' && options.lang) params.language = toApiLang(options.lang);
-    if (typeof context.countryCode === 'string' && context.countryCode) params.city = context.countryCode;
     if (typeof options.city === 'string' && options.city) params.city = options.city;
     if (typeof options.location === 'string' && options.location) params.location = options.location;
     if (typeof options.locationBias === 'object' && options.locationBias !== null) {
