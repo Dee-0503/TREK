@@ -443,7 +443,9 @@ export class CollectionsService {
     for (const strategy of placeMatchStrategies(candidate)) {
       let hit: { id: number; name: string } | undefined;
       if (strategy.by === 'externalId') {
-        const [provider, providerPlaceId] = strategy.id.split(':', 2);
+        const separator = strategy.id.indexOf(':');
+        const provider = separator >= 0 ? strategy.id.slice(0, separator) : '';
+        const providerPlaceId = separator >= 0 ? strategy.id.slice(separator + 1) : '';
         if (provider && providerPlaceId) {
           hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
@@ -456,12 +458,13 @@ export class CollectionsService {
           hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
       WHERE collection_id = ? AND (google_place_id = ? OR google_ftid = ?)
+        AND (provider = 'google' OR provider IS NULL)
       ORDER BY id ASC LIMIT 1
     `, collectionId, providerPlaceId, providerPlaceId);
-        } else if (!hit && (provider === 'osm' || provider === 'openstreetmap')) {
+        } else if (!hit && provider === 'osm') {
           hit = this.db.get<{ id: number; name: string }>(`
       SELECT id, name FROM collection_places
-      WHERE collection_id = ? AND osm_id = ?
+      WHERE collection_id = ? AND osm_id = ? AND provider = 'osm'
       ORDER BY id ASC LIMIT 1
     `, collectionId, providerPlaceId);
         }

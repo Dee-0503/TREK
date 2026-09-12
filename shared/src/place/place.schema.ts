@@ -196,6 +196,8 @@ export const assignmentPlaceSchema = z.object({
   duration_minutes: z.number().nullable().optional(),
   notes: z.string().nullable().optional(),
   image_url: z.string().nullable().optional(),
+  provider: placeProviderSchema.nullable().optional(),
+  provider_place_id: z.string().nullable().optional(),
   transport_mode: z.string().nullable().optional(),
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),

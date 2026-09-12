@@ -30,10 +30,13 @@ describe('externalIdsOf', () => {
     ]);
   });
 
+  it('keeps provider-qualified ids intact when the provider id contains extra colons', () => {
+    expect(externalIdsOf({ provider: 'osm', provider_place_id: 'node:42:way' })).toEqual(['osm:node:42:way']);
+  });
   it('keeps provider order: place_id, ftid, osm', () => {
     expect(externalIdsOf({ osm_id: 'node/42', google_ftid: 'f', google_place_id: 'p' })).toEqual(['google:p', 'google:f', 'osm:node/42']);
   });
-});
+
 
 describe('placeMatchStrategies', () => {
   it('puts every provider id first, one strategy each, in provider order', () => {

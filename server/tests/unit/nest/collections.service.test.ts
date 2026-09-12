@@ -252,6 +252,29 @@ describe('saved places + dedup', () => {
     expect(testDb.prepare('SELECT provider, provider_place_id, google_place_id FROM places WHERE trip_id = ?').get(target.id)).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
   });
 
+  it('COLLECTIONS-SVC-107: preserves provider ids containing additional colons', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Colon IDs' });
+    svc.savePlace(u.id, { collection_id: col.id, name: 'Original', provider: 'osm', provider_place_id: 'node:42:way' });
+
+    const duplicate = svc.savePlace(u.id, { collection_id: col.id, name: 'Renamed', provider: 'osm', provider_place_id: 'node:42:way' });
+
+    expect(duplicate.duplicate).toBe(true);
+  });
+
+  it('COLLECTIONS-SVC-108: legacy fallback is provider-scoped and excludes AMap', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Legacy scope' });
+    const google = svc.savePlace(u.id, { collection_id: col.id, name: 'Google', google_place_id: 'same-id' }).place!;
+    const osm = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM', osm_id: 'same-id' }).place!;
+    expect(google.id).not.toBe(osm.id);
+
+    const osmDuplicate = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM renamed', provider: 'osm', provider_place_id: 'same-id', osm_id: 'same-id' });
+    expect(osmDuplicate.duplicate).toBe(true);
+
+    const amap = svc.savePlace(u.id, { collection_id: col.id, name: 'AMap', provider: 'amap', provider_place_id: 'same-id' });
+    expect(amap.duplicate).toBe(false);
+  });
   it('COLLECTIONS-SVC-102: saveFromTripPlaces skips a place already saved by provider identity', () => {
     // savePlace was not the only caller. The bulk copy carries the provider ids
     // into the row it writes, so asking without them would recognise less than
