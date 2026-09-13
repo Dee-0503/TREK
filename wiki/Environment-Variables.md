@@ -136,10 +136,10 @@ AMap is an optional **server-side** provider. Configure it in the standard Docke
 | `AMAP_API_BASE` | AMap API base URL. | `https://restapi.amap.com` |
 | `AMAP_TIMEOUT_MS` | Per-request AMap timeout in milliseconds. | `10000` |
 | `AMAP_CACHE_TTL_SECONDS` | TTL for the bounded response cache. TREK does not bulk-mirror POIs. | `300` |
-| `AMAP_RATE_LIMIT_PER_MINUTE` | Per-instance AMap request limit per minute. | `60` |
-| `PLACES_PROVIDER_MODE` | `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias). Manual override takes precedence over automatic selection. | `auto` |
+| `AMAP_RATE_LIMIT_PER_MINUTE` | Reserved AMap per-instance request-rate setting. It is not currently enforced by the server runtime. | `60` |
+| `PLACES_PROVIDER_MODE` | `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias). A mode or request override only takes effect when the selected provider is configured and enabled; otherwise the existing fallback/default is used. | `auto` |
 
-In automatic mode, mainland-China requests prefer AMap while overseas requests use the global provider. If AMap cannot provide a route, TREK falls back to OSRM. A standard deployment uses the existing `trek` container only: there is no second AMap container and no client build-time key.
+In automatic mode, mainland-China requests prefer AMap when its server key is configured; without it, the existing enabled-provider fallback applies. Overseas requests use the configured global provider. A provider mode or request override is honored only when that provider is configured and enabled; if it is unavailable, TREK keeps the existing fallback/default rather than forcing the selection. If AMap cannot provide a route, TREK falls back to OSRM. A standard deployment uses the existing `trek` container only: there is no second AMap container and no client build-time key.
 
 For Docker Compose, uncomment the AMap lines in [`docker-compose.yml`](https://github.com/liketrek/TREK/blob/main/docker-compose.yml), put the secret in the host-side `.env`, and restart the app. For Docker run, use `-e AMAP_API_KEY=...` without baking it into an image.
 

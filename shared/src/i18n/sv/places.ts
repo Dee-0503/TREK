@@ -132,9 +132,5 @@ const places: TranslationStrings = {
   'places.hoursUnavailable': 'Öppettider saknas',
   'places.source': 'Källa: {source}',
   'places.fetchedAt': 'Hämtad: {fetchedAt}',
-  'places.providerUnavailable': 'Leverantören är inte tillgänglig',
-  'places.hoursUnavailable': 'Öppettider saknas',
-  'places.source': 'Källa: {source}',
-  'places.fetchedAt': 'Hämtad: {fetchedAt}',
 };
 export default places;

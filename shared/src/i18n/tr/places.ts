@@ -134,9 +134,5 @@ const places: TranslationStrings = {
   'places.hoursUnavailable': 'Çalışma saatleri kullanılamıyor',
   'places.source': 'Kaynak: {source}',
   'places.fetchedAt': 'Alınma zamanı: {fetchedAt}',
-  'places.providerUnavailable': 'Sağlayıcı kullanılamıyor',
-  'places.hoursUnavailable': 'Çalışma saatleri kullanılamıyor',
-  'places.source': 'Kaynak: {source}',
-  'places.fetchedAt': 'Alınma zamanı: {fetchedAt}',
 };
 export default places;

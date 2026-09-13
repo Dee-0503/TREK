@@ -132,9 +132,5 @@ const places: TranslationStrings = {
   'places.hoursUnavailable': 'Không có giờ mở cửa',
   'places.source': 'Nguồn: {source}',
   'places.fetchedAt': 'Đã tải lúc: {fetchedAt}',
-  'places.providerUnavailable': 'Nhà cung cấp không khả dụng',
-  'places.hoursUnavailable': 'Không có giờ mở cửa',
-  'places.source': 'Nguồn: {source}',
-  'places.fetchedAt': 'Đã tải lúc: {fetchedAt}',
 };
 export default places;

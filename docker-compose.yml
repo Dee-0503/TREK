@@ -32,7 +32,7 @@ services:
 #      - AMAP_API_BASE=${AMAP_API_BASE:-https://restapi.amap.com}
 #      - AMAP_TIMEOUT_MS=${AMAP_TIMEOUT_MS:-10000}
 #      - AMAP_CACHE_TTL_SECONDS=${AMAP_CACHE_TTL_SECONDS:-300}
-#      - AMAP_RATE_LIMIT_PER_MINUTE=${AMAP_RATE_LIMIT_PER_MINUTE:-60}
+#      - AMAP_RATE_LIMIT_PER_MINUTE=${AMAP_RATE_LIMIT_PER_MINUTE:-60} # Reserved; not enforced by server runtime
 #      - PLACES_PROVIDER_MODE=${PLACES_PROVIDER_MODE:-auto}
 #      - FORCE_HTTPS=true # Optional. Enables HTTPS redirect, HSTS, CSP upgrade-insecure-requests, and secure cookies behind a TLS proxy
 #      - HSTS_INCLUDE_SUBDOMAINS=false # When true: adds includeSubDomains to the HSTS header. Only effective when HSTS is active. Leave false if sibling subdomains still run over plain HTTP.
