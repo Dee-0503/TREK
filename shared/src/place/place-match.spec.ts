@@ -52,7 +52,6 @@ describe('externalIdsOf', () => {
       'osm:node/42',
     ]);
   });
-  });
 });
 
 describe('placeMatchStrategies', () => {
