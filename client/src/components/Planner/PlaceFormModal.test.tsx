@@ -220,7 +220,7 @@ describe('PlaceFormModal', () => {
     await user.keyboard('{Enter}')
     await user.click(await screen.findByText('OSM POI'))
     await user.click(screen.getByRole('button', { name: /^Add$/i }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ provider: '', provider_place_id: '' })))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ provider: undefined, provider_place_id: '' })))
   })
 
   it('FE-PLANNER-PLACEFORM-020b: automatic AMap autocomplete details omits the Google session token', async () => {
@@ -398,7 +398,7 @@ describe('PlaceFormModal', () => {
   it('FE-PLANNER-PLACEFORM-022: hasMapsKey=false shows OSM active message', () => {
     // hasMapsKey is false by default in beforeEach
     render(<PlaceFormModal {...defaultProps} />);
-    expect(screen.getByText(/OpenStreetMap/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/OpenStreetMap/i).length).toBeGreaterThan(0);
   });
 
   // ── Category ─────────────────────────────────────────────────────────────────

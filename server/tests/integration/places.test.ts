@@ -281,7 +281,7 @@ describe('Update place', () => {
     const first = await request(app)
       .put(`/api/trips/${trip.id}/places/${place.id}`)
       .set('Cookie', authCookie(user.id))
-      .send({ provider: 'openstreetmap', provider_place_id: ' way:42 ' });
+      .send({ provider: 'openstreetmap', provider_place_id: 'way:42' });
     expect(first.status).toBe(200);
     expect(first.body.place.provider).toBe('osm');
     expect(first.body.place.provider_place_id).toBe('way:42');

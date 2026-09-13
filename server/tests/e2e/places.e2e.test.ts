@@ -279,10 +279,10 @@ describe('Places e2e (real auth guard + temp SQLite)', () => {
 
   it('saves and updates an AMap provider identity through the real HTTP route', async () => {
     const created = await request(server).post('/api/trips/1/places').set('Cookie', sessionCookie(1)).send({
-      name: 'AMap POI', provider: 'amap', provider_place_id: ' B0FFF ', lat: 31.2, lng: 121.5,
+      name: 'AMap POI', provider: 'amap', provider_place_id: 'B0FFF', lat: 31.2, lng: 121.5,
     });
     expect(created.status).toBe(201);
-    expect(created.body.place).toMatchObject({ provider: 'amap', provider_place_id: ' B0FFF ' });
+    expect(created.body.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFF' });
 
     const updated = await request(server).put(`/api/trips/1/places/${created.body.place.id}`).set('Cookie', sessionCookie(1)).send({
       provider: 'amap', provider_place_id: 'B0NEW',

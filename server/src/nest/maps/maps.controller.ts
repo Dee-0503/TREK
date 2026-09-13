@@ -304,6 +304,7 @@ export class MapsController {
     }
   }
 
+  @Post('resolve-url')
   @HttpCode(200)
   async resolveUrl(@Body() body: MapsResolveUrlDto): Promise<MapsResolveUrlResult> {
     try {

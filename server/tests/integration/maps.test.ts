@@ -171,7 +171,7 @@ describe('Maps happy paths (mocked service)', () => {
   it('MAPS-002 — POST /maps/search returns results from service', async () => {
     const { user } = createUser(testDb);
     mapsService.searchPlaces.mockResolvedValueOnce({
-      results: [{ address: 'Paris, France', source: 'nominatim' }],
+      places: [{ name: 'Eiffel Tower', address: 'Paris, France', lat: 48.8584, lng: 2.2945, source: 'nominatim' }],
     } as any);
 
     const res = await request(app)
@@ -180,15 +180,14 @@ describe('Maps happy paths (mocked service)', () => {
       .send({ query: 'Paris' });
 
     expect(res.status).toBe(200);
-    expect(res.body.results).toHaveLength(1);
-    expect(res.body.results[0].address).toBe('Paris, France');
+    expect(res.body.places).toHaveLength(1);
+    expect(res.body.places[0].address).toBe('Paris, France');
   });
 
   it('MAPS-003 — GET /maps/details/:placeId returns place details', async () => {
     const { user } = createUser(testDb);
     mapsService.getPlaceDetails.mockResolvedValueOnce({
-      name: 'Eiffel Tower',
-      address: 'Champ de Mars, Paris',
+      place: { name: 'Eiffel Tower', address: 'Champ de Mars, Paris', lat: 48.8584, lng: 2.2945 },
     } as any);
 
     const res = await request(app)
@@ -196,7 +195,7 @@ describe('Maps happy paths (mocked service)', () => {
       .set('Cookie', authCookie(user.id));
 
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe('Eiffel Tower');
+    expect(res.body.place.name).toBe('Eiffel Tower');
   });
 
   it('MAPS-004 — GET /maps/place-photo/:placeId returns photo url', async () => {
@@ -397,12 +396,18 @@ describe('Maps autocomplete', () => {
       .set('Cookie', authCookie(user.id))
       .send({ input: 'test', lang: 'fr', locationBias: { low: { lat: 48.5, lng: 2.0 }, high: { lat: 49.0, lng: 2.8 } } });
 
-    expect(mapsService.autocompletePlaces).toHaveBeenCalledWith(
+      expect(mapsService.autocompletePlaces).toHaveBeenCalledWith(
       user.id,
       'test',
       'fr',
       { low: { lat: 48.5, lng: 2.0 }, high: { lat: 49.0, lng: 2.8 } },
       undefined,
+      {
+        countryCode: undefined,
+        latitude: 48.5,
+        longitude: 2,
+        override: undefined,
+      },
     );
   });
 

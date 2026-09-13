@@ -49,14 +49,24 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
       const res = await makeController({ search }).search(user, { query: 'berlin' }, 'de');
       expect(res).toEqual({ places: [], source: 'osm' });
-      expect(search).toHaveBeenCalledWith(3, 'berlin', 'de', undefined);
+      expect(search).toHaveBeenCalledWith(3, 'berlin', 'de', undefined, {
+        countryCode: undefined,
+        latitude: undefined,
+        longitude: undefined,
+        override: undefined,
+      });
     });
 
     it('forwards a valid locationBias to the service', async () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
       const bias = { lat: 1, lng: 2, radius: 5000 };
       await makeController({ search }).search(user, { query: 'x', locationBias: bias }, 'de');
-      expect(search).toHaveBeenCalledWith(3, 'x', 'de', bias);
+      expect(search).toHaveBeenCalledWith(3, 'x', 'de', bias, {
+        countryCode: undefined,
+        latitude: 1,
+        longitude: 2,
+        override: undefined,
+      });
     });
 
     it('maps a service error to its status + message', async () => {
@@ -118,7 +128,12 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const autocomplete = vi.fn().mockResolvedValue({ suggestions: [], source: 'osm' });
       const bias = { low: { lat: 1, lng: 2 }, high: { lat: 3, lng: 4 } };
       await makeController({ autocompleteDisabled: () => false, autocomplete }).autocomplete(user, { input: 'be', lang: 'en', locationBias: bias });
-      expect(autocomplete).toHaveBeenCalledWith(3, 'be', 'en', bias, undefined);
+      expect(autocomplete).toHaveBeenCalledWith(3, 'be', 'en', bias, undefined, {
+        countryCode: undefined,
+        latitude: 1,
+        longitude: 2,
+        override: undefined,
+      });
     });
 
     // Session tokens tie a search's keystrokes and its details lookup into one
@@ -127,7 +142,12 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const autocomplete = vi.fn().mockResolvedValue({ suggestions: [], source: 'google' });
       await makeController({ autocompleteDisabled: () => false, autocomplete })
         .autocomplete(user, { input: 'be', sessionToken: 'abc123' });
-      expect(autocomplete).toHaveBeenCalledWith(3, 'be', undefined, undefined, 'abc123');
+      expect(autocomplete).toHaveBeenCalledWith(3, 'be', undefined, undefined, 'abc123', {
+        countryCode: undefined,
+        latitude: undefined,
+        longitude: undefined,
+        override: undefined,
+      });
     });
 
     it('maps a service error', async () => {
@@ -150,14 +170,14 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const details = vi.fn();
       await makeController({ detailsDisabled: () => false, detailsExpanded, details })
         .details(user, 'p1', 'full', 'de', '1');
-      expect(detailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true);
+      expect(detailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true, {});
       expect(details).not.toHaveBeenCalled();
     });
 
     it('uses the plain lookup without expand', async () => {
       const details = vi.fn().mockResolvedValue({ place: { id: 'p1' } });
       await makeController({ detailsDisabled: () => false, details }).details(user, 'p1', undefined, 'de');
-      expect(details).toHaveBeenCalledWith(3, 'p1', 'de', undefined);
+      expect(details).toHaveBeenCalledWith(3, 'p1', 'de', undefined, {});
     });
 
     // The details query is not Zod-validated, so the token is shape-checked here
@@ -167,13 +187,13 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const c = makeController({ detailsDisabled: () => false, details });
 
       await c.details(user, 'p1', undefined, 'de', undefined, 'a-b_C9');
-      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', 'a-b_C9');
+      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', 'a-b_C9', {});
 
       await c.details(user, 'p1', undefined, 'de', undefined, 'has spaces & symbols!');
-      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', undefined);
+      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', undefined, {});
 
       await c.details(user, 'p1', undefined, 'de', undefined, 'x'.repeat(37));
-      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', undefined);
+      expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', undefined, {});
     });
 
     it('maps a service error', async () => {
@@ -401,7 +421,7 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
     it('forwards lang through to the service', async () => {
       const reverse = vi.fn().mockResolvedValue({ name: null, address: null });
       await makeController({ reverse }).reverse('1', '2', 'fr');
-      expect(reverse).toHaveBeenCalledWith('1', '2', 'fr');
+      expect(reverse).toHaveBeenCalledWith('1', '2', 'fr', {});
     });
   });
 });

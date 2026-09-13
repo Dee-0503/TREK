@@ -14,8 +14,6 @@ import { z } from 'zod';
  * controller.
  */
 
-const open = z.record(z.string(), z.unknown());
-
 export const placeProviderSchema = z.enum(['google', 'amap', 'osm', 'openstreetmap']).transform((provider) =>
   provider === 'openstreetmap' ? 'osm' : provider,
 );
@@ -211,12 +209,21 @@ export const assignmentPlaceSchema = z.object({
 });
 export type AssignmentPlace = z.infer<typeof assignmentPlaceSchema>;
 
-export const placeCreateRequestSchema = open
-  .and(z.object({ name: z.string().min(1) }))
-  .and(placeCreateIdentitySchema);
+export const placeCreateRequestSchema = z.object({
+  name: z.string().min(1),
+  provider: placeProviderSchema.optional().nullable(),
+  provider_place_id: z.string().trim().min(1).optional().nullable(),
+}).catchall(z.unknown()).superRefine((value, ctx) => {
+  validatePlaceIdentityPair(value, ctx, false);
+});
 export type PlaceCreateRequest = z.infer<typeof placeCreateRequestSchema>;
 
-export const placeUpdateRequestSchema = open.and(placeUpdateIdentitySchema);
+export const placeUpdateRequestSchema = z.object({
+  provider: placeProviderSchema.optional().nullable(),
+  provider_place_id: z.string().trim().min(1).optional().nullable(),
+}).catchall(z.unknown()).superRefine((value, ctx) => {
+  validatePlaceIdentityPair(value, ctx, true);
+});
 export type PlaceUpdateRequest = z.infer<typeof placeUpdateRequestSchema>;
 
 // Collaborative ratings (#1435): one 1-5 star vote per user and place.
