@@ -665,12 +665,8 @@ export class MapsService {
           ? (err as { code: string }).code
           : 'provider_failure';
         if (!FALLBACK_ROUTE_ERRORS.has(reason)) throw err;
-        try {
-          const fallback = await this.routeOsrm(profile, waypoints, signal);
-          return { ...fallback, routeSource: { provider: 'osrm', fallback: true, fallbackReason: `amap_${reason}` } };
-        } catch (osrmError) {
-          throw osrmError;
-        }
+        const fallback = await this.routeOsrm(profile, waypoints, signal);
+        return { ...fallback, routeSource: { provider: 'osrm', fallback: true, fallbackReason: `amap_${reason}` } };
       }
     }
     return this.routeOsrm(profile, waypoints, signal);
@@ -2117,7 +2113,8 @@ export class MapsService {
   ): Promise<{ name: string | null; address: string | null }> {
     const provider = this.providerRouter?.resolvePlaceProvider(opts?.context ?? {});
     if (provider === 'amap' && this.amapProvider) {
-      return this.amapProvider.reverseGeocode({ lat: Number(lat), lng: Number(lng) }, { lang, context: opts?.context });
+      const reverse = await this.amapProvider.reverseGeocode({ lat: Number(lat), lng: Number(lng) }, { lang, context: opts?.context });
+      return { name: reverse.name ?? null, address: reverse.address ?? null };
     }
     const params = new URLSearchParams({
       lat,

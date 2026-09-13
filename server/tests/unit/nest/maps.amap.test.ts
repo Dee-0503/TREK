@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fetchFollow = vi.fn();
-const readJson = vi.fn();
+const { fetchFollow, readJson } = vi.hoisted(() => ({ fetchFollow: vi.fn(), readJson: vi.fn() }));
 
-vi.mock('../../../../src/utils/ssrfGuard', () => ({ safeFetchFollow: fetchFollow }));
-vi.mock('../../../../src/utils/cappedFetch', () => ({ readCappedJson: readJson }));
-vi.mock('../../../../src/app-config', () => ({
+vi.mock('../../../src/utils/ssrfGuard', () => ({ safeFetchFollow: fetchFollow }));
+vi.mock('../../../src/utils/cappedFetch', () => ({ readCappedJson: readJson }));
+vi.mock('../../../src/app-config', () => ({
+  getAppUrl: vi.fn(),
+  getMcpSafeUrl: vi.fn(),
   readEnv: () => ({
     maps: {
       amapApiBase: 'https://restapi.amap.com',
@@ -16,7 +17,7 @@ vi.mock('../../../../src/app-config', () => ({
   }),
 }));
 
-import { AmapProvider } from '../../../../src/nest/maps/providers/amap.provider';
+import { AmapProvider } from '../../../src/nest/maps/providers/amap.provider';
 
 const poi = {
   id: 'B123', name: '上海中心', address: '浦东新区', location: '121.499,31.239', type: '商务住宅', tel: '021-123',
@@ -147,6 +148,7 @@ describe('AmapProvider mocked HTTP adapter', () => {
     await expect(new AmapProvider().route('driving', [{ lat: 31, lng: 121 }, { lat: 31.01, lng: 121.01 }])).rejects.toMatchObject({ status: 502, code });
   });
 
+  it('rejects malformed POI elements explicitly', async () => {
     readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, name: undefined }] });
     await expect(new AmapProvider().search('missing-name')).rejects.toMatchObject({ code: 'invalid_response', status: 502 });
     readJson.mockResolvedValueOnce({ status: '1', pois: [{ ...poi, id: 'B126', location: 'bad' }] });
@@ -158,5 +160,4 @@ describe('AmapProvider mocked HTTP adapter', () => {
     const result = await new AmapProvider().search('hours-fallback');
     expect(result.places[0].opening_hours?.[0]).toContain('10:00-20:00');
   });
-
 });

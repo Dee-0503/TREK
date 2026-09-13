@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { ProviderRouter } from '../../../../src/nest/maps/providers/provider-router';
+import { ProviderRouter } from '../../../src/nest/maps/providers/provider-router';
 
 afterEach(() => vi.unstubAllEnvs());
 

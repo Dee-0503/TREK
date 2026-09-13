@@ -8,7 +8,7 @@
 export class AmapCoordinates {
   private static readonly PI = Math.PI;
   private static readonly AXIS = 6378245.0;
-  private static readonly EE = 0.00669342162296594323;
+  private static readonly EE = 0.006693421622965943;
 
   /** GCJ-02 provider coordinates to TREK's WGS-84 coordinates. */
   static toInternal(coordinates: { lat: number; lng: number }): { lat: number; lng: number } {

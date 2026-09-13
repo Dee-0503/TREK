@@ -612,7 +612,7 @@ export class CollectionsService {
       google_place_id: (place.google_place_id as string | null) ?? null,
       google_ftid: (place.google_ftid as string | null) ?? null,
       osm_id: (place.osm_id as string | null) ?? null,
-      provider: (place.provider as string | null) ?? null,
+      provider: (place.provider as 'google' | 'amap' | 'osm' | 'openstreetmap' | null) ?? null,
       provider_place_id: (place.provider_place_id as string | null) ?? null,
       website: (place.website as string | null) ?? null,
       phone: (place.phone as string | null) ?? null,

@@ -2543,7 +2543,6 @@ describe('controller-facing wrappers delegate to the folded methods', () => {
         wikidata: 'Q123',
       }],
       source: 'google',
-      providerOnlyEnvelopeField: 'secret',
     });
     try {
       await expect(svc.search(1, 'cafe')).resolves.toEqual({
@@ -2565,14 +2564,12 @@ describe('controller-facing wrappers delegate to the folded methods', () => {
         google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3,
         googleMapsUri: 'https://provider.example/internal', providerOnlyToken: 'secret',
       },
-      providerOnlyEnvelopeField: 'secret',
-    });
+      });
     const getPlaceDetailsExpanded = vi.spyOn(MapsService.prototype, 'getPlaceDetailsExpanded').mockResolvedValue({
       place: {
         osm_id: 'node:123', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4,
         wikidata: 'Q123', wikimedia_commons: 'Category:Park', providerOnlyToken: 'secret',
       },
-      providerOnlyEnvelopeField: 'secret',
     });
     try {
       await expect(svc.details(1, 'ChIJ123')).resolves.toEqual({

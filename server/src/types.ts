@@ -70,6 +70,8 @@ export interface Place {
   duration_minutes?: number;
   notes?: string | null;
   image_url?: string | null;
+  provider?: 'google' | 'amap' | 'osm' | 'openstreetmap' | null;
+  provider_place_id?: string | null;
   google_place_id?: string | null;
   google_ftid?: string | null;
   osm_id?: string | null;

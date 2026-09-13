@@ -547,6 +547,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     setMapsSearch,
     mapsResults,
     setMapsResults,
+    providerOverride,
+    setProviderOverride,
     isSearchingMaps,
     setIsSearchingMaps,
     newCategoryName,
@@ -619,6 +621,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     setMapsSearch,
     mapsResults,
     setMapsResults,
+    providerOverride,
+    setProviderOverride,
     isSearchingMaps,
     setIsSearchingMaps,
     newCategoryName,
@@ -730,7 +734,10 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
             <select
               id="place-provider-override"
               value={providerOverride ?? ''}
-              onChange={(event) => setProviderOverride((event.target.value || undefined) as 'google' | 'amap' | 'osm' | undefined)}
+              onChange={(event) => {
+                      const value = event.target.value
+                      setProviderOverride(value === 'google' || value === 'amap' || value === 'osm' ? value : undefined)
+                    }}
               className="rounded border border-edge bg-surface-input px-2 py-1 text-caption text-content"
             >
               <option value="">Automatic</option>
@@ -799,8 +806,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
                   onClick={() => handleSelectMapsResult(result)}
                   className="w-full text-left px-3 py-2 hover:bg-surface-hover border-b border-edge-faint last:border-0"
                 >
-                  <div className="font-medium text-sm">{result.name}</div>
-                  <div className="text-xs text-content-muted truncate">{result.address}</div>
+                  <div className="font-medium text-sm">{typeof result.name === 'string' ? result.name : ''}</div>
+                  <div className="text-xs text-content-muted truncate">{typeof result.address === 'string' ? result.address : ''}</div>
                 </button>
               ))}
             </div>

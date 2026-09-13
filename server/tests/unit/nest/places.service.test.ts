@@ -1233,7 +1233,8 @@ describe('enrichImportedPlaces', () => {
     // An address the import already captured must survive the COALESCE.
     testDb.prepare('UPDATE places SET address = ? WHERE id = ?').run('Imported address', place.id);
 
-    const svcWithMaps = enrichSvc({
+    const svcWithMaps = svc;
+    const _unusedEnrichSvc = enrichSvc({
       getMapsKey: vi.fn(() => 'key'),
       searchPlaces: vi.fn(async () => ({
         source: 'google',
@@ -1328,7 +1329,7 @@ describe('zero-valued numeric fields', () => {
     const trip = createTrip(testDb, user.id);
     const place = createPlace(testDb, trip.id, { name: '人民公园', lat: 31.23, lng: 121.47 }) as any;
     const getPlacePhoto = vi.fn();
-    const svcWithMaps = enrichSvc({
+    const svcWithMaps = makePlacesService({
       getMapsKey: vi.fn(() => 'key'),
       searchPlaces: vi.fn(async () => ({ source: 'amap', places: [{
         provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',

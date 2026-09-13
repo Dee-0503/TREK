@@ -64,11 +64,13 @@ export default function LocationSelect({ value, onChange, placeholder, style, co
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query, value, locale])
 
-  const pick = (r: any) => {
+  const pick = (r: Record<string, unknown>) => {
     const lat = Number(r.lat)
     const lng = Number(r.lng)
+    const rawName = typeof r.name === 'string' ? r.name : ''
+    const rawAddress = typeof r.address === 'string' ? r.address : ''
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-    const loc: LocationPoint = { name: r.name || r.address || 'Location', lat, lng, address: r.address || null }
+    const loc: LocationPoint = { name: rawName || rawAddress || 'Location', lat, lng, address: rawAddress || null }
     onChange(loc)
     setQuery(loc.name)
     setOpen(false)
@@ -130,8 +132,8 @@ export default function LocationSelect({ value, onChange, placeholder, style, co
             >
               <MapPin size={12} className="text-content-faint" style={{ marginTop: 2, flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.address}</div>
-                {r.address && r.name && r.name !== r.address && (
+                <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{typeof r.name === 'string' ? r.name : typeof r.address === 'string' ? r.address : ''}</div>
+                {typeof r.address === 'string' && typeof r.name === 'string' && r.address && r.name && r.name !== r.address && (
                   <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.address}</div>
                 )}
               </span>

@@ -52,7 +52,7 @@ const amapRouteResponseSchema = amapResponseSchema.extend({
   route: z.object({
     paths: z.array(z.object({
       distance: z.string(), duration: z.string(), steps: z.array(z.object({ polyline: z.string().min(1) }).passthrough()).optional(),
-    }).passthrough()).min(1),
+    }).passthrough()),
   }).passthrough(),
 });
 
@@ -104,7 +104,7 @@ function parseHours(business: { opentime_today?: string; opentime_week?: string 
   if (!business) return undefined;
   const parseLines = (raw: string | string[] | undefined): PlaceHours | undefined => {
     const lines = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[;；]/).map((part) => part.trim()).filter(Boolean) : [];
-    if (!lines.length) return undefined;
+  if (!lines.length || !lines.some((line) => /\d{1,2}:\d{2}/.test(line))) return undefined;
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const descriptions = days.map((day) => `${day}: ?`);
   const periods: PlaceHours['periods'] = [];
@@ -170,6 +170,7 @@ export class AmapProvider implements MapsProvider, RouteProvider {
         destination: `${providerTo.lng},${providerTo.lat}`,
         waypoints: '',
       }, amapRouteResponseSchema, options.signal);
+      if (!data.route.paths.length) throw error(502, 'empty_route', 'AMap returned an empty route');
       const pathData = data.route.paths[0];
       const coordinates = pathData.steps?.flatMap(step => step.polyline.split(';').map(pair => {
         const [lng, lat] = pair.split(',').map(Number);
@@ -204,7 +205,7 @@ export class AmapProvider implements MapsProvider, RouteProvider {
       const data = await this.request('/v5/place/text', {
         keywords: query.trim(), show_fields: 'business', ...this.contextParams(options),
       }, amapSearchResponseSchema);
-      return { places: data.pois.map((raw) => { const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location); if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response'); return publicPlace(poi.id, poi, pos); }), source: 'amap' };
+      return { places: data.pois.map((raw) => { const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location); if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response'); const place = publicPlace(poi.id, poi, pos); if (place.opening_hours === undefined) delete place.opening_hours; return place; }), source: 'amap' };
     });
   }
 

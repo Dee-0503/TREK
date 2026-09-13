@@ -25,7 +25,7 @@ export class ProviderRouter {
     return this.resolveRouteProvider(context);
   }
 
-  private resolve(context: ProviderContext, enabled: MapProvider[]): MapProvider {
+  private resolve(context: GeographicContext & { override?: MapProvider | 'openstreetmap' }, enabled: MapProvider[]): MapProvider {
     if (context.override) {
       const override = context.override === 'openstreetmap' ? 'osm' : context.override;
       if (enabled.includes(override)) return override;
@@ -49,7 +49,7 @@ export class ProviderRouter {
     return this.enabledPlaceProviders().includes(provider);
   }
 
-  private isMainlandChina(context: ProviderContext): boolean {
+  private isMainlandChina(context: GeographicContext): boolean {
     return context.countryCode?.toUpperCase() === 'CN';
   }
 }

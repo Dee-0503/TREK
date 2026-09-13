@@ -381,18 +381,24 @@ describe('client > maps provider context', () => {
       }),
     )
 
-    const context = {
+    const searchContext = {
       countryCode: 'CN',
       locationBias: { lat: 31.23, lng: 121.47, radius: 25 },
       lang: 'zh-CN',
       providerOverride: 'amap' as const,
     }
-    await mapsApi.search('外滩', context)
-    await mapsApi.autocomplete('外', context)
+    const autocompleteContext = {
+      countryCode: 'CN',
+      locationBias: { low: { lat: 31.22, lng: 121.46 }, high: { lat: 31.24, lng: 121.48 } },
+      lang: 'zh-CN',
+      providerOverride: 'amap' as const,
+    }
+    await mapsApi.search('外滩', searchContext)
+    await mapsApi.autocomplete('外', autocompleteContext)
 
     expect(requests).toHaveLength(2)
-    expect(requests[0]?.body).toEqual({ query: '外滩', ...context })
-    expect(requests[1]?.body).toEqual({ input: '外', ...context })
+    expect(requests[0]?.body).toEqual({ query: '外滩', ...searchContext })
+    expect(requests[1]?.body).toEqual({ input: '外', ...autocompleteContext })
   })
 
   it('FE-APIWIRE-044: omits Google session tokens for AMap details', async () => {
