@@ -72,7 +72,7 @@ Most of what follows is an addon an admin switches on or off. Lists, Costs, Docu
 
 - **Day plans**: drag places between days and reorder inside a day, with undo. Notes and bookings drag the same way, and a map marker drops straight onto a day
 - **Maps**: Leaflet, Mapbox GL or MapLibre GL (OpenFreeMap, no token), with clustering, photo markers and route lines. 3D buildings and terrain are Mapbox only
-- **Place search**: Google Places when a key is set (photos, ratings, opening hours), otherwise OpenStreetMap with no key
+- **Place search**: Google Places when a key is set (photos, ratings, opening hours), otherwise OpenStreetMap with no key. Mainland deployments can optionally use server-side AMap; its key never enters the client bundle.
 - **Place enrichment**: descriptions, facts, hours and photo candidates from OpenStreetMap, Wikipedia, Wikidata and Wikimedia Commons
 - **POI explore**: pull OpenStreetMap POIs by category for the current viewport over Overpass
 - **Import**: shared Google Maps and Naver Maps lists, plus GPX, KML and KMZ files

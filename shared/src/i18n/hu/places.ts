@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Kép eltávolítása',
   'places.imageUploadError': 'Nem sikerült feltölteni a képet',
   'places.imageRemoveError': 'Nem sikerült eltávolítani a képet',
+  'places.providerUnavailable': 'A szolgáltató nem érhető el',
+  'places.hoursUnavailable': 'A nyitvatartás nem érhető el',
+  'places.source': 'Forrás: {source}',
+  'places.fetchedAt': 'Lekérve: {fetchedAt}',
 };
 export default places;

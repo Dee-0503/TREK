@@ -127,5 +127,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Hapus gambar',
   'places.imageUploadError': 'Tidak dapat mengunggah gambar',
   'places.imageRemoveError': 'Tidak dapat menghapus gambar',
+  'places.providerUnavailable': 'Penyedia tidak tersedia',
+  'places.hoursUnavailable': 'Jam buka tidak tersedia',
+  'places.source': 'Sumber: {source}',
+  'places.fetchedAt': 'Diambil: {fetchedAt}',
 };
 export default places;

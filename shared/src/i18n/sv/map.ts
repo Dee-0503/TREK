@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Platsåtkomst är blockerad. Kontrollera enhetens inställningar; en installerad app har ett eget platstillstånd, skilt från webbläsaren.',
   'map.location.unavailable': 'Din plats kunde inte fastställas.',
   'map.location.timeout': 'Platsbestämningen tog för lång tid. Försök igen med friare sikt mot himlen.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Rutten visas med OpenStreetMap eftersom AMap inte var tillgängligt.',
 };
 export default map;

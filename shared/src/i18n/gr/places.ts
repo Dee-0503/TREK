@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Αφαίρεση εικόνας',
   'places.imageUploadError': 'Δεν ήταν δυνατή η μεταφόρτωση της εικόνας',
   'places.imageRemoveError': 'Δεν ήταν δυνατή η αφαίρεση της εικόνας',
+  'places.providerUnavailable': 'Ο πάροχος δεν είναι διαθέσιμος',
+  'places.hoursUnavailable': 'Το ωράριο δεν είναι διαθέσιμο',
+  'places.source': 'Πηγή: {source}',
+  'places.fetchedAt': 'Λήψη: {fetchedAt}',
 };
 export default places;

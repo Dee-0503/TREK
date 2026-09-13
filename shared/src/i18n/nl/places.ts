@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Afbeelding verwijderen',
   'places.imageUploadError': 'Afbeelding uploaden mislukt',
   'places.imageRemoveError': 'Afbeelding verwijderen mislukt',
+  'places.providerUnavailable': 'Provider niet beschikbaar',
+  'places.hoursUnavailable': 'Openingstijden niet beschikbaar',
+  'places.source': 'Bron: {source}',
+  'places.fetchedAt': 'Opgehaald: {fetchedAt}',
 };
 export default places;

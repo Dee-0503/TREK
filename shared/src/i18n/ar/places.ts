@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'إزالة الصورة',
   'places.imageUploadError': 'تعذّر رفع الصورة',
   'places.imageRemoveError': 'تعذّر إزالة الصورة',
+  'places.providerUnavailable': 'المزوّد غير متاح',
+  'places.hoursUnavailable': 'ساعات العمل غير متاحة',
+  'places.source': 'المصدر: {source}',
+  'places.fetchedAt': 'وقت الجلب: {fetchedAt}',
 };
 export default places;

@@ -128,5 +128,13 @@ const places: TranslationStrings = {
   'places.removeImage': 'Ta bort bild',
   'places.imageUploadError': 'Det gick inte att ladda upp bilden',
   'places.imageRemoveError': 'Det gick inte att ta bort bilden',
+  'places.providerUnavailable': 'Leverantören är inte tillgänglig',
+  'places.hoursUnavailable': 'Öppettider saknas',
+  'places.source': 'Källa: {source}',
+  'places.fetchedAt': 'Hämtad: {fetchedAt}',
+  'places.providerUnavailable': 'Leverantören är inte tillgänglig',
+  'places.hoursUnavailable': 'Öppettider saknas',
+  'places.source': 'Källa: {source}',
+  'places.fetchedAt': 'Hämtad: {fetchedAt}',
 };
 export default places;

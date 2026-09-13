@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.enrichOnImport': 'Orte über Google anreichern',
   'places.enrichOnImportHint':
     'Sucht jeden importierten Ort nach, um Fotos, Adresse und Kontaktdaten zu ergänzen. Nutzt deinen Google-Maps-Key.',
+  'places.providerUnavailable': 'Anbieter nicht verfügbar',
+  'places.hoursUnavailable': 'Öffnungszeiten nicht verfügbar',
+  'places.source': 'Quelle: {source}',
+  'places.fetchedAt': 'Abgerufen: {fetchedAt}',
 };
 export default places;

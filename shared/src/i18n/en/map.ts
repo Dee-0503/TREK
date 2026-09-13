@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Location access is blocked. Check your device settings; an installed app has its own location permission, separate from the browser.',
   'map.location.unavailable': 'Your location could not be determined.',
   'map.location.timeout': 'Locating you took too long. Try again with a clearer view of the sky.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Route shown by OpenStreetMap because AMap was unavailable.',
 };
 export default map;

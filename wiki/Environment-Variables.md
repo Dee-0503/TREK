@@ -126,7 +126,25 @@ translations are added to TREK.
 
 ---
 
-## Outbound HTTP(S) Proxy
+## Maps provider routing (AMap)
+
+AMap is an optional **server-side** provider. Configure it in the standard Docker/Compose `environment:` block or a runtime `.env` file; do not pass a key to the client build. The server must have outbound HTTPS access to `restapi.amap.com`.
+
+| Variable | Description | Default |
+|---|---|---|
+| `AMAP_API_KEY` | AMap server key. Keep it secret and masked; restrict it to the required API/product and a fixed server egress IP. It is never included in the client bundle. | — |
+| `AMAP_API_BASE` | AMap API base URL. | `https://restapi.amap.com` |
+| `AMAP_TIMEOUT_MS` | Per-request AMap timeout in milliseconds. | `10000` |
+| `AMAP_CACHE_TTL_SECONDS` | TTL for the bounded response cache. TREK does not bulk-mirror POIs. | `300` |
+| `AMAP_RATE_LIMIT_PER_MINUTE` | Per-instance AMap request limit per minute. | `60` |
+| `PLACES_PROVIDER_MODE` | `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias). Manual override takes precedence over automatic selection. | `auto` |
+
+In automatic mode, mainland-China requests prefer AMap while overseas requests use the global provider. If AMap cannot provide a route, TREK falls back to OSRM. A standard deployment uses the existing `trek` container only: there is no second AMap container and no client build-time key.
+
+For Docker Compose, uncomment the AMap lines in [`docker-compose.yml`](https://github.com/liketrek/TREK/blob/main/docker-compose.yml), put the secret in the host-side `.env`, and restart the app. For Docker run, use `-e AMAP_API_KEY=...` without baking it into an image.
+
+---
+
 
 TREK can route supported outbound HTTP(S) requests through a proxy by setting the standard variables below. Outbound
 proxying is disabled by default.

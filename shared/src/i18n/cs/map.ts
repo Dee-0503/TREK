@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Přístup k poloze je zablokován. Zkontrolujte nastavení zařízení; nainstalovaná aplikace má vlastní oprávnění k poloze, nezávislé na prohlížeči.',
   'map.location.unavailable': 'Vaši polohu se nepodařilo zjistit.',
   'map.location.timeout': 'Zjišťování polohy trvalo příliš dlouho. Zkuste to znovu s volným výhledem na oblohu.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Mapy Google',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Trasa se zobrazuje přes OpenStreetMap, protože AMap nebyl dostupný.',
 };
 export default map;

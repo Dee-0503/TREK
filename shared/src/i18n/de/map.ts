@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Der Standortzugriff ist blockiert. Prüfe die Geräteeinstellungen; eine installierte App hat eine eigene Standortberechtigung, unabhängig vom Browser.',
   'map.location.unavailable': 'Dein Standort konnte nicht ermittelt werden.',
   'map.location.timeout': 'Die Standortbestimmung hat zu lange gedauert. Versuche es mit freier Sicht zum Himmel erneut.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Route wird über OpenStreetMap angezeigt, weil AMap nicht verfügbar war.',
 };
 export default map;

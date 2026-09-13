@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Odebrat obrázek',
   'places.imageUploadError': 'Obrázek se nepodařilo nahrát',
   'places.imageRemoveError': 'Obrázek se nepodařilo odebrat',
+  'places.providerUnavailable': 'Poskytovatel není dostupný',
+  'places.hoursUnavailable': 'Otevírací doba není dostupná',
+  'places.source': 'Zdroj: {source}',
+  'places.fetchedAt': 'Staženo: {fetchedAt}',
 };
 export default places;

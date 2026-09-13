@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Remove image',
   'places.imageUploadError': 'Could not upload image',
   'places.imageRemoveError': 'Could not remove image',
+  'places.providerUnavailable': 'Provider unavailable',
+  'places.hoursUnavailable': 'Opening hours unavailable',
+  'places.source': 'Source: {source}',
+  'places.fetchedAt': 'Fetched: {fetchedAt}',
 };
 export default places;

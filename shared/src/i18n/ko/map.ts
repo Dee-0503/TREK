@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': '위치 접근이 차단되어 있습니다. 기기 설정을 확인하세요. 설치된 앱은 브라우저와 별도의 위치 권한을 사용합니다.',
   'map.location.unavailable': '현재 위치를 확인할 수 없습니다.',
   'map.location.timeout': '위치를 확인하는 데 시간이 너무 오래 걸렸습니다. 하늘이 잘 보이는 곳에서 다시 시도하세요.',
+  'map.provider.amap': '가오더 지도',
+  'map.provider.google': 'Google 지도',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': '가오더 지도를 사용할 수 없어 OpenStreetMap으로 경로를 표시합니다.',
 };
 export default map;
