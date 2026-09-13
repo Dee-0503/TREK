@@ -92,21 +92,21 @@ function PhotoCredit({ imageUrl }) {
   )
 }
 
-function usePlaceDetails(googlePlaceId, osmId, language) {
+function usePlaceDetails(googlePlaceId, osmId, provider, providerPlaceId, language) {
   const [details, setDetails] = useState(null)
-  const detailId = googlePlaceId || osmId
+  const detailId = providerPlaceId || googlePlaceId || osmId
   const cacheKey = `gdetails_${detailId}_${language}`
   useEffect(() => {
     if (!detailId) { setDetails(null); return }
     if (detailsCache.has(cacheKey)) { setDetails(detailsCache.get(cacheKey)); return }
     const cached = getSessionCache(cacheKey)
     if (cached) { detailsCache.set(cacheKey, cached); setDetails(cached); return }
-    mapsApi.details(detailId, language).then(data => {
+    mapsApi.details(detailId, { lang: language, provider }).then(data => {
       detailsCache.set(cacheKey, data.place)
       setSessionCache(cacheKey, data.place)
       setDetails(data.place)
     }).catch(() => {})
-  }, [detailId, language])
+  }, [detailId, provider, language])
   return details
 }
 
@@ -215,7 +215,7 @@ export default function PlaceInspector({
   const [nameValue, setNameValue] = useState('')
   const nameInputRef = useRef(null)
   const fileInputRef = useRef(null)
-  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, language)
+  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, place?.provider, place?.provider_place_id, language)
 
   // Library-wide "is this place already saved anywhere I can see?" indicator for
   // the trip-planner footer bookmark. Re-checks when the place changes or after

@@ -8,16 +8,19 @@ interface Props {
   onChange: (value: string) => void
   placeholder?: string
   className?: string
+  countryCode?: string
+  locationBias?: { lat: number; lng: number; radius?: number }
+  providerOverride?: 'google' | 'amap' | 'osm'
 }
 
 // Free-text address input with location autocomplete, backed by the same maps
 // search as LocationSelect. Unlike LocationSelect the typed text is
 // authoritative: every keystroke reaches the parent so a hand-written address
 // is never lost, and picking a suggestion just replaces the text (#1496).
-export default function AddressInput({ value, onChange, placeholder, className }: Props) {
+export default function AddressInput({ value, onChange, placeholder, className, countryCode, locationBias, providerOverride }: Props) {
   const { t, locale } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<Record<string, unknown>[]>([])
   const [highlight, setHighlight] = useState(-1)
   const [loading, setLoading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -47,7 +50,7 @@ export default function AddressInput({ value, onChange, placeholder, className }
       const myReq = ++reqIdRef.current
       setLoading(true)
       try {
-        const data = await mapsApi.search(trimmed, locale)
+        const data = await mapsApi.search(trimmed, { lang: locale, countryCode, locationBias, providerOverride })
         if (myReq !== reqIdRef.current) return
         setResults(data.places || [])
         setHighlight(-1)

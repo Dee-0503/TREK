@@ -12,6 +12,8 @@ export interface PlaceFormData {
   website: string
   // Populated from a maps-search pick (not part of the initial blank form).
   phone?: string
+  provider?: 'google' | 'amap' | 'osm'
+  provider_place_id?: string
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
@@ -68,6 +70,8 @@ export const RESULT_FIELDS = [
   'address',
   'lat',
   'lng',
+  'provider',
+  'provider_place_id',
   'google_place_id',
   'google_ftid',
   'osm_id',

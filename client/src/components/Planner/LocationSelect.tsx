@@ -15,13 +15,16 @@ interface Props {
   onChange: (loc: LocationPoint | null) => void
   placeholder?: string
   style?: React.CSSProperties
+  countryCode?: string
+  locationBias?: { lat: number; lng: number; radius?: number }
+  providerOverride?: 'google' | 'amap' | 'osm'
 }
 
-export default function LocationSelect({ value, onChange, placeholder, style }: Props) {
+export default function LocationSelect({ value, onChange, placeholder, style, countryCode, locationBias, providerOverride }: Props) {
   const { t, locale } = useTranslation()
   const [query, setQuery] = useState(value?.name || '')
   const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<Record<string, unknown>[]>([])
   const [highlight, setHighlight] = useState(-1)
   const [loading, setLoading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -49,7 +52,7 @@ export default function LocationSelect({ value, onChange, placeholder, style }: 
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const data = await mapsApi.search(trimmed, locale)
+        const data = await mapsApi.search(trimmed, { lang: locale, countryCode, locationBias, providerOverride })
         setResults(data.places || [])
         setHighlight(-1)
       } catch {
