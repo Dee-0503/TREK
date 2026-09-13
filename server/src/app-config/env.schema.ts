@@ -48,10 +48,11 @@ const publicHttpUrl = optionalWith((v) => {
   try {
     const parsed = new URL(v);
     const host = parsed.hostname;
+    const normalizedHost = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
     if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    if (parsed.username || parsed.password || host.endsWith('.') || host.includes('..')) return false;
-    if (host !== host.toLowerCase() || host !== new URL(`http://${host}`).hostname) return false;
-    const ipVersion = isIP(host);
+    if (parsed.username || parsed.password || normalizedHost.endsWith('.') || normalizedHost.includes('..')) return false;
+    if (normalizedHost !== normalizedHost.toLowerCase() || normalizedHost !== new URL(`http://${normalizedHost}`).hostname) return false;
+    const ipVersion = isIP(normalizedHost);
     if (ipVersion === 6) return false;
     if (ipVersion === 4) {
       const octets = host.split('.').map(Number);
