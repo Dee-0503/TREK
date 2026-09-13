@@ -204,6 +204,52 @@ describe('PlaceFormModal', () => {
     expect(await screen.findByText('Eiffel Tower')).toBeInTheDocument();
   });
 
+  it('FE-PLANNER-PLACEFORM-020a: picking a provider result then an identity-less result clears stale provider fields', async () => {
+    const user = userEvent.setup()
+    server.use(http.post('/api/maps/search', async ({ request }) => {
+      const body = await request.json() as { query: string }
+      return HttpResponse.json({ places: body.query === 'amap' ? [{ name: 'AMap POI', lat: 31, lng: 121, providerIdentity: { provider: 'amap', providerPlaceId: 'amap-1' } }] : [{ name: 'OSM POI', lat: 32, lng: 122 }] })
+    }))
+    const onSave = vi.fn().mockResolvedValue({ id: 1 })
+    render(<PlaceFormModal {...defaultProps} onSave={onSave} />)
+    const searchInput = screen.getByPlaceholderText('Search places...')
+    await user.type(searchInput, 'amap')
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByText('AMap POI'))
+    await user.type(searchInput, 'osm')
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByText('OSM POI'))
+    await user.click(screen.getByRole('button', { name: /^Add$/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ provider: '', provider_place_id: '' })))
+  })
+
+  it('FE-PLANNER-PLACEFORM-020b: automatic AMap autocomplete details omits the Google session token', async () => {
+    const user = userEvent.setup()
+    let detailsUrl = ''
+    server.use(
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({ suggestions: [{ placeId: 'amap-2', mainText: 'AMap POI', secondaryText: 'China' }], source: 'amap' })),
+      http.get('/api/maps/details/:placeId', ({ request }) => { detailsUrl = request.url; return HttpResponse.json({ place: { name: 'AMap POI', lat: 31, lng: 121, providerIdentity: { provider: 'amap', providerPlaceId: 'amap-2' } } }) }),
+    )
+    render(<PlaceFormModal {...defaultProps} />)
+    await user.type(screen.getByPlaceholderText('Search places...'), 'AMap')
+    await user.click(await screen.findByText('China'))
+    await waitFor(() => expect(new URL(detailsUrl).searchParams.has('sessionToken')).toBe(false))
+  })
+
+  it('FE-PLANNER-PLACEFORM-020c: explicit Google autocomplete details keeps the session token', async () => {
+    const user = userEvent.setup()
+    let detailsUrl = ''
+    server.use(
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({ suggestions: [{ placeId: 'google-2', mainText: 'Google POI', secondaryText: 'US' }], source: 'google' })),
+      http.get('/api/maps/details/:placeId', ({ request }) => { detailsUrl = request.url; return HttpResponse.json({ place: { name: 'Google POI', lat: 1, lng: 2 } }) }),
+    )
+    render(<PlaceFormModal {...defaultProps} />)
+    await user.selectOptions(screen.getByLabelText('Provider'), 'google')
+    await user.type(screen.getByPlaceholderText('Search places...'), 'Google')
+    await user.click(await screen.findByText('US'))
+    await waitFor(() => expect(new URL(detailsUrl).searchParams.has('sessionToken')).toBe(true))
+  })
+
   it('FE-PLANNER-PLACEFORM-020: clicking a maps result fills the form', async () => {
     const user = userEvent.setup();
     server.use(

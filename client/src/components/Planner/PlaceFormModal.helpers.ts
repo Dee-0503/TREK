@@ -103,8 +103,13 @@ export function mergeResult(
 ): PlaceFormData {
   const next = { ...prev } as PlaceFormData & Record<string, string | undefined>
 
+  const identity = result.providerIdentity as { provider?: string; providerPlaceId?: string } | undefined
+  const resultWithIdentity = identity
+    ? { ...result, provider: identity.provider, provider_place_id: identity.providerPlaceId }
+    : result
+
   for (const field of RESULT_FIELDS) {
-    const raw = result[field]
+    const raw = resultWithIdentity[field]
     const value = raw == null ? '' : String(raw)
 
     if (value) {

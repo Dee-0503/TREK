@@ -90,6 +90,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   const [mapsSearch, setMapsSearch] = useState('')
   const [mapsResults, setMapsResults] = useState<Record<string, unknown>[]>([])
   const [providerOverride, setProviderOverride] = useState<'google' | 'amap' | 'osm' | undefined>()
+  const [autocompleteSource, setAutocompleteSource] = useState<string | undefined>()
   const [isSearchingMaps, setIsSearchingMaps] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [showNewCategory, setShowNewCategory] = useState(false)
@@ -186,7 +187,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     // because only handleSelectMapsResult ever set it.
     if (place && place.lat != null && place.lng != null) {
       setDetailsSelection({
-        placeId: place.google_place_id || place.osm_id || undefined,
+        placeId: place.provider_place_id || place.google_place_id || place.osm_id || undefined,
+        provider: place.provider ?? undefined,
         lat: Number(place.lat),
         lng: Number(place.lng),
         name: place.name || '',
@@ -264,6 +266,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       }
       const result = await mapsApi.autocomplete(query, context, undefined, controller.signal)
       setAcSuggestions(result.suggestions || [])
+      setAutocompleteSource(result.source)
       setAcHighlight(-1)
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return
@@ -271,7 +274,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       console.error('Autocomplete failed:', err)
       setAcSuggestions([])
     }
-  }, [language, locationBias])
+  }, [language, locationBias, providerOverride, tripObj])
 
   // Debounce effect — only watches mapsSearch
   useEffect(() => {
@@ -331,21 +334,14 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   }
 
   const handleSelectMapsResult = (result) => {
-    setForm(prev => {
-      const merged = mergeResult(prev, result, autoFilledRef.current)
-      return result.providerIdentity
-        ? { ...merged, provider: result.providerIdentity.provider, provider_place_id: result.providerIdentity.providerPlaceId, google_place_id: undefined }
-        : merged
-    })
-    if (result.providerIdentity) {
-      autoFilledRef.current.delete('google_place_id')
-    }
+    setForm(prev => mergeResult(prev, result, autoFilledRef.current))
     // A new pick drops whatever hero image belonged to the previous place.
     const lat = Number(result.lat)
     const lng = Number(result.lng)
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setDetailsSelection({
         placeId: result.providerIdentity?.providerPlaceId || result.google_place_id || result.osm_id || undefined,
+        provider: result.providerIdentity?.provider,
         lat,
         lng,
         name: result.name || '',
@@ -377,7 +373,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       try {
         // Spends the session the suggestions opened, so Google bills the search
         // once rather than per keystroke.
-        const result = await mapsApi.details(suggestion.placeId, { lang: language, provider: providerOverride, sessionToken: placesSessionRef.current.peek() })
+        const result = await mapsApi.details(suggestion.placeId, { lang: language, provider: autocompleteSource === 'amap' ? 'amap' : providerOverride, sessionToken: autocompleteSource === 'amap' ? undefined : placesSessionRef.current.peek() })
         if (result.place && result.place.lat != null && result.place.lng != null) {
           place = result.place
         }

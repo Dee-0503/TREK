@@ -95,13 +95,14 @@ function PhotoCredit({ imageUrl }) {
 function usePlaceDetails(googlePlaceId, osmId, provider, providerPlaceId, language) {
   const [details, setDetails] = useState(null)
   const detailId = providerPlaceId || googlePlaceId || osmId
-  const cacheKey = `gdetails_${detailId}_${language}`
+  const canonicalProvider = provider || (providerPlaceId ? undefined : googlePlaceId ? 'google' : osmId ? 'osm' : undefined)
+  const cacheKey = `gdetails_${canonicalProvider || 'unknown'}_${detailId}_${language}`
   useEffect(() => {
     if (!detailId) { setDetails(null); return }
     if (detailsCache.has(cacheKey)) { setDetails(detailsCache.get(cacheKey)); return }
     const cached = getSessionCache(cacheKey)
     if (cached) { detailsCache.set(cacheKey, cached); setDetails(cached); return }
-    mapsApi.details(detailId, { lang: language, provider }).then(data => {
+    mapsApi.details(detailId, { lang: language, provider: canonicalProvider }).then(data => {
       detailsCache.set(cacheKey, data.place)
       setSessionCache(cacheKey, data.place)
       setDetails(data.place)

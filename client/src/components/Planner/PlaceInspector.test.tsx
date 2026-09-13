@@ -321,6 +321,24 @@ describe('PlaceInspector', () => {
 
   // ── Google Maps details (mapsApi) ──────────────────────────────────────────
 
+  it('FE-PLANNER-INSPECTOR-023a: reopens an AMap place with its provider identity', async () => {
+    const p = buildPlace({ id: 205, google_place_id: 'same-id', osm_id: 'same-id', provider: 'amap', provider_place_id: 'amap-205' } as any)
+    render(<PlaceInspector {...defaultProps} place={p} />)
+    await waitFor(() => {
+      expect(vi.mocked(mapsApi.details)).toHaveBeenCalledWith('amap-205', { lang: expect.any(String), provider: 'amap' })
+    })
+  })
+
+  it('FE-PLANNER-INSPECTOR-023b: details cache is isolated by provider', async () => {
+    vi.mocked(mapsApi.details)
+      .mockResolvedValueOnce({ place: { phone: 'amap phone' } } as any)
+      .mockResolvedValueOnce({ place: { phone: 'google phone' } } as any)
+    const { rerender } = render(<PlaceInspector {...defaultProps} place={buildPlace({ id: 206, provider: 'amap', provider_place_id: 'same-id' } as any)} />)
+    await waitFor(() => expect(vi.mocked(mapsApi.details)).toHaveBeenCalledTimes(1))
+    rerender(<PlaceInspector {...defaultProps} place={buildPlace({ id: 207, google_place_id: 'same-id', provider: null, provider_place_id: null } as any)} />)
+    await waitFor(() => expect(vi.mocked(mapsApi.details)).toHaveBeenCalledTimes(2))
+  })
+
   it('FE-PLANNER-INSPECTOR-023: mapsApi.details called when place has google_place_id', async () => {
     const p = buildPlace({ id: 200, google_place_id: 'ChIJ001' });
     render(<PlaceInspector {...defaultProps} place={p} />);

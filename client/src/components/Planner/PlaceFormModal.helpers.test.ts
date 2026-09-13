@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { isGoogleMapsUrl } from './PlaceFormModal.helpers'
+import { isGoogleMapsUrl, mergeResult, DEFAULT_FORM } from './PlaceFormModal.helpers'
+
+describe('mergeResult provider identity', () => {
+  it('clears the previous provider identity when the next result has none', () => {
+    const owned = new Set(['provider', 'provider_place_id'] as const)
+    const prev = { ...DEFAULT_FORM, provider: 'amap' as const, provider_place_id: 'amap-1' }
+
+    const next = mergeResult(prev, { name: 'OSM place' }, owned)
+
+    expect(next.provider).toBe('')
+    expect(next.provider_place_id).toBe('')
+    expect(owned.has('provider')).toBe(false)
+    expect(owned.has('provider_place_id')).toBe(false)
+  })
+})
 
 describe('isGoogleMapsUrl', () => {
   it('accepts the short share hosts', () => {
