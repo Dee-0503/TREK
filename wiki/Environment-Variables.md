@@ -128,22 +128,20 @@ translations are added to TREK.
 
 ## Maps provider routing (AMap)
 
-AMap is an optional **server-side** provider. Configure it in the standard Docker/Compose `environment:` block or a runtime `.env` file; do not pass a key to the client build. The server must have outbound HTTPS access to `restapi.amap.com`.
+AMap is an optional **server-side** provider. Configure it through the standard Docker/Compose runtime `environment:` block or a runtime `.env` file; never pass its key to the client build. The server must have outbound HTTPS access to `restapi.amap.com`.
 
 | Variable | Description | Default |
 |---|---|---|
-| `AMAP_API_KEY` | AMap server key. Keep it secret and masked; restrict it to the required API/product and a fixed server egress IP. It is never included in the client bundle. | — |
+| `AMAP_API_KEY` | Server-only AMap key. Keep it secret and masked; restrict it to the required API/product and a fixed server egress IP. It is never included in the client bundle. | — |
 | `AMAP_API_BASE` | AMap API base URL. | `https://restapi.amap.com` |
 | `AMAP_TIMEOUT_MS` | Per-request AMap timeout in milliseconds. | `10000` |
 | `AMAP_CACHE_TTL_SECONDS` | TTL for the bounded response cache. TREK does not bulk-mirror POIs. | `300` |
 | `AMAP_RATE_LIMIT_PER_MINUTE` | Reserved AMap per-instance request-rate setting. It is not currently enforced by the server runtime. | `60` |
-| `PLACES_PROVIDER_MODE` | `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias). A mode or request override only takes effect when the selected provider is configured and enabled; otherwise the existing fallback/default is used. | `auto` |
+| `PLACES_PROVIDER_MODE` | `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias). A mode or request override only takes effect when the target provider is configured and enabled; otherwise the existing fallback/default is used. | `auto` |
 
-In automatic mode, mainland-China requests prefer AMap when its server key is configured; without it, the existing enabled-provider fallback applies. Overseas requests use the configured global provider. A provider mode or request override is honored only when that provider is configured and enabled; if it is unavailable, TREK keeps the existing fallback/default rather than forcing the selection. If AMap cannot provide a route, TREK falls back to OSRM. A standard deployment uses the existing `trek` container only: there is no second AMap container and no client build-time key.
+In automatic mode, mainland-China requests prefer AMap when it is configured and enabled; otherwise the existing enabled-provider fallback applies. Overseas requests, or deployments without AMap enabled, continue using the existing OSRM routing. For mainland-China driving, walking, and cycling, an AMap failure falls back to OSRM after one attempt. A standard deployment uses the existing `trek` container only: there is no second AMap container and no client build-time key.
 
 For Docker Compose, uncomment the AMap lines in [`docker-compose.yml`](https://github.com/liketrek/TREK/blob/main/docker-compose.yml), put the secret in the host-side `.env`, and restart the app. For Docker run, use `-e AMAP_API_KEY=...` without baking it into an image.
-
----
 
 
 TREK can route supported outbound HTTP(S) requests through a proxy by setting the standard variables below. Outbound

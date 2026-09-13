@@ -77,7 +77,7 @@ Most of what follows is an addon an admin switches on or off. Lists, Costs, Docu
 - **POI explore**: pull OpenStreetMap POIs by category for the current viewport over Overpass
 - **Import**: shared Google Maps and Naver Maps lists, plus GPX, KML and KMZ files
 - **Export**: GPX of a trip's places and tracks, and an ICS feed per trip or across all of them
-- **Routes**: auto-sort a day (nearest neighbour then 2-opt, locked stops and hotel anchors stay put), driving, walking or cycling profiles over OSRM, then open it in Google Maps or CoMaps
+- **Routes**: auto-sort a day (nearest neighbour then 2-opt, locked stops and hotel anchors stay put), driving, walking or cycling profiles over OSRM, then open it in Google Maps or CoMaps. In mainland China, when AMap is configured and enabled, driving, walking and cycling prefer AMap and fall back to OSRM after one failure; overseas, or when AMap is not enabled, the existing OSRM routing remains in use.
 - **Public transport**: door-to-door itineraries over Transitous
 - **Weather**: 16-day forecast from Open-Meteo, no key. Dates outside that window read the archive for the same date instead
 - **Day notes**: markdown body with an icon and a colour, reordered by drag and drop or moved to another day
@@ -363,7 +363,7 @@ Caddy handles TLS and WebSockets automatically.
 ## Environment variables
 
 Every variable, its default and what it does: see
-[Environment Variables](https://github.com/liketrek/TREK/wiki/Environment-Variables).
+[Environment Variables](https://github.com/liketrek/TREK/wiki/Environment-Variables). This includes the server-only AMap key and provider-routing fallback rules.
 
 ## Star History
 

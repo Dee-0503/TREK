@@ -65,7 +65,7 @@
   <Config Name="AMAP_TIMEOUT_MS" Target="AMAP_TIMEOUT_MS" Default="10000" Mode="" Description="AMap request timeout in milliseconds." Type="Variable" Display="advanced" Required="false" Mask="false">10000</Config>
   <Config Name="AMAP_CACHE_TTL_SECONDS" Target="AMAP_CACHE_TTL_SECONDS" Default="300" Mode="" Description="Bounded AMap response cache TTL in seconds; this is not a bulk POI mirror." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
   <Config Name="AMAP_RATE_LIMIT_PER_MINUTE" Target="AMAP_RATE_LIMIT_PER_MINUTE" Default="60" Mode="" Description="Reserved per-minute AMap request-rate setting; not enforced by server runtime." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
-  <Config Name="PLACES_PROVIDER_MODE" Target="PLACES_PROVIDER_MODE" Default="auto" Mode="" Description="Places provider mode: auto, google, amap, or osm." Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>
+  <Config Name="PLACES_PROVIDER_MODE" Target="PLACES_PROVIDER_MODE" Default="auto" Mode="" Description="Places provider mode: auto, google, amap, or osm. A mode or request override only applies when the target provider is configured and enabled; otherwise the fallback/default remains in effect." Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>
 
   <!-- Other -->
   <Config Name="DEMO_MODE" Target="DEMO_MODE" Default="false" Mode="" Description="Enable demo mode (resets all data hourly). Not intended for regular use." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>

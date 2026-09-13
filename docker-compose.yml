@@ -27,13 +27,15 @@ services:
 #      - SESSION_DURATION_REMEMBER=30d # Session length when "Remember me" is ticked at login: longer-lived JWT + persistent cookie that survives browser restarts. Same format as SESSION_DURATION. Default: 30d
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-} # Comma-separated origins for CORS and email notification links
       # Maps provider settings are runtime-only. Keep AMAP_API_KEY server-side;
-      # do not add it to client build args or a second AMap container.
-#      - AMAP_API_KEY=${AMAP_API_KEY:-}
+      # do not add it to client build args or a second AMap container. A mode or
+      # request override only applies when its target provider is configured and
+      # enabled; otherwise the existing fallback/default remains in effect.
+#      - AMAP_API_KEY=${AMAP_API_KEY:-} # Server-only AMap credential; never a client build-time key
 #      - AMAP_API_BASE=${AMAP_API_BASE:-https://restapi.amap.com}
 #      - AMAP_TIMEOUT_MS=${AMAP_TIMEOUT_MS:-10000}
 #      - AMAP_CACHE_TTL_SECONDS=${AMAP_CACHE_TTL_SECONDS:-300}
 #      - AMAP_RATE_LIMIT_PER_MINUTE=${AMAP_RATE_LIMIT_PER_MINUTE:-60} # Reserved; not enforced by server runtime
-#      - PLACES_PROVIDER_MODE=${PLACES_PROVIDER_MODE:-auto}
+#      - PLACES_PROVIDER_MODE=${PLACES_PROVIDER_MODE:-auto} # auto | google | amap | osm; applies only when target provider is configured and enabled
 #      - FORCE_HTTPS=true # Optional. Enables HTTPS redirect, HSTS, CSP upgrade-insecure-requests, and secure cookies behind a TLS proxy
 #      - HSTS_INCLUDE_SUBDOMAINS=false # When true: adds includeSubDomains to the HSTS header. Only effective when HSTS is active. Leave false if sibling subdomains still run over plain HTTP.
 #      - COOKIE_SECURE=false # Escape hatch: force session cookies over plain HTTP even in production. Not recommended.
