@@ -93,6 +93,13 @@ export function providerNamespacedDetailCacheKey(provider: string | null | undef
     if (embeddedCanonical && ['google', 'amap', 'osm'].includes(embeddedCanonical)) {
       return `${embeddedCanonical}:${placeId.slice(separator + 1)}`;
     }
+    // OSM identities use their feature type (`node`, `way`, or `relation`) as
+    // the prefix rather than the provider name. Preserve that identity in the
+    // same namespace as an explicit `openstreetmap` details response so the
+    // enrichment cache can be read before the provider lookup is repeated.
+    if (['node', 'way', 'relation'].includes(embeddedProvider)) {
+      return `osm:${placeId}`;
+    }
   }
   return canonical && ['google', 'amap', 'osm'].includes(canonical) ? `${canonical}:${placeId}` : null;
 }
