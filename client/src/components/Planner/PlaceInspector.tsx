@@ -98,16 +98,27 @@ function usePlaceDetails(googlePlaceId, osmId, provider, providerPlaceId, langua
   const canonicalProvider = provider || (providerPlaceId ? undefined : googlePlaceId ? 'google' : osmId ? 'osm' : undefined)
   const cacheKey = `gdetails_${canonicalProvider || 'unknown'}_${detailId}_${language}`
   useEffect(() => {
-    if (!detailId) { setDetails(null); return }
-    if (detailsCache.has(cacheKey)) { setDetails(detailsCache.get(cacheKey)); return }
+    let active = true
+    setDetails(null)
+    if (!detailId) return () => { active = false }
+    if (detailsCache.has(cacheKey)) {
+      setDetails(detailsCache.get(cacheKey))
+      return () => { active = false }
+    }
     const cached = getSessionCache(cacheKey)
-    if (cached) { detailsCache.set(cacheKey, cached); setDetails(cached); return }
+    if (cached) {
+      detailsCache.set(cacheKey, cached)
+      setDetails(cached)
+      return () => { active = false }
+    }
     mapsApi.details(detailId, { lang: language, provider: canonicalProvider }).then(data => {
+      if (!active) return
       detailsCache.set(cacheKey, data.place)
       setSessionCache(cacheKey, data.place)
       setDetails(data.place)
     }).catch(() => {})
-  }, [detailId, provider, language])
+    return () => { active = false }
+  }, [cacheKey, detailId, canonicalProvider, language])
   return details
 }
 
