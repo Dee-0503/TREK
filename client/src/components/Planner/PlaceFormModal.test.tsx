@@ -764,6 +764,8 @@ describe('PlaceFormModal', () => {
 
   it('FE-PLANNER-PLACEFORM-042b: full search keeps the existing center bias while autocomplete uses the bbox', async () => {
     const user = userEvent.setup();
+    const searchBodies: Record<string, unknown>[] = [];
+    let searchHandlerCalled = false;
     seedStore(useTripStore, {
       trip: buildTrip({ id: 1, country_code: 'cn' }),
       places: [
@@ -773,13 +775,8 @@ describe('PlaceFormModal', () => {
     });
     server.use(
       http.post('/api/maps/search', async ({ request }) => {
-        expect(await request.json()).toEqual({
-          query: 'Eiffel',
-          lang: 'en',
-          countryCode: 'CN',
-          providerOverride: 'amap',
-          locationBias: { lat: 48.86, lng: 2.355 },
-        });
+        searchHandlerCalled = true;
+        searchBodies.push((await request.json()) as Record<string, unknown>);
         return HttpResponse.json({ places: [], source: 'amap' });
       }),
     );
@@ -790,7 +787,16 @@ describe('PlaceFormModal', () => {
     await user.type(searchInput, 'Eiffel');
     await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
 
-    await waitFor(() => expect(searchInput).toHaveValue('Eiffel'));
+    await waitFor(() => expect(searchHandlerCalled).toBe(true));
+    expect(searchBodies).toHaveLength(1);
+    expect(searchBodies[0]).toEqual({
+      query: 'Eiffel',
+      lang: 'en',
+      countryCode: 'CN',
+      providerOverride: 'amap',
+      locationBias: { lat: 48.86, lng: 2.355 },
+    });
+    expect(searchInput).toHaveValue('Eiffel');
   });
 
   it('FE-PLANNER-PLACEFORM-043: places spread over more than 500 km send no location bias', async () => {
