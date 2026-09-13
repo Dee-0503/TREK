@@ -2604,23 +2604,23 @@ describe('controller-facing wrappers delegate to the folded methods', () => {
     try {
       const circleBias = { lat: 1, lng: 2, radius: 5 };
       await svc.search(3, 'berlin', 'de', circleBias);
-      expect(spies.searchPlaces).toHaveBeenCalledWith(3, 'berlin', 'de', circleBias);
+      expect(spies.searchPlaces).toHaveBeenCalledWith(3, 'berlin', 'de', circleBias, undefined);
 
       const rectBias = { low: { lat: 1, lng: 2 }, high: { lat: 3, lng: 4 } };
       await svc.autocomplete(3, 'be', 'en', rectBias);
-      expect(spies.autocompletePlaces).toHaveBeenCalledWith(3, 'be', 'en', rectBias, undefined);
+      expect(spies.autocompletePlaces).toHaveBeenCalledWith(3, 'be', 'en', rectBias, undefined, undefined);
 
       await svc.details(3, 'p1', 'de');
-      expect(spies.getPlaceDetails).toHaveBeenCalledWith(3, 'p1', 'de', undefined);
+      expect(spies.getPlaceDetails).toHaveBeenCalledWith(3, 'p1', 'de', undefined, undefined);
 
       await svc.detailsExpanded(3, 'p1', 'de', true);
-      expect(spies.getPlaceDetailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true);
+      expect(spies.getPlaceDetailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true, undefined);
 
       await svc.photo(3, 'p1', 1.5, 2.5, 'Spot');
       expect(spies.getPlacePhoto).toHaveBeenCalledWith(3, 'p1', 1.5, 2.5, 'Spot');
 
       await svc.reverse('1', '2', 'de');
-      expect(spies.reverseGeocode).toHaveBeenCalledWith('1', '2', 'de');
+      expect(spies.reverseGeocode).toHaveBeenCalledWith('1', '2', 'de', { context: undefined });
 
       await svc.resolveUrl('https://maps.app.goo.gl/x');
       expect(spies.resolveGoogleMapsUrl).toHaveBeenCalledWith('https://maps.app.goo.gl/x');

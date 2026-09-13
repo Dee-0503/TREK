@@ -1213,11 +1213,11 @@ describe('enrichImportedPlaces', () => {
     return makePlacesService(maps as MapsService);
   }
 
-  it('PLACE-SVC-058 — no-ops when no Google Maps key is configured', async () => {
-    const searchPlaces = vi.fn();
+  it('PLACE-SVC-058 — routes imported places without requiring a Google Maps key', async () => {
+    const searchPlaces = vi.fn(async () => ({ places: [], source: 'openstreetmap' }));
     const svcNoKey = enrichSvc({ getMapsKey: vi.fn(() => null), searchPlaces });
     await svcNoKey.enrichImportedPlaces('1', 1, [{ id: 1, name: 'A', lat: 1, lng: 2 }]);
-    expect(searchPlaces).not.toHaveBeenCalled();
+    expect(searchPlaces).toHaveBeenCalledWith(1, 'A', undefined, { lat: 1, lng: 2, radius: 2000 });
   });
 
   it('PLACE-SVC-059 — no-ops for an empty batch without touching the provider', async () => {
@@ -1233,8 +1233,7 @@ describe('enrichImportedPlaces', () => {
     // An address the import already captured must survive the COALESCE.
     testDb.prepare('UPDATE places SET address = ? WHERE id = ?').run('Imported address', place.id);
 
-    const svcWithMaps = svc;
-    const _unusedEnrichSvc = enrichSvc({
+    const svcWithMaps = enrichSvc({
       getMapsKey: vi.fn(() => 'key'),
       searchPlaces: vi.fn(async () => ({
         source: 'google',

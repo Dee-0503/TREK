@@ -227,7 +227,7 @@ describe('saved places + dedup', () => {
     const first = svc.savePlace(u.id, {
       collection_id: col.id, name: '人民公园', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
     });
-    expect(first.place).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null });
+    expect(first.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
 
     const duplicate = svc.savePlace(u.id, {
       collection_id: col.id, name: 'Renamed park', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
@@ -271,7 +271,7 @@ describe('saved places + dedup', () => {
 
     expect(svc.savePlace(u.id, { collection_id: col.id, name: 'Google renamed', provider: 'google', provider_place_id: 'legacy-google' }).duplicate).toBe(true);
     expect(svc.savePlace(u.id, { collection_id: col.id, name: 'OSM renamed', provider: 'openstreetmap', provider_place_id: 'node:legacy' }).duplicate).toBe(true);
-    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'AMap collision', provider: 'amap', provider_place_id: 'legacy-google' }).duplicate).toBe(false);
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'AMap collision', provider: 'amap', provider_place_id: 'legacy-google' }).duplicate).toBeUndefined();
   });
   it('COLLECTIONS-SVC-108: legacy fallback is provider-scoped and excludes AMap', () => {
     const u = createUser(testDb).user;
@@ -284,7 +284,8 @@ describe('saved places + dedup', () => {
     expect(osmDuplicate.duplicate).toBe(true);
 
     const amap = svc.savePlace(u.id, { collection_id: col.id, name: 'AMap', provider: 'amap', provider_place_id: 'same-id' });
-    expect(amap.duplicate).toBe(false);
+    expect(amap.duplicate).toBeUndefined();
+    expect(amap.place).toBeDefined();
   });
   it('COLLECTIONS-SVC-102: saveFromTripPlaces skips a place already saved by provider identity', () => {
     // savePlace was not the only caller. The bulk copy carries the provider ids
@@ -344,7 +345,7 @@ describe('saveFromTripPlace', () => {
     const col = svc.createCollection(u.id, { name: 'From trip' });
 
     const result = svc.saveFromTripPlace(u.id, col.id, trip.id, place.id);
-    expect(result.place).toMatchObject({ provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2', google_place_id: null });
+    expect(result.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
   });
   it('COLLECTIONS-SVC-014b: saveFromTripPlace rejects an inaccessible source trip', () => {
     const owner = createUser(testDb).user;

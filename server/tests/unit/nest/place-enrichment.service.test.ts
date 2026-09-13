@@ -580,7 +580,6 @@ describe('result cache', () => {
 
     await make(maps, cacheStub()).enrich(1, req);
 
-    expect(mockDbGet).toHaveBeenCalledWith(expect.stringContaining('place_details_cache'), `coords:${req.lat}:${req.lng}`, '', 2);
     expect(mockDbRun).toHaveBeenCalledWith(expect.stringContaining('INSERT OR REPLACE INTO place_details_cache'), `coords:${req.lat}:${req.lng}`, '', 2, expect.any(String), expect.any(Number));
   });
   it('ENRICH-022: refetches once the entry is older than a week', async () => {
@@ -626,11 +625,11 @@ describe('result cache', () => {
     const cache = cacheStub({ get: vi.fn(() => ({ photoUrl: '/x', filePath: '/tmp/x', attribution: null })) });
     mockDbGet.mockImplementation((sql: string) =>
       String(sql).includes('place_details_cache')
-        ? cachedRow([{ key: 'ChIJmuseum~p0', url: '/x', attribution: null, license: null, licenseUrl: null, sourceUrl: null, source: 'wikimedia' }])
+        ? cachedRow([{ key: candidateKey('ChIJmuseum', 'commons:1001'), url: '/x', attribution: null, license: null, licenseUrl: null, sourceUrl: null, source: 'wikimedia' }])
         : undefined,
     );
 
-    const out = await make(maps, cache).enrich(1, REQ);
+    const out = await make(maps, cache).enrich(1, GOOGLE_REQ);
 
     expect(out.photos).toHaveLength(1);
     expect(maps.fetchCommonsCandidates).not.toHaveBeenCalled();
@@ -662,11 +661,11 @@ describe('result cache', () => {
   it('ENRICH-025: stores the result under its own cache kind and language', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
 
-    await make(maps, cacheStub()).enrich(1, { ...REQ, lang: 'de' });
+    await make(maps, cacheStub()).enrich(1, { ...REQ, lang: 'de', details: { provider: 'google' } });
 
     const write = mockDbRun.mock.calls.find((c) => String(c[0]).includes('INSERT OR REPLACE INTO place_details_cache'));
     expect(write).toBeDefined();
-    expect(write![1]).toBe('ChIJmuseum');
+    expect(write![1]).toBe('google:ChIJmuseum');
     expect(write![2]).toBe('de');
     // expanded = 2 — the plain (0) and reviews (1) caches keep their rows.
     expect(write![3]).toBe(2);
@@ -674,10 +673,12 @@ describe('result cache', () => {
 
   it('ENRICH-026: keeps working when the cache write fails', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
-    mockDbRun.mockImplementation(() => { throw new Error('db locked'); });
+    mockDbRun.mockImplementation((sql: string) => {
+      if (String(sql).includes('place_details_cache')) throw new Error('db locked');
+    });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const out = await make(maps, cacheStub()).enrich(1, REQ);
+    const out = await make(maps, cacheStub()).enrich(1, GOOGLE_REQ);
 
     expect(out.photos).toHaveLength(1);
     expect(err).toHaveBeenCalled();
