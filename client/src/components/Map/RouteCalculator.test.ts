@@ -398,7 +398,7 @@ describe('calculateRouteWithLegs', () => {
     await calculateRouteWithLegs(wps, { profile: 'driving', countryCode: 'CN', providerOverride: 'amap' })
     expect(routeSpy).toHaveBeenCalledWith(expect.objectContaining({
       profile: 'driving', countryCode: 'CN', providerOverride: 'amap',
-    }))
+    }), undefined)
   })
 
   it('FE-COMP-ROUTECALCULATOR-033: returns an empty route for fewer than 2 waypoints without calling OSRM', async () => {
@@ -490,7 +490,6 @@ describe('calculateRouteWithLegs', () => {
     expect(result.legs).toEqual([])
     expect(result.coordinates).toEqual([[48.85, 2.35]])
   })
-})
 
   it('FE-COMP-ROUTECALCULATOR-050: explicit AMap override routes through the server without country context', async () => {
     const spy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
@@ -498,7 +497,7 @@ describe('calculateRouteWithLegs', () => {
       routeSource: { provider: 'amap', fallback: false }, legs: [],
     })
     const result = await calculateRouteWithLegs(freshWaypoints(), { profile: 'driving', providerOverride: 'amap' })
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ providerOverride: 'amap' }), expect.anything())
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ providerOverride: 'amap' }), undefined)
     expect(result.routeSource).toEqual({ provider: 'amap', fallback: false })
   })
 
@@ -535,6 +534,7 @@ describe('calculateRouteWithLegs', () => {
     const result = await calculateRouteWithLegs(wps, { profile: 'plugin:ev-router/fastest', tripId: 7 })
 
     expect(result.coordinates).toEqual([[48.85, 2.35], [48.9, 2.4]])
+    expect(result.routeSource).toEqual({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' })
     expect(result.legs[0].noteText).toBe('25 min charge')
     expect(result.legs[0].drivingText).toBe('1 h 30 min')
     expect(result.legs[0].distanceText).toBe('120 km')

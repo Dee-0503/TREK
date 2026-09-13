@@ -332,7 +332,12 @@ export async function calculateRouteWithLegs(
       coordinates: route.coordinates,
       distance: route.distance,
       duration: route.duration,
-      routeSource: { provider: 'amap', fallback: false },
+      routeSource: {
+        provider: 'plugin',
+        fallback: false,
+        pluginId: route.pluginId,
+        profile: route.profile,
+      },
       legs,
       ...(route.viaPoints.length ? { vias: route.viaPoints } : {}),
     }

@@ -23,7 +23,7 @@ function aggregateRouteSources(sources: RouteWithLegs['routeSource'][]): RouteWi
   const fallback = sources.some(source => source.fallback)
   if (providers.size > 1) {
     return {
-      provider: 'osrm',
+      provider: 'mixed',
       fallback: true,
       fallbackReason: 'mixed_provider',
       ...(reasons.length ? { fallbackReasons: reasons } : {}),
@@ -299,7 +299,15 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
             if (r.vias) allVias.push(...r.vias)
           } catch (err) {
             if (err instanceof Error && err.name === 'AbortError') throw err
-            // Routing failed for these legs — fall back to straight lines, no times.
+            // Routing failed for these legs — retain a synthetic source so the
+            // aggregated UI explains which provider/chunk fell back to a straight line.
+            const failureReason = err instanceof Error && err.message ? err.message : 'provider_failure'
+            allRouteSources.push({
+              provider: mode.startsWith('plugin:') ? 'plugin' : (routeContext.providerOverride ?? 'osrm'),
+              fallback: true,
+              fallbackReason: failureReason,
+              ...(mode.startsWith('plugin:') ? { pluginId: mode.slice('plugin:'.length).split('/')[0], profile: mode } : {}),
+            })
             pushCoords(straight())
           }
           i = end

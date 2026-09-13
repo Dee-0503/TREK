@@ -46,11 +46,15 @@ const requestContext = {
 
 /** Route source metadata returned by the real route consumer. */
 export const routeSourceSchema = z.object({
-  provider: z.enum(['amap', 'osrm']),
+  /** `plugin` identifies a plugin route; `mixed` is used when chunks use different providers. */
+  provider: z.enum(['amap', 'osrm', 'plugin', 'mixed']),
   fallback: z.boolean(),
   fallbackReason: z.string().optional(),
   /** All distinct fallback reasons when a route combines multiple chunks. */
   fallbackReasons: z.array(z.string()).optional(),
+  /** Identifies the plugin route profile when provider is `plugin`. */
+  pluginId: z.string().optional(),
+  profile: z.string().optional(),
 });
 export type RouteSource = z.infer<typeof routeSourceSchema>;
 

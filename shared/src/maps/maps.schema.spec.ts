@@ -23,7 +23,8 @@ describe('provider-neutral map contracts', () => {
     expect(mapProviderSchema.parse('amap')).toBe('amap');
     expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' });
     expect(() => providerOverrideSchema.parse('unknown')).toThrow();
-    expect(routeSourceSchema.parse({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })).toMatchObject({ provider: 'osrm', fallback: true });
+    expect(routeSourceSchema.parse({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' })).toMatchObject({ provider: 'plugin', pluginId: 'ev-router' });
+    expect(routeSourceSchema.parse({ provider: 'mixed', fallback: true, fallbackReason: 'mixed_provider' })).toMatchObject({ provider: 'mixed', fallback: true });
     expect(routeWithLegsSchema.safeParse({ coordinates: [[39.9, 116.4]], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true }, legs: [] }).success).toBe(true);
   });
 

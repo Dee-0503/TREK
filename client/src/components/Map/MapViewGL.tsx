@@ -100,7 +100,7 @@ interface Props {
   routeVias?: RouteVia[]
   route?: [number, number][][] | null
   routeSegments?: RouteSegment[]
-  routeSource?: { provider: 'amap' | 'osrm'; fallback: boolean; fallbackReason?: string }
+  routeSource?: { provider: 'amap' | 'osrm' | 'plugin' | 'mixed'; fallback: boolean; fallbackReason?: string; fallbackReasons?: string[]; pluginId?: string; profile?: string }
   selectedPlaceId?: number | null
   onMarkerClick?: (id: number) => void
   hoverDisabled?: boolean
