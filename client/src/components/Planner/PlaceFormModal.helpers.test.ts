@@ -8,7 +8,7 @@ describe('mergeResult provider identity', () => {
 
     const next = mergeResult(prev, { name: 'OSM place' }, owned)
 
-    expect(next.provider).toBe('')
+    expect(next.provider).toBeUndefined()
     expect(next.provider_place_id).toBe('')
     expect(owned.has('provider')).toBe(false)
     expect(owned.has('provider_place_id')).toBe(false)
