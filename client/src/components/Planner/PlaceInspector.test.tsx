@@ -720,7 +720,7 @@ describe('PlaceInspector', () => {
 
   it('FE-PLANNER-INSPECTOR-039: session storage cache prevents duplicate mapsApi calls', async () => {
     // Prime the session storage cache with language 'en' (default)
-    sessionStorage.setItem('gdetails_ChIJ005_en', JSON.stringify({ rating: 3.0 }));
+    sessionStorage.setItem('gdetails_google_ChIJ005_en', JSON.stringify({ rating: 3.0 }));
     const p = buildPlace({ id: 304, google_place_id: 'ChIJ005' });
     render(<PlaceInspector {...defaultProps} place={p} />);
     // Wait for effect to run
