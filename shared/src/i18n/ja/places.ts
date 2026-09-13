@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': '画像を削除',
   'places.imageUploadError': '画像をアップロードできませんでした',
   'places.imageRemoveError': '画像を削除できませんでした',
+  'places.providerUnavailable': 'プロバイダーを利用できません',
+  'places.hoursUnavailable': '営業時間を取得できません',
+  'places.source': '出典：{source}',
+  'places.fetchedAt': '取得日時：{fetchedAt}',
 };
 export default places;

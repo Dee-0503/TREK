@@ -128,7 +128,7 @@ describe('PlPlaceSearch', () => {
     fireEvent.click(await screen.findByText('Louvre'))
 
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2))
-    expect(searchBodies[0]).toEqual({ query: 'Louvre, Paris, France' })
+    expect(searchBodies[0]).toEqual({ query: 'Louvre, Paris, France', lang: 'en' })
     expect(onPick).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Louvre Museum', lat: '48.8606' }))
   })
 
@@ -310,7 +310,7 @@ describe('PlPlaceSearch', () => {
     fireEvent.change(input, { target: { value: 'Lou' } })
     fireEvent.click(await screen.findByText('Louvre'))
     await waitFor(() => expect(searchBodies).toHaveLength(1))
-    expect(searchBodies[0]).toEqual({ query: 'Louvre' })
+    expect(searchBodies[0]).toEqual({ query: 'Louvre', lang: 'en' })
   })
 
   it('FE-MOB-PLSRCH-018c: a response without a places array leaves the result list empty', async () => {

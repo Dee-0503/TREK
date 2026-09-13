@@ -60,6 +60,13 @@
   <Config Name="OIDC_SCOPE" Target="OIDC_SCOPE" Default="openid email profile" Mode="" Description="Space-separated OIDC scopes to request. Fully overrides the default — always include openid email profile plus any extra scopes you need (e.g. add groups when using OIDC_ADMIN_CLAIM)." Type="Variable" Display="advanced" Required="false" Mask="false">openid email profile</Config>
   <Config Name="OIDC_DISCOVERY_URL" Target="OIDC_DISCOVERY_URL" Default="" Mode="" Description="Override the auto-constructed OIDC discovery endpoint. Useful for providers with a non-standard path (e.g. Authentik)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
 
+  <Config Name="AMAP_API_KEY" Target="AMAP_API_KEY" Default="" Mode="" Description="Server-only AMap key. Keep masked; never exposed to the client bundle. Requires server egress to restapi.amap.com." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="AMAP_API_BASE" Target="AMAP_API_BASE" Default="https://restapi.amap.com" Mode="" Description="AMap API base URL (server runtime)." Type="Variable" Display="advanced" Required="false" Mask="false">https://restapi.amap.com</Config>
+  <Config Name="AMAP_TIMEOUT_MS" Target="AMAP_TIMEOUT_MS" Default="10000" Mode="" Description="AMap request timeout in milliseconds." Type="Variable" Display="advanced" Required="false" Mask="false">10000</Config>
+  <Config Name="AMAP_CACHE_TTL_SECONDS" Target="AMAP_CACHE_TTL_SECONDS" Default="300" Mode="" Description="Bounded AMap response cache TTL in seconds; this is not a bulk POI mirror." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
+  <Config Name="AMAP_RATE_LIMIT_PER_MINUTE" Target="AMAP_RATE_LIMIT_PER_MINUTE" Default="60" Mode="" Description="Reserved per-minute AMap request-rate setting; not enforced by server runtime." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
+  <Config Name="PLACES_PROVIDER_MODE" Target="PLACES_PROVIDER_MODE" Default="auto" Mode="" Description="Places provider mode: auto, google, amap, or osm. A mode or request override only applies when the target provider is configured and enabled; otherwise the fallback/default remains in effect." Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>
+
   <!-- Other -->
   <Config Name="DEMO_MODE" Target="DEMO_MODE" Default="false" Mode="" Description="Enable demo mode (resets all data hourly). Not intended for regular use." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
   <Config Name="MCP_RATE_LIMIT" Target="MCP_RATE_LIMIT" Default="300" Mode="" Description="Max MCP API requests per user per minute." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>

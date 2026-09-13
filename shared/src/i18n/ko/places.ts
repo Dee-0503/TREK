@@ -126,5 +126,9 @@ const places: TranslationStrings = {
   'places.removeImage': '이미지 제거',
   'places.imageUploadError': '이미지를 업로드할 수 없습니다',
   'places.imageRemoveError': '이미지를 제거할 수 없습니다',
+  'places.providerUnavailable': '제공자를 사용할 수 없음',
+  'places.hoursUnavailable': '영업시간을 확인할 수 없음',
+  'places.source': '출처: {source}',
+  'places.fetchedAt': '가져온 시간: {fetchedAt}',
 };
 export default places;

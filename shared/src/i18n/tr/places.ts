@@ -130,5 +130,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Görseli kaldır',
   'places.imageUploadError': 'Görsel yüklenemedi',
   'places.imageRemoveError': 'Görsel kaldırılamadı',
+  'places.providerUnavailable': 'Sağlayıcı kullanılamıyor',
+  'places.hoursUnavailable': 'Çalışma saatleri kullanılamıyor',
+  'places.source': 'Kaynak: {source}',
+  'places.fetchedAt': 'Alınma zamanı: {fetchedAt}',
 };
 export default places;

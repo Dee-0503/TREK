@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Dostęp do lokalizacji jest zablokowany. Sprawdź ustawienia urządzenia; zainstalowana aplikacja ma własne uprawnienie do lokalizacji, niezależne od przeglądarki.',
   'map.location.unavailable': 'Nie udało się ustalić Twojej lokalizacji.',
   'map.location.timeout': 'Ustalanie lokalizacji trwało zbyt długo. Spróbuj ponownie przy lepszej widoczności nieba.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Trasa jest wyświetlana przez OpenStreetMap, ponieważ AMap był niedostępny.',
 };
 export default map;

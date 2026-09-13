@@ -105,6 +105,12 @@ LLM_TIMEOUT_MS.
 The exemption list is enforced by the `no-restricted-syntax` ban on
 `process.env` in `eslint.config.mjs` — keep the two lists in sync.
 
+## Maps provider routing
+
+AMap configuration is server-only and is read from runtime environment variables. `AMAP_API_KEY` is never sent to the client or included in a client build. `AMAP_API_BASE` defaults to `https://restapi.amap.com`; `AMAP_TIMEOUT_MS` defaults to `10000` and `AMAP_CACHE_TTL_SECONDS` to `300`. `AMAP_RATE_LIMIT_PER_MINUTE` defaults to `60` but is currently a reserved configuration setting, not an enforced server-side rate limiter. `PLACES_PROVIDER_MODE` accepts `auto`, `google`, `amap`, or `osm` (`openstreetmap` is an alias).
+
+In `auto`, mainland China requests prefer AMap when it is configured and enabled; otherwise the existing enabled-provider fallback applies. Overseas requests use the configured global provider, and when AMap is not enabled the existing OSRM routing remains in use. A manual provider mode or request override only takes effect when that provider is configured and enabled; otherwise selection continues through the existing fallback/default. For mainland-China driving, walking, and cycling, an AMap route failure falls back to OSRM after one attempt. The server must be able to reach `restapi.amap.com`; use a fixed egress IP and restrict the AMap key to the required API/product and server IPs. The response cache is bounded and short-lived; it is not a bulk POI mirror.
+
 ## Follow-up candidates (quirks pinned during the migration, deliberately NOT fixed)
 
 - `numberOr` (`Number(x) || d`) treats `"0"` and negative-invalid values oddly:

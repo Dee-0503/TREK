@@ -88,7 +88,9 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   } = props
   const [form, setForm] = useState(DEFAULT_FORM)
   const [mapsSearch, setMapsSearch] = useState('')
-  const [mapsResults, setMapsResults] = useState([])
+  const [mapsResults, setMapsResults] = useState<Record<string, unknown>[]>([])
+  const [providerOverride, setProviderOverride] = useState<'google' | 'amap' | 'osm' | undefined>()
+  const [autocompleteSource, setAutocompleteSource] = useState<string | undefined>()
   const [isSearchingMaps, setIsSearchingMaps] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [showNewCategory, setShowNewCategory] = useState(false)
@@ -142,6 +144,9 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
         end_time: timeSource.end_time || '',
         notes: place.notes || '',
         transport_mode: place.transport_mode || 'walking',
+        provider: place.provider ?? undefined,
+        provider_place_id: place.provider_place_id ?? undefined,
+        google_place_id: place.google_place_id ?? undefined,
         website: place.website || '',
         // The day-specific note rides only with an assignment in context (#2163);
         // otherwise the key stays absent so submit never sends a notes write.
@@ -182,7 +187,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     // because only handleSelectMapsResult ever set it.
     if (place && place.lat != null && place.lng != null) {
       setDetailsSelection({
-        placeId: place.google_place_id || place.osm_id || undefined,
+        placeId: place.provider_place_id || place.google_place_id || place.osm_id || undefined,
+        provider: place.provider ?? undefined,
         lat: Number(place.lat),
         lng: Number(place.lng),
         name: place.name || '',
@@ -251,8 +257,16 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     const controller = new AbortController()
     acAbortRef.current = controller
     try {
-      const result = await mapsApi.autocomplete(query, language, locationBias, controller.signal, placesSessionRef.current.current())
+      const context = {
+        countryCode: (tripObj as { country_code?: string | null } | null)?.country_code?.toUpperCase(),
+        locationBias,
+        lang: language,
+        providerOverride,
+        sessionToken: providerOverride === 'amap' ? undefined : placesSessionRef.current.current(),
+      }
+      const result = await mapsApi.autocomplete(query, context, undefined, controller.signal)
       setAcSuggestions(result.suggestions || [])
+      setAutocompleteSource(result.source)
       setAcHighlight(-1)
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return
@@ -260,7 +274,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       console.error('Autocomplete failed:', err)
       setAcSuggestions([])
     }
-  }, [language, locationBias])
+  }, [language, locationBias, providerOverride, tripObj])
 
   // Debounce effect — only watches mapsSearch
   useEffect(() => {
@@ -310,7 +324,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
           return
         }
       }
-      const result = await mapsApi.search(mapsSearch, language)
+      const result = await mapsApi.search(mapsSearch, { lang: language, providerOverride, countryCode: (tripObj as { country_code?: string | null } | null)?.country_code?.toUpperCase(), locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
       setMapsResults(result.places || [])
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
@@ -321,13 +335,13 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
 
   const handleSelectMapsResult = (result) => {
     setForm(prev => mergeResult(prev, result, autoFilledRef.current))
-    // The one point every pick flows through, so the detail column hangs here.
     // A new pick drops whatever hero image belonged to the previous place.
     const lat = Number(result.lat)
     const lng = Number(result.lng)
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setDetailsSelection({
-        placeId: result.google_place_id || result.osm_id || undefined,
+        placeId: result.providerIdentity?.providerPlaceId || result.google_place_id || result.osm_id || undefined,
+        provider: result.providerIdentity?.provider,
         lat,
         lng,
         name: result.name || '',
@@ -359,7 +373,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       try {
         // Spends the session the suggestions opened, so Google bills the search
         // once rather than per keystroke.
-        const result = await mapsApi.details(suggestion.placeId, language, placesSessionRef.current.peek())
+        const result = await mapsApi.details(suggestion.placeId, { lang: language, provider: autocompleteSource === 'amap' ? 'amap' : providerOverride, sessionToken: autocompleteSource === 'amap' ? undefined : placesSessionRef.current.peek() })
         if (result.place && result.place.lat != null && result.place.lng != null) {
           place = result.place
         }
@@ -368,7 +382,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       }
       if (!place) {
         const query = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(query, language)
+        const search = await mapsApi.search(query, { lang: language, providerOverride, countryCode: (tripObj as { country_code?: string | null } | null)?.country_code?.toUpperCase(), locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
         place = search.places?.[0] ?? null
       }
       if (place) {
@@ -533,6 +547,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     setMapsSearch,
     mapsResults,
     setMapsResults,
+    providerOverride,
+    setProviderOverride,
     isSearchingMaps,
     setIsSearchingMaps,
     newCategoryName,
@@ -605,6 +621,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     setMapsSearch,
     mapsResults,
     setMapsResults,
+    providerOverride,
+    setProviderOverride,
     isSearchingMaps,
     setIsSearchingMaps,
     newCategoryName,
@@ -711,6 +729,23 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
               {t('places.osmActive')}
             </p>
           )}
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <label htmlFor="place-provider-override" className="text-caption text-content-muted">Provider</label>
+            <select
+              id="place-provider-override"
+              value={providerOverride ?? ''}
+              onChange={(event) => {
+                      const value = event.target.value
+                      setProviderOverride(value === 'google' || value === 'amap' || value === 'osm' ? value : undefined)
+                    }}
+              className="rounded border border-edge bg-surface-input px-2 py-1 text-caption text-content"
+            >
+              <option value="">Automatic</option>
+              <option value="amap">AMap</option>
+              <option value="google">Google</option>
+              <option value="osm">OpenStreetMap</option>
+            </select>
+          </div>
           <div className="relative">
             <div className="flex gap-2">
               <input
@@ -771,8 +806,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
                   onClick={() => handleSelectMapsResult(result)}
                   className="w-full text-left px-3 py-2 hover:bg-surface-hover border-b border-edge-faint last:border-0"
                 >
-                  <div className="font-medium text-sm">{result.name}</div>
-                  <div className="text-xs text-content-muted truncate">{result.address}</div>
+                  <div className="font-medium text-sm">{typeof result.name === 'string' ? result.name : ''}</div>
+                  <div className="text-xs text-content-muted truncate">{typeof result.address === 'string' ? result.address : ''}</div>
                 </button>
               ))}
             </div>

@@ -17,9 +17,9 @@ export class MapsMcp {
 
   @Tool({
     name: 'get_place_details',
-    description: 'Fetch detailed information about a place by its Google Place ID. The plain lookup returns name, address, coordinates, rating, opening hours, phone and website, and always answers with an empty review list. Set expand only when visitor reviews or the editorial summary are what was actually asked for: that field mask bills as a Google Enterprise SKU and costs the instance owner several times a plain lookup.',
+    description: 'Fetch detailed information about a place by its provider-qualified place ID. The plain lookup returns name, address, coordinates, rating, opening hours, phone and website, and always answers with an empty review list. Set expand only when visitor reviews or the editorial summary are what was actually asked for.',
     inputSchema: {
-      placeId: z.string().describe('Google Place ID'),
+      placeId: z.string().describe('Provider-qualified place ID (for example amap:B0FFFAB6J2, node:123, or a Google Place ID)'),
       lang: z.string().optional().default('en'),
       expand: z.boolean().optional().default(false).describe('Also fetch up to five visitor reviews and the editorial summary. Billed as an Enterprise SKU, so leave it off unless the answer needs them'),
       refresh: z.boolean().optional().default(false).describe('Bypass the cached expanded payload and re-fetch from the provider. Only does anything together with expand, and pays the expanded price again'),

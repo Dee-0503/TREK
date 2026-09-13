@@ -71,6 +71,7 @@ export function useMPlanTimeline(planner: TripPlanner) {
     true,
     routeProfile,
     tripAccommodations,
+    { countryCode: (planner.trip as { country_code?: string | null } | null)?.country_code ?? undefined },
   )
 
   const rows = useMemo<PlanRow[]>(() => {

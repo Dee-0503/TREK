@@ -125,5 +125,9 @@ const places: TranslationStrings = {
   'places.removeImage': '移除圖片',
   'places.imageUploadError': '無法上傳圖片',
   'places.imageRemoveError': '無法刪除圖片',
+  'places.providerUnavailable': '服務提供者無法使用',
+  'places.hoursUnavailable': '營業時間無法取得',
+  'places.source': '來源：{source}',
+  'places.fetchedAt': '取得時間：{fetchedAt}',
 };
 export default places;

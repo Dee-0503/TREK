@@ -267,7 +267,7 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
     visibleConnections, toggleConnection, allConnectionsShown, toggleAllConnections, mapTransportDetail, setMapTransportDetail,
     isMobile, isTouch,
     expandedDayIds, setExpandedDayIds, mapPlaces,
-    route, routeSegments, routeInfo, setRoute, setRouteInfo, updateRouteForDay,
+    route, routeSegments, routeInfo, routeSource, setRoute, setRouteInfo, updateRouteForDay,
     handleSelectDay, handlePlaceClick, handleMarkerClick, handleMapClick, handleMapContextMenu, openAddPlaceFromPoi,
     handleSavePlace, openPlaceEditor, handleDeletePlace, confirmDeletePlace, confirmDeletePlaces, confirmChangeCategory,
     handleAssignToDay, handleRemoveAssignment, handleReorder, handleReorderDays, handleAddDay, handleUpdateDayTitle,
@@ -381,6 +381,7 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
               days={days}
               selectedDayId={selectedDayId}
               routeSegments={routeSegments}
+              routeSource={routeSource}
               selectedPlaceId={selectedPlaceId}
               onMarkerClick={handleMarkerClick}
               onMapClick={handleMapClick}

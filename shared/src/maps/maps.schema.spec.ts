@@ -7,10 +7,35 @@ import {
   mapsPlaceEnrichmentResultSchema,
   placePhotoCandidateSchema,
   placeDescriptionSchema,
+  mapProviderSchema,
+  providerOverrideSchema,
+  routeSourceSchema,
+  routeWithLegsSchema,
+  mapsSearchResultSchema,
+  mapsPlaceDetailsResultSchema,
 } from './maps.schema';
+import { placeProviderIdentitySchema } from '../place/place.schema';
 
 import { describe, it, expect } from 'vitest';
 
+describe('provider-neutral map contracts', () => {
+  it('uses one provider identity source and validates route results', () => {
+    expect(mapProviderSchema.parse('amap')).toBe('amap');
+    expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' });
+    expect(() => providerOverrideSchema.parse('unknown')).toThrow();
+    expect(routeSourceSchema.parse({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' })).toMatchObject({ provider: 'plugin', pluginId: 'ev-router' });
+    expect(routeSourceSchema.parse({ provider: 'mixed', fallback: true, fallbackReason: 'mixed_provider' })).toMatchObject({ provider: 'mixed', fallback: true });
+    expect(routeWithLegsSchema.safeParse({ coordinates: [[39.9, 116.4]], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true }, legs: [] }).success).toBe(true);
+  });
+
+  it('projects old Google and OSM payloads without depending on unknown fields', () => {
+    const google = mapsSearchResultSchema.parse({ places: [{ google_place_id: 'ChIJx', name: 'Museum', address: 'Berlin', lat: 52.5, lng: 13.4, rating: 4.5, types: ['museum'], source: 'google', providerOnlyBlob: { nested: true } }], source: 'google' });
+    const osm = mapsPlaceDetailsResultSchema.parse({ place: { osm_id: 'node:42', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4, source: 'openstreetmap', extratags: { amenity: 'park' } } });
+    expect(google.places[0]).toMatchObject({ google_place_id: 'ChIJx', name: 'Museum' });
+    expect(google.places[0]).not.toHaveProperty('providerOnlyBlob');
+    expect(osm.place).toMatchObject({ osm_id: 'node:42', name: 'Park' });
+  });
+});
 describe('mapsSearchRequestSchema', () => {
   it('requires a non-empty query', () => {
     expect(mapsSearchRequestSchema.safeParse({ query: 'berlin' }).success).toBe(true);

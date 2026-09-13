@@ -221,7 +221,73 @@ describe('saved places + dedup', () => {
     expect(result.duplicateOf?.name).toBe('Original Name');
   });
 
-  it('COLLECTIONS-SVC-102: the bulk import recognises a renamed place by its provider id too', () => {
+  it('COLLECTIONS-SVC-104: preserves AMap identity and deduplicates by provider-qualified id', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'AMap' });
+    const first = svc.savePlace(u.id, {
+      collection_id: col.id, name: '人民公园', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+    });
+    expect(first.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+
+    const duplicate = svc.savePlace(u.id, {
+      collection_id: col.id, name: 'Renamed park', provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+    });
+    expect(duplicate.duplicate).toBe(true);
+    expect(testDb.prepare('SELECT google_place_id FROM collection_places WHERE id = ?').get(first.place!.id)).toEqual({ google_place_id: null });
+  });
+  it('COLLECTIONS-SVC-106: bulk save and copy preserve provider identity and SQL bindings', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Provider SQL' });
+    const trip = createTrip(testDb, u.id);
+    const source = createPlace(testDb, trip.id, { name: 'AMap source' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ?, google_place_id = NULL WHERE id = ?').run('amap', 'B0FFFAB6J2', source.id);
+
+    const saved = svc.saveFromTripPlaces(u.id, col.id, trip.id, [source.id]);
+    expect(saved.copied).toBe(1);
+    expect(testDb.prepare('SELECT provider, provider_place_id, google_place_id FROM collection_places WHERE collection_id = ?').get(col.id)).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+
+    const target = createTrip(testDb, u.id);
+    const copied = svc.copyToTrip(u.id, { trip_id: target.id, place_ids: [Number(testDb.prepare('SELECT id FROM collection_places WHERE collection_id = ?').get(col.id).id)] });
+    expect(copied.copied).toBe(1);
+    expect(testDb.prepare('SELECT provider, provider_place_id, google_place_id FROM places WHERE trip_id = ?').get(target.id)).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+  });
+
+  it('COLLECTIONS-SVC-107: preserves provider ids containing additional colons', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Colon IDs' });
+    svc.savePlace(u.id, { collection_id: col.id, name: 'Original', provider: 'osm', provider_place_id: 'node:42:way' });
+
+    const duplicate = svc.savePlace(u.id, { collection_id: col.id, name: 'Renamed', provider: 'osm', provider_place_id: 'node:42:way' });
+
+    expect(duplicate.duplicate).toBe(true);
+  });
+
+  it('COLLECTIONS-SVC-108b: legacy Google and OSM ids match provider-null rows', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Legacy null provider' });
+    const google = svc.savePlace(u.id, { collection_id: col.id, name: 'Google legacy', google_place_id: 'legacy-google' }).place!;
+    const osm = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM legacy', osm_id: 'node:legacy' }).place!;
+    testDb.prepare('UPDATE collection_places SET provider = NULL, provider_place_id = NULL WHERE id IN (?, ?)').run(google.id, osm.id);
+
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'Google renamed', provider: 'google', provider_place_id: 'legacy-google' }).duplicate).toBe(true);
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'OSM renamed', provider: 'openstreetmap', provider_place_id: 'node:legacy' }).duplicate).toBe(true);
+    expect(svc.savePlace(u.id, { collection_id: col.id, name: 'AMap collision', provider: 'amap', provider_place_id: 'legacy-google' }).duplicate).toBeUndefined();
+  });
+  it('COLLECTIONS-SVC-108: legacy fallback is provider-scoped and excludes AMap', () => {
+    const u = createUser(testDb).user;
+    const col = svc.createCollection(u.id, { name: 'Legacy scope' });
+    const google = svc.savePlace(u.id, { collection_id: col.id, name: 'Google', google_place_id: 'same-id' }).place!;
+    const osm = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM', osm_id: 'same-id' }).place!;
+    expect(google.id).not.toBe(osm.id);
+
+    const osmDuplicate = svc.savePlace(u.id, { collection_id: col.id, name: 'OSM renamed', provider: 'osm', provider_place_id: 'same-id', osm_id: 'same-id' });
+    expect(osmDuplicate.duplicate).toBe(true);
+
+    const amap = svc.savePlace(u.id, { collection_id: col.id, name: 'AMap', provider: 'amap', provider_place_id: 'same-id' });
+    expect(amap.duplicate).toBeUndefined();
+    expect(amap.place).toBeDefined();
+  });
+  it('COLLECTIONS-SVC-102: saveFromTripPlaces skips a place already saved by provider identity', () => {
     // savePlace was not the only caller. The bulk copy carries the provider ids
     // into the row it writes, so asking without them would recognise less than
     // the row it just wrote already knows.
@@ -237,6 +303,7 @@ describe('saved places + dedup', () => {
     expect(out.copied).toBe(0);
     expect(out.skipped.map(s => s.name)).toEqual(['Trattoria da Enzo']);
   });
+
 
   it('COLLECTIONS-SVC-103: the import picker marks that same place as already saved', () => {
     // The dialog and the import have to agree: a row shown as new that the import
@@ -270,7 +337,17 @@ describe('saveFromTripPlace', () => {
     expect(res.place!.name).toBe('Louvre');
   });
 
-  it('COLLECTIONS-SVC-015: rejects a trip the user cannot read (no IDOR)', () => {
+  it('COLLECTIONS-SVC-105: copies provider identity from a trip place into a collection join', () => {
+    const u = createUser(testDb).user;
+    const trip = createTrip(testDb, u.id);
+    const place = createPlace(testDb, trip.id, { name: '人民公园' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ?, google_place_id = NULL WHERE id = ?').run('amap', 'amap:B0FFFAB6J2', place.id);
+    const col = svc.createCollection(u.id, { name: 'From trip' });
+
+    const result = svc.saveFromTripPlace(u.id, col.id, trip.id, place.id);
+    expect(result.place).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+  });
+  it('COLLECTIONS-SVC-014b: saveFromTripPlace rejects an inaccessible source trip', () => {
     const owner = createUser(testDb).user;
     const stranger = createUser(testDb).user;
     createCategory(testDb);
@@ -281,6 +358,7 @@ describe('saveFromTripPlace', () => {
     expect(() => svc.saveFromTripPlace(stranger.id, col.id, trip.id, place.id)).toThrow();
     try { svc.saveFromTripPlace(stranger.id, col.id, trip.id, place.id); } catch (e) { expect((e as { status: number }).status).toBe(404); }
   });
+
 });
 
 // ── status + move ────────────────────────────────────────────────────────────
@@ -342,7 +420,32 @@ describe('status + updatePlace move', () => {
 // ── copy to trip ─────────────────────────────────────────────────────────────
 
 describe('copyToTrip', () => {
-  it('COLLECTIONS-SVC-020: reduced INSERT (itinerary defaults), skips dups, copies tags', () => {
+  it('COLLECTIONS-SVC-020A: bulk copy preserves AMap identity and provider duplicate matching', () => {
+    const u = createUser(testDb).user;
+    const trip = createTrip(testDb, u.id);
+    const col = svc.createCollection(u.id, { name: 'AMap collection' });
+    const saved = svc.savePlace(u.id, {
+      collection_id: col.id,
+      name: '人民公园',
+      provider: 'amap',
+      provider_place_id: 'B0FFFAB6J2',
+      google_place_id: null,
+    }).place!;
+
+    const copied = svc.copyToTrip(u.id, { trip_id: trip.id, place_ids: [saved.id] });
+    expect(copied).toEqual({ copied: 1, skipped: [] });
+
+    const inserted = testDb.prepare(
+      'SELECT provider, provider_place_id, google_place_id FROM places WHERE trip_id = ? AND name = ?',
+    ).get(trip.id, '人民公园') as { provider: string | null; provider_place_id: string | null; google_place_id: string | null };
+    expect(inserted).toEqual({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null });
+
+    // Rename the source and copy it again: only provider identity can match now.
+    testDb.prepare('UPDATE collection_places SET name = ? WHERE id = ?').run('Renamed park', saved.id);
+    const duplicate = svc.copyToTrip(u.id, { trip_id: trip.id, place_ids: [saved.id] });
+    expect(duplicate).toEqual({ copied: 0, skipped: [{ id: saved.id, name: 'Renamed park' }] });
+  });
+  it('COLLECTIONS-SVC-020: copies places, skips duplicates, and copies tags', () => {
     const u = createUser(testDb).user;
     createCategory(testDb);
     const trip = createTrip(testDb, u.id);

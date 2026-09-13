@@ -367,6 +367,53 @@ describe('client > redirect handling', () => {
   })
 })
 
+describe('client > maps provider context', () => {
+  it('FE-APIWIRE-043: sends identical geographic context and provider override for search and autocomplete', async () => {
+    const requests: Array<{ url: string; body: unknown }> = []
+    server.use(
+      http.post('/api/maps/search', async ({ request }) => {
+        requests.push({ url: request.url, body: await request.json() })
+        return HttpResponse.json({ places: [], source: 'amap' })
+      }),
+      http.post('/api/maps/autocomplete', async ({ request }) => {
+        requests.push({ url: request.url, body: await request.json() })
+        return HttpResponse.json({ suggestions: [], source: 'amap' })
+      }),
+    )
+
+    const searchContext = {
+      countryCode: 'CN',
+      locationBias: { lat: 31.23, lng: 121.47, radius: 25 },
+      lang: 'zh-CN',
+      providerOverride: 'amap' as const,
+    }
+    const autocompleteContext = {
+      countryCode: 'CN',
+      locationBias: { low: { lat: 31.22, lng: 121.46 }, high: { lat: 31.24, lng: 121.48 } },
+      lang: 'zh-CN',
+      providerOverride: 'amap' as const,
+    }
+    await mapsApi.search('外滩', searchContext)
+    await mapsApi.autocomplete('外', autocompleteContext)
+
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.body).toEqual({ query: '外滩', ...searchContext })
+    expect(requests[1]?.body).toEqual({ input: '外', ...autocompleteContext })
+  })
+
+  it('FE-APIWIRE-044: omits Google session tokens for AMap details', async () => {
+    let query = ''
+    server.use(http.get('/api/maps/details/:id', ({ request }) => {
+      query = new URL(request.url).search
+      return HttpResponse.json({ place: null })
+    }))
+
+    await mapsApi.details('amap-poi-1', { lang: 'zh-CN', provider: 'amap', sessionToken: 'must-not-leak' })
+
+    expect(query).toBe('?lang=zh-CN')
+  })
+})
+
 describe('client > dev-only contract drift checks', () => {
   it('FE-APIWIRE-021: parseInDev passes a matching payload straight through', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

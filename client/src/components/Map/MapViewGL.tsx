@@ -23,6 +23,7 @@ import { resolveTrackColor, hasManualTrackColor } from './trackColors'
 import { buildPoiPopupHtml } from './placePopup'
 import { pluginsApi, type PluginMapMarker, type PluginMapLayer } from '../../api/client'
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../constants/mapDefaults'
+import { formatRouteSourceLabel } from './routeSourcePresentation'
 import { computeMapViewport, TILE_SIZE_GL } from '../../utils/mapViewport'
 
 function categoryIconSvg(iconName: string | null | undefined, size: number): string {
@@ -99,6 +100,7 @@ interface Props {
   routeVias?: RouteVia[]
   route?: [number, number][][] | null
   routeSegments?: RouteSegment[]
+  routeSource?: { provider: 'amap' | 'osrm' | 'plugin' | 'mixed'; fallback: boolean; fallbackReason?: string; fallbackReasons?: string[]; pluginId?: string; profile?: string }
   selectedPlaceId?: number | null
   onMarkerClick?: (id: number) => void
   hoverDisabled?: boolean
@@ -412,6 +414,7 @@ export function MapViewGL({
   routeVias = NO_ROUTE_VIAS,
   route = null,
   routeSegments = NO_ROUTE_SEGMENTS,
+  routeSource = null,
   selectedPlaceId = null,
   hoverDisabled = false,
   onMarkerClick,
@@ -440,6 +443,8 @@ export function MapViewGL({
   onMapReady,
 }: Props) {
   const rawMapboxStyle = useSettingsStore(s => s.settings.mapbox_style || MAPBOX_DEFAULT_STYLE)
+  const routeSourceLabel = formatRouteSourceLabel(routeSource)
+
   const rawMaplibreStyle = useSettingsStore(s => s.settings.maplibre_style || '')
   const mapboxToken = useSettingsStore(s => s.settings.mapbox_access_token || '')
   const mapbox3d = useSettingsStore(s => s.settings.mapbox_3d_enabled !== false)
@@ -1543,6 +1548,11 @@ export function MapViewGL({
 
   return (
     <div className="w-full h-full relative">
+      {routeSourceLabel && (
+        <div role="status" aria-live="polite" aria-label={`Route source: ${routeSourceLabel}`} className="absolute top-3 left-1/2 z-[30] -translate-x-1/2 rounded-full bg-surface-elevated px-3 py-1 text-content-secondary shadow-sm">
+          Route source: {routeSourceLabel}
+        </div>
+      )}
       <div ref={containerRef} className="w-full h-full" />
       {isMobile && (
         <LocationButton

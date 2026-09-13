@@ -27,6 +27,8 @@ export const tripSchema = z.object({
   start_date: z.string().nullable().optional(),
   end_date: z.string().nullable().optional(),
   currency: z.string(),
+  /** ISO 3166-1 alpha-2 country context for provider-aware routing when available. */
+  country_code: z.string().length(2).toUpperCase().nullable().optional(),
   cover_image: z.string().nullable().optional(),
   is_archived: z.number(),
   reminder_days: z.number(),

@@ -219,6 +219,9 @@ export interface EnrichablePlace {
   name: string;
   lat: number;
   lng: number;
+  provider?: string | null;
+  provider_place_id?: string | null;
+  providerIdentity?: { provider?: unknown; providerPlaceId?: unknown } | null;
   google_place_id?: string | null;
   google_ftid?: string | null;
   address?: string | null;
@@ -256,10 +259,18 @@ export function pickEnrichmentMatch(
 ): Record<string, unknown> | null {
   let best: { c: Record<string, unknown>; dist: number } | null = null;
   for (const c of candidates || []) {
-    const gpid = c.google_place_id;
+    const provider = typeof c.provider === 'string' ? c.provider.trim().toLowerCase() : null;
+    const nestedIdentity = c.providerIdentity && typeof c.providerIdentity === 'object'
+      ? c.providerIdentity as { provider?: unknown; providerPlaceId?: unknown }
+      : null;
+    const resolvedProvider = provider ?? (typeof nestedIdentity?.provider === 'string' ? nestedIdentity.provider.trim().toLowerCase() : null);
+    const providerId = typeof c.provider_place_id === 'string' ? c.provider_place_id.trim()
+      : typeof nestedIdentity?.providerPlaceId === 'string' ? nestedIdentity.providerPlaceId.trim() : '';
+    const hasIdentity = (providerId !== '' && ['google', 'amap', 'osm', 'openstreetmap'].includes(resolvedProvider ?? '')) ||
+      (typeof c.google_place_id === 'string' && c.google_place_id.trim() !== '');
     const lat = c.lat;
     const lng = c.lng;
-    if (typeof gpid !== 'string' || !gpid) continue;
+    if (!hasIdentity) continue;
     if (typeof lat !== 'number' || typeof lng !== 'number') continue;
     const dist = haversineMetres(target.lat, target.lng, lat, lng);
     if (dist > maxMeters) continue;

@@ -38,6 +38,8 @@ export function formatAssignmentWithPlace(a: AssignmentRow, tags: Partial<Tag>[]
       notes: a.place_notes,
       image_url: a.image_url,
       transport_mode: a.transport_mode,
+      provider: a.provider,
+      provider_place_id: a.provider_place_id,
       google_place_id: a.google_place_id,
       google_ftid: a.google_ftid,
       osm_id: a.osm_id,

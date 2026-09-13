@@ -1670,6 +1670,15 @@ describe('getPlaceDetails (fetch stubbed)', () => {
     await expect(svc.getPlaceDetailsExpanded(999, 'ChIJNotAnOsmId', 'en', false)).resolves.toEqual({ place: null });
   });
 
+  it('MAPS-041a: an AMap id never falls through to OSM when AMap is unavailable', async () => {
+    mockDbGet.mockReturnValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(svc.getPlaceDetails(999, 'amap:B0FFFAB6J2')).resolves.toEqual({ place: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('MAPS-041b: returns full Google place details on happy path', async () => {
     mockDbGet.mockReturnValueOnce({ maps_api_key: 'gkey' });
     vi.stubGlobal(
@@ -2522,6 +2531,65 @@ describe('photoBytesKey', () => {
 });
 
 describe('controller-facing wrappers delegate to the folded methods', () => {
+  it('projects public search results without provider-only fields', async () => {
+    const searchPlaces = vi.spyOn(MapsService.prototype, 'searchPlaces').mockResolvedValue({
+      places: [{
+        google_place_id: 'ChIJ123',
+        name: 'Cafe',
+        address: 'Paris',
+        lat: 48.8,
+        lng: 2.3,
+        providerOnlyToken: 'secret',
+        wikidata: 'Q123',
+      }],
+      source: 'google',
+    });
+    try {
+      await expect(svc.search(1, 'cafe')).resolves.toEqual({
+        places: [{ google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3 }],
+        source: 'google',
+      });
+      const result = await svc.search(1, 'cafe');
+      expect(result.places[0]).not.toHaveProperty('providerOnlyToken');
+      expect(result.places[0]).not.toHaveProperty('wikidata');
+      expect(result).not.toHaveProperty('providerOnlyEnvelopeField');
+    } finally {
+      searchPlaces.mockRestore();
+    }
+  });
+
+  it('projects public Google and OSM details without provider-only fields', async () => {
+    const getPlaceDetails = vi.spyOn(MapsService.prototype, 'getPlaceDetails').mockResolvedValue({
+      place: {
+        google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3,
+        googleMapsUri: 'https://provider.example/internal', providerOnlyToken: 'secret',
+      },
+      });
+    const getPlaceDetailsExpanded = vi.spyOn(MapsService.prototype, 'getPlaceDetailsExpanded').mockResolvedValue({
+      place: {
+        osm_id: 'node:123', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4,
+        wikidata: 'Q123', wikimedia_commons: 'Category:Park', providerOnlyToken: 'secret',
+      },
+    });
+    try {
+      await expect(svc.details(1, 'ChIJ123')).resolves.toEqual({
+        place: { google_place_id: 'ChIJ123', name: 'Cafe', address: 'Paris', lat: 48.8, lng: 2.3 },
+      });
+      await expect(svc.detailsExpanded(1, 'node:123', undefined, false)).resolves.toEqual({
+        place: { osm_id: 'node:123', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4 },
+      });
+      const google = await svc.details(1, 'ChIJ123');
+      const osm = await svc.detailsExpanded(1, 'node:123', undefined, false);
+      expect(google.place).not.toHaveProperty('providerOnlyToken');
+      expect(osm.place).not.toHaveProperty('wikidata');
+      expect(osm.place).not.toHaveProperty('wikimedia_commons');
+      expect(google).not.toHaveProperty('providerOnlyEnvelopeField');
+      expect(osm).not.toHaveProperty('providerOnlyEnvelopeField');
+    } finally {
+      getPlaceDetails.mockRestore();
+      getPlaceDetailsExpanded.mockRestore();
+    }
+  });
   it('search/autocomplete/details/detailsExpanded/photo/reverse/resolveUrl/pois forward their args', async () => {
     const spies = {
       searchPlaces: vi.spyOn(MapsService.prototype, 'searchPlaces').mockResolvedValue({ places: [], source: 'osm' }),
@@ -2536,23 +2604,23 @@ describe('controller-facing wrappers delegate to the folded methods', () => {
     try {
       const circleBias = { lat: 1, lng: 2, radius: 5 };
       await svc.search(3, 'berlin', 'de', circleBias);
-      expect(spies.searchPlaces).toHaveBeenCalledWith(3, 'berlin', 'de', circleBias);
+      expect(spies.searchPlaces).toHaveBeenCalledWith(3, 'berlin', 'de', circleBias, undefined);
 
       const rectBias = { low: { lat: 1, lng: 2 }, high: { lat: 3, lng: 4 } };
       await svc.autocomplete(3, 'be', 'en', rectBias);
-      expect(spies.autocompletePlaces).toHaveBeenCalledWith(3, 'be', 'en', rectBias, undefined);
+      expect(spies.autocompletePlaces).toHaveBeenCalledWith(3, 'be', 'en', rectBias, undefined, undefined);
 
       await svc.details(3, 'p1', 'de');
-      expect(spies.getPlaceDetails).toHaveBeenCalledWith(3, 'p1', 'de', undefined);
+      expect(spies.getPlaceDetails).toHaveBeenCalledWith(3, 'p1', 'de', undefined, undefined);
 
       await svc.detailsExpanded(3, 'p1', 'de', true);
-      expect(spies.getPlaceDetailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true);
+      expect(spies.getPlaceDetailsExpanded).toHaveBeenCalledWith(3, 'p1', 'de', true, undefined);
 
       await svc.photo(3, 'p1', 1.5, 2.5, 'Spot');
       expect(spies.getPlacePhoto).toHaveBeenCalledWith(3, 'p1', 1.5, 2.5, 'Spot');
 
       await svc.reverse('1', '2', 'de');
-      expect(spies.reverseGeocode).toHaveBeenCalledWith('1', '2', 'de');
+      expect(spies.reverseGeocode).toHaveBeenCalledWith('1', '2', 'de', { context: undefined });
 
       await svc.resolveUrl('https://maps.app.goo.gl/x');
       expect(spies.resolveGoogleMapsUrl).toHaveBeenCalledWith('https://maps.app.goo.gl/x');

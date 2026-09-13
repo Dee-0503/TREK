@@ -15,13 +15,16 @@ interface Props {
   onChange: (loc: LocationPoint | null) => void
   placeholder?: string
   style?: React.CSSProperties
+  countryCode?: string
+  locationBias?: { lat: number; lng: number; radius?: number }
+  providerOverride?: 'google' | 'amap' | 'osm'
 }
 
-export default function LocationSelect({ value, onChange, placeholder, style }: Props) {
+export default function LocationSelect({ value, onChange, placeholder, style, countryCode, locationBias, providerOverride }: Props) {
   const { t, locale } = useTranslation()
   const [query, setQuery] = useState(value?.name || '')
   const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<Record<string, unknown>[]>([])
   const [highlight, setHighlight] = useState(-1)
   const [loading, setLoading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -49,7 +52,7 @@ export default function LocationSelect({ value, onChange, placeholder, style }: 
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const data = await mapsApi.search(trimmed, locale)
+        const data = await mapsApi.search(trimmed, { lang: locale, countryCode, locationBias, providerOverride })
         setResults(data.places || [])
         setHighlight(-1)
       } catch {
@@ -61,11 +64,13 @@ export default function LocationSelect({ value, onChange, placeholder, style }: 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query, value, locale])
 
-  const pick = (r: any) => {
+  const pick = (r: Record<string, unknown>) => {
     const lat = Number(r.lat)
     const lng = Number(r.lng)
+    const rawName = typeof r.name === 'string' ? r.name : ''
+    const rawAddress = typeof r.address === 'string' ? r.address : ''
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-    const loc: LocationPoint = { name: r.name || r.address || 'Location', lat, lng, address: r.address || null }
+    const loc: LocationPoint = { name: rawName || rawAddress || 'Location', lat, lng, address: rawAddress || null }
     onChange(loc)
     setQuery(loc.name)
     setOpen(false)
@@ -127,8 +132,8 @@ export default function LocationSelect({ value, onChange, placeholder, style }: 
             >
               <MapPin size={12} className="text-content-faint" style={{ marginTop: 2, flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.address}</div>
-                {r.address && r.name && r.name !== r.address && (
+                <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{typeof r.name === 'string' ? r.name : typeof r.address === 'string' ? r.address : ''}</div>
+                {typeof r.address === 'string' && typeof r.name === 'string' && r.address && r.name && r.name !== r.address && (
                   <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.address}</div>
                 )}
               </span>

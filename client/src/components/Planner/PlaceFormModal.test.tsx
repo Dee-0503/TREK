@@ -204,6 +204,52 @@ describe('PlaceFormModal', () => {
     expect(await screen.findByText('Eiffel Tower')).toBeInTheDocument();
   });
 
+  it('FE-PLANNER-PLACEFORM-020a: picking a provider result then an identity-less result clears stale provider fields', async () => {
+    const user = userEvent.setup()
+    server.use(http.post('/api/maps/search', async ({ request }) => {
+      const body = await request.json() as { query: string }
+      return HttpResponse.json({ places: body.query === 'amap' ? [{ name: 'AMap POI', lat: 31, lng: 121, providerIdentity: { provider: 'amap', providerPlaceId: 'amap-1' } }] : [{ name: 'OSM POI', lat: 32, lng: 122 }] })
+    }))
+    const onSave = vi.fn().mockResolvedValue({ id: 1 })
+    render(<PlaceFormModal {...defaultProps} onSave={onSave} />)
+    const searchInput = screen.getByPlaceholderText('Search places...')
+    await user.type(searchInput, 'amap')
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByText('AMap POI'))
+    await user.type(searchInput, 'osm')
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByText('OSM POI'))
+    await user.click(screen.getByRole('button', { name: /^Add$/i }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ provider: undefined, provider_place_id: '' })))
+  })
+
+  it('FE-PLANNER-PLACEFORM-020b: automatic AMap autocomplete details omits the Google session token', async () => {
+    const user = userEvent.setup()
+    let detailsUrl = ''
+    server.use(
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({ suggestions: [{ placeId: 'amap-2', mainText: 'AMap POI', secondaryText: 'China' }], source: 'amap' })),
+      http.get('/api/maps/details/:placeId', ({ request }) => { detailsUrl = request.url; return HttpResponse.json({ place: { name: 'AMap POI', lat: 31, lng: 121, providerIdentity: { provider: 'amap', providerPlaceId: 'amap-2' } } }) }),
+    )
+    render(<PlaceFormModal {...defaultProps} />)
+    await user.type(screen.getByPlaceholderText('Search places...'), 'AMap')
+    await user.click(await screen.findByText('China'))
+    await waitFor(() => expect(new URL(detailsUrl).searchParams.has('sessionToken')).toBe(false))
+  })
+
+  it('FE-PLANNER-PLACEFORM-020c: explicit Google autocomplete details keeps the session token', async () => {
+    const user = userEvent.setup()
+    let detailsUrl = ''
+    server.use(
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({ suggestions: [{ placeId: 'google-2', mainText: 'Google POI', secondaryText: 'US' }], source: 'google' })),
+      http.get('/api/maps/details/:placeId', ({ request }) => { detailsUrl = request.url; return HttpResponse.json({ place: { name: 'Google POI', lat: 1, lng: 2 } }) }),
+    )
+    render(<PlaceFormModal {...defaultProps} />)
+    await user.selectOptions(screen.getByLabelText('Provider'), 'google')
+    await user.type(screen.getByPlaceholderText('Search places...'), 'Google')
+    await user.click(await screen.findByText('US'))
+    await waitFor(() => expect(new URL(detailsUrl).searchParams.has('sessionToken')).toBe(true))
+  })
+
   it('FE-PLANNER-PLACEFORM-020: clicking a maps result fills the form', async () => {
     const user = userEvent.setup();
     server.use(
@@ -352,7 +398,7 @@ describe('PlaceFormModal', () => {
   it('FE-PLANNER-PLACEFORM-022: hasMapsKey=false shows OSM active message', () => {
     // hasMapsKey is false by default in beforeEach
     render(<PlaceFormModal {...defaultProps} />);
-    expect(screen.getByText(/OpenStreetMap/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/OpenStreetMap/i).length).toBeGreaterThan(0);
   });
 
   // ── Category ─────────────────────────────────────────────────────────────────
@@ -680,17 +726,17 @@ describe('PlaceFormModal', () => {
 
   // ── Location bias from the trip's existing places ───────────────────────────
 
-  it('FE-PLANNER-PLACEFORM-042: a tight cluster of trip places biases the autocomplete bounding box', async () => {
+  it('FE-PLANNER-PLACEFORM-042: a tight cluster of trip places sends the complete autocomplete request context', async () => {
     const user = userEvent.setup();
     const bodies: Record<string, unknown>[] = [];
     server.use(
       http.post('/api/maps/autocomplete', async ({ request }) => {
         bodies.push((await request.json()) as Record<string, unknown>);
-        return HttpResponse.json({ suggestions: [] });
+        return HttpResponse.json({ suggestions: [], source: 'amap' });
       }),
     );
     seedStore(useTripStore, {
-      trip: buildTrip({ id: 1 }),
+      trip: buildTrip({ id: 1, country_code: 'cn' }),
       places: [
         buildPlace({ lat: 48.85, lng: 2.34 }),
         buildPlace({ lat: 48.87, lng: 2.37 }),
@@ -700,13 +746,57 @@ describe('PlaceFormModal', () => {
     });
 
     render(<PlaceFormModal {...defaultProps} />);
+    await user.selectOptions(screen.getByLabelText('Provider'), 'amap');
     await user.type(screen.getByPlaceholderText('Search places...'), 'Eiffel');
 
     await waitFor(() => expect(bodies).toHaveLength(1));
-    expect(bodies[0].locationBias).toEqual({
-      low: { lat: 48.85, lng: 2.34 },
-      high: { lat: 48.87, lng: 2.37 },
+    expect(bodies[0]).toEqual({
+      input: 'Eiffel',
+      lang: 'en',
+      countryCode: 'CN',
+      providerOverride: 'amap',
+      locationBias: {
+        low: { lat: 48.85, lng: 2.34 },
+        high: { lat: 48.87, lng: 2.37 },
+      },
     });
+  });
+
+  it('FE-PLANNER-PLACEFORM-042b: full search keeps the existing center bias while autocomplete uses the bbox', async () => {
+    const user = userEvent.setup();
+    const searchBodies: Record<string, unknown>[] = [];
+    let searchHandlerCalled = false;
+    seedStore(useTripStore, {
+      trip: buildTrip({ id: 1, country_code: 'cn' }),
+      places: [
+        buildPlace({ lat: 48.85, lng: 2.34 }),
+        buildPlace({ lat: 48.87, lng: 2.37 }),
+      ],
+    });
+    server.use(
+      http.post('/api/maps/search', async ({ request }) => {
+        searchHandlerCalled = true;
+        searchBodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ places: [], source: 'amap' });
+      }),
+    );
+
+    render(<PlaceFormModal {...defaultProps} />);
+    await user.selectOptions(screen.getByLabelText('Provider'), 'amap');
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Eiffel');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+
+    await waitFor(() => expect(searchHandlerCalled).toBe(true));
+    expect(searchBodies).toHaveLength(1);
+    expect(searchBodies[0]).toEqual({
+      query: 'Eiffel',
+      lang: 'en',
+      countryCode: 'CN',
+      providerOverride: 'amap',
+      locationBias: { lat: 48.86, lng: 2.355 },
+    });
+    expect(searchInput).toHaveValue('Eiffel');
   });
 
   it('FE-PLANNER-PLACEFORM-043: places spread over more than 500 km send no location bias', async () => {

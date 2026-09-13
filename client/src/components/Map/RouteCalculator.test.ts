@@ -389,9 +389,21 @@ afterEach(() => {
 })
 
 describe('calculateRouteWithLegs', () => {
+  it('FE-COMP-ROUTECALCULATOR-050: forwards geographic context and provider override to the route API', async () => {
+    const routeSpy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
+      coordinates: [[31.23, 121.47], [31.24, 121.48]], distance: 1000, duration: 120,
+      routeSource: { provider: 'amap', fallback: false }, legs: [],
+    })
+    const wps = freshWaypoints()
+    await calculateRouteWithLegs(wps, { profile: 'driving', countryCode: 'CN', providerOverride: 'amap' })
+    expect(routeSpy).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving', countryCode: 'CN', providerOverride: 'amap',
+    }), undefined)
+  })
+
   it('FE-COMP-ROUTECALCULATOR-033: returns an empty route for fewer than 2 waypoints without calling OSRM', async () => {
     const result = await calculateRouteWithLegs([wp1])
-    expect(result).toEqual({ coordinates: [], distance: 0, duration: 0, legs: [] })
+    expect(result).toEqual({ coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] })
   })
 
   it('FE-COMP-ROUTECALCULATOR-034: returns road geometry as [lat,lng] plus per-leg metadata', async () => {
@@ -478,9 +490,18 @@ describe('calculateRouteWithLegs', () => {
     expect(result.legs).toEqual([])
     expect(result.coordinates).toEqual([[48.85, 2.35]])
   })
-})
 
-describe('calculateRouteWithLegs plugin profiles', () => {
+  it('FE-COMP-ROUTECALCULATOR-050: explicit AMap override routes through the server without country context', async () => {
+    const spy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
+      coordinates: [[1, 2], [3, 4]], distance: 100, duration: 10,
+      routeSource: { provider: 'amap', fallback: false }, legs: [],
+    })
+    const result = await calculateRouteWithLegs(freshWaypoints(), { profile: 'driving', providerOverride: 'amap' })
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ providerOverride: 'amap' }), undefined)
+    expect(result.routeSource).toEqual({ provider: 'amap', fallback: false })
+  })
+
+
   it('FE-COMP-ROUTECALCULATOR-043: refuses a plugin route without a trip context', async () => {
     const spy = vi.spyOn(pluginsApi, 'pluginRoute')
     await expect(
@@ -513,6 +534,7 @@ describe('calculateRouteWithLegs plugin profiles', () => {
     const result = await calculateRouteWithLegs(wps, { profile: 'plugin:ev-router/fastest', tripId: 7 })
 
     expect(result.coordinates).toEqual([[48.85, 2.35], [48.9, 2.4]])
+    expect(result.routeSource).toEqual({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' })
     expect(result.legs[0].noteText).toBe('25 min charge')
     expect(result.legs[0].drivingText).toBe('1 h 30 min')
     expect(result.legs[0].distanceText).toBe('120 km')

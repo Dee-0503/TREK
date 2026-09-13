@@ -92,21 +92,33 @@ function PhotoCredit({ imageUrl }) {
   )
 }
 
-function usePlaceDetails(googlePlaceId, osmId, language) {
+function usePlaceDetails(googlePlaceId, osmId, provider, providerPlaceId, language) {
   const [details, setDetails] = useState(null)
-  const detailId = googlePlaceId || osmId
-  const cacheKey = `gdetails_${detailId}_${language}`
+  const detailId = providerPlaceId || googlePlaceId || osmId
+  const canonicalProvider = provider || (providerPlaceId ? undefined : googlePlaceId ? 'google' : osmId ? 'osm' : undefined)
+  const cacheKey = `gdetails_${canonicalProvider || 'unknown'}_${detailId}_${language}`
   useEffect(() => {
-    if (!detailId) { setDetails(null); return }
-    if (detailsCache.has(cacheKey)) { setDetails(detailsCache.get(cacheKey)); return }
+    let active = true
+    setDetails(null)
+    if (!detailId) return () => { active = false }
+    if (detailsCache.has(cacheKey)) {
+      setDetails(detailsCache.get(cacheKey))
+      return () => { active = false }
+    }
     const cached = getSessionCache(cacheKey)
-    if (cached) { detailsCache.set(cacheKey, cached); setDetails(cached); return }
-    mapsApi.details(detailId, language).then(data => {
+    if (cached) {
+      detailsCache.set(cacheKey, cached)
+      setDetails(cached)
+      return () => { active = false }
+    }
+    mapsApi.details(detailId, { lang: language, provider: canonicalProvider }).then(data => {
+      if (!active) return
       detailsCache.set(cacheKey, data.place)
       setSessionCache(cacheKey, data.place)
       setDetails(data.place)
     }).catch(() => {})
-  }, [detailId, language])
+    return () => { active = false }
+  }, [cacheKey, detailId, canonicalProvider, language])
   return details
 }
 
@@ -215,7 +227,7 @@ export default function PlaceInspector({
   const [nameValue, setNameValue] = useState('')
   const nameInputRef = useRef(null)
   const fileInputRef = useRef(null)
-  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, language)
+  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, place?.provider, place?.provider_place_id, language)
 
   // Library-wide "is this place already saved anywhere I can see?" indicator for
   // the trip-planner footer bookmark. Re-checks when the place changes or after

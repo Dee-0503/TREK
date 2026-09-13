@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Xóa ảnh',
   'places.imageUploadError': 'Không thể tải ảnh lên',
   'places.imageRemoveError': 'Không thể xóa ảnh',
+  'places.providerUnavailable': 'Nhà cung cấp không khả dụng',
+  'places.hoursUnavailable': 'Không có giờ mở cửa',
+  'places.source': 'Nguồn: {source}',
+  'places.fetchedAt': 'Đã tải lúc: {fetchedAt}',
 };
 export default places;

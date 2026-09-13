@@ -1,5 +1,6 @@
+import { placeProviderSchema, type PlaceProvider } from './place.schema';
+
 /**
- * When two places are the same place — the single source of the rule.
  *
  * There are two consumers with nothing in common but this decision: the bulk
  * place importers ask it of an in-memory set they already built for the trip
@@ -32,6 +33,8 @@ export interface PlaceMatchCandidate {
   name?: string | null;
   lat?: number | null;
   lng?: number | null;
+  provider?: PlaceProvider | string | null;
+  provider_place_id?: string | null;
   google_place_id?: string | null;
   google_ftid?: string | null;
   osm_id?: string | null;
@@ -51,9 +54,23 @@ export function normalizePlaceName(name: string | null | undefined): string | nu
 
 /** The provider ids a candidate carries, trimmed, in provider order, blanks dropped. */
 export function externalIdsOf(candidate: PlaceMatchCandidate): string[] {
-  return [candidate.google_place_id, candidate.google_ftid, candidate.osm_id]
-    .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-    .map((id) => id.trim());
+  const provider = typeof candidate.provider === 'string'
+    ? placeProviderSchema.safeParse(candidate.provider).data
+    : undefined;
+  const providerId = typeof candidate.provider_place_id === 'string' && candidate.provider_place_id.trim() !== '' && provider
+    ? `${provider}:${candidate.provider_place_id.trim()}`
+    : null;
+  const legacyIds = [
+    typeof candidate.google_place_id === 'string' ? `google:${candidate.google_place_id}` : null,
+    typeof candidate.google_ftid === 'string' ? `google:${candidate.google_ftid}` : null,
+    typeof candidate.osm_id === 'string' ? `osm:${candidate.osm_id}` : null,
+  ];
+  return [providerId, ...legacyIds]
+    .filter((id): id is string => typeof id === 'string' && id.slice(id.indexOf(':') + 1).trim() !== '')
+    .map((id) => {
+      const separator = id.indexOf(':');
+      return `${id.slice(0, separator)}:${id.slice(separator + 1).trim()}`;
+    });
 }
 
 /**

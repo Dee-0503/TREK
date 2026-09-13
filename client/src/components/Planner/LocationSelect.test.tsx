@@ -82,11 +82,9 @@ describe('LocationSelect', () => {
 
   it('FE-PLANNER-LOCSEL-007: the query and locale are forwarded to the maps API', async () => {
     const user = userEvent.setup();
-    let body: { query?: string } = {};
-    let lang: string | null = null;
+    let body: { query?: string; lang?: string } = {};
     server.use(http.post('/api/maps/search', async ({ request }) => {
-      lang = new URL(request.url).searchParams.get('lang');
-      body = await request.json() as { query?: string };
+      body = await request.json() as { query?: string; lang?: string };
       return HttpResponse.json({ places: [GARE] });
     }));
 
@@ -95,7 +93,7 @@ describe('LocationSelect', () => {
     await screen.findByText('Gare du Nord');
 
     expect(body.query).toBe('Gare du Nord');
-    expect(lang).toBe('en-US');
+    expect(body.lang).toBe('en-US');
   });
 
   it('FE-PLANNER-LOCSEL-008: a hit whose address equals its name shows no duplicate subtitle', async () => {

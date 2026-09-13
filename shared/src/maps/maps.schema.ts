@@ -1,4 +1,30 @@
+import { placeProviderIdentitySchema } from '../place/place.schema';
 import { z } from 'zod';
+
+/** Provider-neutral map/place provider identifiers shared by request and response contracts. */
+export const mapProviderSchema = placeProviderIdentitySchema.shape.provider;
+export type MapProvider = z.infer<typeof mapProviderSchema>;
+
+export const providerOverrideSchema = mapProviderSchema;
+export type ProviderOverride = z.infer<typeof providerOverrideSchema>;
+
+export const geographicContextSchema = z.object({
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+});
+export type GeographicContext = z.infer<typeof geographicContextSchema>;
+
+/** Route providers are deliberately narrower than place providers. */
+export const routeProviderOverrideSchema = z.enum(['amap', 'osrm']);
+export type RouteProviderOverride = z.infer<typeof routeProviderOverrideSchema>;
+
+const requestContext = {
+  countryCode: geographicContextSchema.shape.countryCode,
+  latitude: geographicContextSchema.shape.latitude,
+  longitude: geographicContextSchema.shape.longitude,
+  providerOverride: providerOverrideSchema.optional(),
+};
 
 /**
  * Maps / geo API contract — single source of truth for the /api/maps endpoints.
@@ -18,19 +44,111 @@ import { z } from 'zod';
  * bespoke bodies in the controller.
  */
 
+/** Route source metadata returned by the real route consumer. */
+export const routeSourceSchema = z.object({
+  /** `plugin` identifies a plugin route; `mixed` is used when chunks use different providers. */
+  provider: z.enum(['amap', 'osrm', 'plugin', 'mixed']),
+  fallback: z.boolean(),
+  fallbackReason: z.string().optional(),
+  /** All distinct fallback reasons when a route combines multiple chunks. */
+  fallbackReasons: z.array(z.string()).optional(),
+  /** Identifies the plugin route profile when provider is `plugin`. */
+  pluginId: z.string().optional(),
+  profile: z.string().optional(),
+});
+export type RouteSource = z.infer<typeof routeSourceSchema>;
+
+export const routeLegSchema = z.object({
+  mid: z.tuple([z.number(), z.number()]),
+  from: z.tuple([z.number(), z.number()]),
+  to: z.tuple([z.number(), z.number()]),
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  walkingText: z.string(),
+  drivingText: z.string(),
+  distanceText: z.string(),
+  durationText: z.string().optional(),
+  noteText: z.string().optional(),
+  mode: z.string().optional(),
+});
+export type RouteLeg = {
+  mid: [number, number];
+  from: [number, number];
+  to: [number, number];
+  distance: number;
+  duration: number;
+  walkingText: string;
+  drivingText: string;
+  distanceText: string;
+  durationText?: string;
+  noteText?: string;
+  mode?: string;
+};
+
+/** The complete RouteCalculator result, including its display strings. */
+export const routeWithLegsSchema = z.object({
+  coordinates: z.array(z.tuple([z.number(), z.number()])),
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  routeSource: routeSourceSchema,
+  legs: z.array(routeLegSchema),
+  vias: z.array(z.object({
+    lat: z.number(),
+    lng: z.number(),
+    label: z.string().optional(),
+    tone: z.enum(['default', 'success', 'warn', 'danger']),
+    dwellSeconds: z.number().nonnegative().optional(),
+  })).optional(),
+});
+export type RouteWithLegs = {
+  coordinates: [number, number][];
+  distance: number;
+  duration: number;
+  routeSource: RouteSource;
+  legs: z.infer<typeof routeLegSchema>[];
+  vias?: { lat: number; lng: number; label?: string; tone: 'default' | 'success' | 'warn' | 'danger'; dwellSeconds?: number }[];
+};
+
+export const routeResultSchema = z.object({
+  coordinates: z.array(z.tuple([z.number(), z.number()])),
+  distance: z.number().nonnegative(),
+  duration: z.number().nonnegative(),
+  distanceText: z.string(),
+  durationText: z.string(),
+  walkingText: z.string(),
+  drivingText: z.string(),
+  routeSource: routeSourceSchema,
+});
+export type RouteResult = z.infer<typeof routeResultSchema>;
+
+export const mapsRouteRequestSchema = z.object({
+  profile: z.enum(['driving', 'walking', 'cycling']),
+  waypoints: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).min(2),
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  providerOverride: routeProviderOverrideSchema.optional(),
+});
+export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
+
+export const mapsRouteResultSchema = routeWithLegsSchema;
+export type MapsRouteResult = RouteWithLegs;
+
 const latLng = z.object({ lat: z.number(), lng: z.number() });
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
+  ...requestContext,
   // Optional bias toward a coordinate (lat/lng[/radius]); improves
   // foreign-region queries. z.number() is finite-only (zod v4), matching the
   // legacy Number.isFinite() check; radius was never validated beyond "number".
   locationBias: latLng.extend({ radius: z.number().optional() }).optional(),
+  countryCode: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+  providerOverride: z.enum(['google', 'amap', 'osm']).optional(),
 });
 export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 
 export const mapsAutocompleteRequestSchema = z.object({
   input: z.string().min(1).max(200),
+  ...requestContext,
   lang: z.string().optional(),
   locationBias: z.object({ low: latLng, high: latLng }).optional(),
   /**
@@ -55,12 +173,47 @@ export const mapsResolveUrlRequestSchema = z.object({
 });
 export type MapsResolveUrlRequest = z.infer<typeof mapsResolveUrlRequestSchema>;
 
-/** Provider-shaped place blob (Google/OSM fields differ); kept open by design. */
-const placeRecord = z.record(z.string(), z.unknown());
+/** Provider-neutral place projection shared by search and detail responses. */
+export const mapPlaceProjectionSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  address: z.string().optional(),
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
+  google_place_id: z.string().nullable().optional(),
+  google_ftid: z.string().nullable().optional(),
+  osm_id: z.string().nullable().optional(),
+  rating: z.number().nullable().optional(),
+  rating_count: z.number().nullable().optional(),
+  website: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  types: z.array(z.string()).optional(),
+  opening_hours: z.array(z.string()).nullable().optional(),
+  open_now: z.boolean().nullable().optional(),
+  opening_periods: z.array(z.object({
+    open: z.object({ day: z.number(), hour: z.number(), minute: z.number() }),
+    close: z.object({ day: z.number(), hour: z.number(), minute: z.number() }).nullable().optional(),
+  })).nullable().optional(),
+  opening_special_days: z.array(z.string()).nullable().optional(),
+  google_maps_url: z.string().nullable().optional(),
+  osm_url: z.string().nullable().optional(),
+  summary: z.string().nullable().optional(),
+  reviews: z.array(z.object({
+    author: z.string().nullable().optional(),
+    rating: z.number().nullable().optional(),
+    text: z.string().nullable().optional(),
+    time: z.string().nullable().optional(),
+    photo: z.string().nullable().optional(),
+  })).optional(),
+  source: z.string().optional(),
+  providerIdentity: placeProviderIdentitySchema.optional(),
+});
+export type MapPlaceProjection = z.infer<typeof mapPlaceProjectionSchema>;
 
 export const mapsSearchResultSchema = z.object({
-  places: z.array(placeRecord),
+  places: z.array(mapPlaceProjectionSchema),
   source: z.string(),
+  routeSource: routeSourceSchema.optional(),
 });
 export type MapsSearchResult = z.infer<typeof mapsSearchResultSchema>;
 
@@ -76,7 +229,7 @@ export const mapsAutocompleteResultSchema = z.object({
 export type MapsAutocompleteResult = z.infer<typeof mapsAutocompleteResultSchema>;
 
 export const mapsPlaceDetailsResultSchema = z.object({
-  place: placeRecord.nullable(),
+  place: mapPlaceProjectionSchema.nullable(),
   disabled: z.boolean().optional(),
 });
 export type MapsPlaceDetailsResult = z.infer<typeof mapsPlaceDetailsResultSchema>;

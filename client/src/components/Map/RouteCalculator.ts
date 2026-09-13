@@ -1,6 +1,7 @@
 import { useSettingsStore } from '../../store/settingsStore'
-import { pluginsApi } from '../../api/client'
-import type { DistanceUnit, RouteResult, RouteSegment, RouteWithLegs, Waypoint, RouteAnchors } from '../../types'
+import { pluginsApi, mapsApi } from '../../api/client'
+import type { DistanceUnit, RouteResult, RouteSegment, Waypoint, RouteAnchors, RouteWithLegs as SharedRouteWithLegs } from '../../types'
+import type { RouteProviderOverride } from '@trek/shared'
 import { formatDistance } from '../../utils/units'
 
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
@@ -16,7 +17,7 @@ const OSRM_PROFILE_BASE: Record<'driving' | 'walking' | 'cycling', string> = {
 
 // Cache route responses keyed by the exact waypoint list. Routes are stable, so
 // this avoids re-hitting the public OSRM demo server on every day switch / reorder.
-const routeCache = new Map<string, RouteWithLegs>()
+const routeCache = new Map<string, SharedRouteWithLegs>()
 const ROUTE_CACHE_MAX = 200
 
 /**
@@ -78,6 +79,7 @@ export async function calculateRoute(
     coordinates,
     distance,
     duration,
+    routeSource: { provider: 'osrm', fallback: false },
     distanceText: formatRouteDistance(distance),
     durationText: formatDuration(duration),
     walkingText: formatDuration(walkingDuration),
@@ -285,10 +287,10 @@ export async function calculateSegments(
  */
 export async function calculateRouteWithLegs(
   waypoints: Waypoint[],
-  { signal, profile = 'driving', tripId, dayId }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null } = {}
-): Promise<RouteWithLegs> {
+  { signal, profile = 'driving', tripId, dayId, countryCode, providerOverride }: { signal?: AbortSignal; profile?: RouteProfileKey; tripId?: number | string | null; dayId?: number | null; countryCode?: string; providerOverride?: RouteProviderOverride } = {}
+): Promise<SharedRouteWithLegs> {
   if (!waypoints || waypoints.length < 2) {
-    return { coordinates: [], distance: 0, duration: 0, legs: [] }
+    return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }
   }
 
   const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';')
@@ -298,13 +300,10 @@ export async function calculateRouteWithLegs(
   // the same coordinates on a different day), so its key includes tripId/dayId;
   // the built-in OSRM profiles are context-free and leave those out.
   const pluginScope = profile.startsWith('plugin:') ? `:${tripId ?? ''}:${dayId ?? ''}` : ''
-  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}`
+  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}:${countryCode ?? ''}:${providerOverride ?? ''}`
   const cached = routeCache.get(cacheKey)
   if (cached) return cached
 
-  // Plugin profile (`plugin:<id>/<profile>`): the server invokes that routeProvider
-  // and normalizes its answer; null means the provider failed or refused, and the
-  // throw makes callers fall back to straight lines exactly like an OSRM outage.
   const pluginProfile = parsePluginProfile(profile)
   if (pluginProfile) {
     if (tripId == null) throw new Error('Plugin routing needs a trip context')
@@ -329,10 +328,16 @@ export async function calculateRouteWithLegs(
         ...(leg.note ? { noteText: leg.note } : {}),
       }
     })
-    const result: RouteWithLegs = {
+    const result: SharedRouteWithLegs = {
       coordinates: route.coordinates,
       distance: route.distance,
       duration: route.duration,
+      routeSource: {
+        provider: 'plugin',
+        fallback: false,
+        pluginId: route.pluginId,
+        profile: route.profile,
+      },
       legs,
       ...(route.viaPoints.length ? { vias: route.viaPoints } : {}),
     }
@@ -345,6 +350,13 @@ export async function calculateRouteWithLegs(
   }
 
   const osrmProfile = (profile === 'walking' || profile === 'cycling') ? profile : 'driving'
+  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && (countryCode === 'CN' || providerOverride !== undefined)) {
+    const result = await mapsApi.route({ profile: osrmProfile as 'driving' | 'walking' | 'cycling', waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode, providerOverride }, signal)
+    const legs: RouteSegment[] = result.legs.map(leg => ({ ...leg }))
+    const routed: SharedRouteWithLegs = { ...result, legs }
+    routeCache.set(cacheKey, routed)
+    return routed
+  }
   const url = `${OSRM_PROFILE_BASE[osrmProfile]}/${coords}?overview=full&geometries=geojson&annotations=distance,duration`
   const response = await fetch(url, { signal })
   if (!response.ok) throw new Error('Route could not be calculated')
@@ -374,7 +386,7 @@ export async function calculateRouteWithLegs(
     }
   )
 
-  const result: RouteWithLegs = { coordinates, distance: route.distance, duration: route.duration, legs }
+  const result: SharedRouteWithLegs = { coordinates, distance: route.distance, duration: route.duration, routeSource: { provider: 'osrm', fallback: false }, legs }
   routeCache.set(cacheKey, result)
   if (routeCache.size > ROUTE_CACHE_MAX) {
     const oldest = routeCache.keys().next().value

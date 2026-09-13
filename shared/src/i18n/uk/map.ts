@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Доступ до геолокації заблоковано. Перевірте налаштування пристрою; встановлений застосунок має власний дозвіл на геолокацію, окремий від браузера.',
   'map.location.unavailable': 'Не вдалося визначити ваше місцезнаходження.',
   'map.location.timeout': 'Визначення місцезнаходження тривало надто довго. Спробуйте ще раз просто неба.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Маршрут показано через OpenStreetMap, оскільки AMap недоступний.',
 };
 export default map;

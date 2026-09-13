@@ -128,5 +128,9 @@ const places: TranslationStrings = {
   'places.removeImage': 'Удалить изображение',
   'places.imageUploadError': 'Не удалось загрузить изображение',
   'places.imageRemoveError': 'Не удалось удалить изображение',
+  'places.providerUnavailable': 'Провайдер недоступен',
+  'places.hoursUnavailable': 'Часы работы недоступны',
+  'places.source': 'Источник: {source}',
+  'places.fetchedAt': 'Получено: {fetchedAt}',
 };
 export default places;

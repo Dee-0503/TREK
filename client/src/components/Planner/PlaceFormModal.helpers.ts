@@ -12,6 +12,8 @@ export interface PlaceFormData {
   website: string
   // Populated from a maps-search pick (not part of the initial blank form).
   phone?: string
+  provider?: 'google' | 'amap' | 'osm'
+  provider_place_id?: string
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
@@ -68,6 +70,8 @@ export const RESULT_FIELDS = [
   'address',
   'lat',
   'lng',
+  'provider',
+  'provider_place_id',
   'google_place_id',
   'google_ftid',
   'osm_id',
@@ -99,16 +103,30 @@ export function mergeResult(
 ): PlaceFormData {
   const next = { ...prev } as PlaceFormData & Record<string, string | undefined>
 
+  const identity = result.providerIdentity as { provider?: PlaceFormData['provider']; providerPlaceId?: string } | undefined
+  const resultWithIdentity = identity
+    ? { ...result, provider: identity.provider, provider_place_id: identity.providerPlaceId }
+    : result
+
   for (const field of RESULT_FIELDS) {
-    const raw = result[field]
+    const raw = resultWithIdentity[field]
     const value = raw == null ? '' : String(raw)
 
     if (value) {
-      next[field] = value
+      if (field === 'provider') {
+        if (value !== 'google' && value !== 'amap' && value !== 'osm') continue
+        next.provider = value
+      } else {
+        next[field] = value
+      }
       autoFilled.add(field)
     } else if (autoFilled.has(field)) {
       // Belonged to the place that is no longer selected.
-      next[field] = ''
+      if (field === 'provider') {
+        next[field] = undefined
+      } else {
+        next[field] = ''
+      }
       autoFilled.delete(field)
     }
     // Otherwise the user put it there; leave it alone.

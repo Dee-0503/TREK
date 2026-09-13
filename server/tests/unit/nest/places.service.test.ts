@@ -14,7 +14,7 @@ import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/plac
 import { UnsplashService } from '../../../src/nest/unsplash/unsplash.service';
 import { RuntimeEnvService } from '../../../src/nest/app-config/runtime-env.service';
 import { TRACK_COLORS, COORD_DEDUP_TOLERANCE } from '@trek/shared';
-import { ADDRESS_BACKFILL_MAX_PLACES } from '../../../src/nest/places/places.helpers';
+import { ADDRESS_BACKFILL_MAX_PLACES, isPlaceDuplicate } from '../../../src/nest/places/places.helpers';
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
@@ -1213,11 +1213,11 @@ describe('enrichImportedPlaces', () => {
     return makePlacesService(maps as MapsService);
   }
 
-  it('PLACE-SVC-058 — no-ops when no Google Maps key is configured', async () => {
-    const searchPlaces = vi.fn();
+  it('PLACE-SVC-058 — routes imported places without requiring a Google Maps key', async () => {
+    const searchPlaces = vi.fn(async () => ({ places: [], source: 'openstreetmap' }));
     const svcNoKey = enrichSvc({ getMapsKey: vi.fn(() => null), searchPlaces });
     await svcNoKey.enrichImportedPlaces('1', 1, [{ id: 1, name: 'A', lat: 1, lng: 2 }]);
-    expect(searchPlaces).not.toHaveBeenCalled();
+    expect(searchPlaces).toHaveBeenCalledWith(1, 'A', undefined, { lat: 1, lng: 2, radius: 2000 });
   });
 
   it('PLACE-SVC-059 — no-ops for an empty batch without touching the provider', async () => {
@@ -1323,7 +1323,29 @@ describe('enrichImportedPlaces', () => {
 // replaced by the default.
 
 describe('zero-valued numeric fields', () => {
-  it('PLACE-SVC-065 — create keeps lat/lng of exactly 0 instead of nulling them', () => {
+  it('PLACE-SVC-065 — persists an AMap identity without entering Google fields or photo dispatch', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: '人民公园', lat: 31.23, lng: 121.47 }) as any;
+    const getPlacePhoto = vi.fn();
+    const svcWithMaps = makePlacesService({
+      getMapsKey: vi.fn(() => 'key'),
+      searchPlaces: vi.fn(async () => ({ source: 'amap', places: [{
+        provider: 'amap', provider_place_id: 'amap:B0FFFAB6J2',
+        providerIdentity: { provider: 'amap', providerPlaceId: 'amap:B0FFFAB6J2' },
+        lat: 31.23, lng: 121.47, address: 'Shanghai',
+      }] })),
+      getPlacePhoto,
+    } as never);
+
+    await svcWithMaps.enrichImportedPlaces(String(trip.id), user.id, [{ id: place.id, name: '人民公园', lat: 31.23, lng: 121.47 }]);
+
+    const row = testDb.prepare('SELECT provider, provider_place_id, google_place_id, google_ftid FROM places WHERE id = ?').get(place.id) as any;
+    expect(row).toMatchObject({ provider: 'amap', provider_place_id: 'B0FFFAB6J2', google_place_id: null, google_ftid: null });
+    expect(getPlacePhoto).not.toHaveBeenCalled();
+  });
+
+  it('PLACE-SVC-065 — create preserves zero coordinates', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
     const place = svc.create(String(trip.id), { name: 'Null Island', lat: 0, lng: 0 }) as any;
@@ -1637,7 +1659,36 @@ describe('findMatchingPlaceId', () => {
     ).toBe(place.id);
   });
 
-  it('PLACES-SVC-010 — does NOT match a NAMED candidate to a different place at the same coordinates', () => {
+  it('PLACES-SVC-010 — buildDedupSet matches a saved AMap identity during import duplicate checks', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'Saved AMap Place' });
+    testDb.prepare('UPDATE places SET provider = ?, provider_place_id = ? WHERE id = ?').run('amap', 'B0FFF', place.id);
+
+    const dedup = (svc as unknown as { buildDedupSet: (tripId: string) => Parameters<typeof isPlaceDuplicate>[1] })
+      .buildDedupSet(String(trip.id));
+
+    expect(isPlaceDuplicate({
+      name: 'Renamed During Import',
+      provider: 'amap',
+      provider_place_id: 'B0FFF',
+    }, dedup)).toBe(true);
+  });
+
+  it('PLACES-SVC-010b — legacy Google and OSM ids match rows left provider-null by migration', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const google = createPlace(testDb, trip.id, { name: 'Legacy Google' });
+    const osm = createPlace(testDb, trip.id, { name: 'Legacy OSM' });
+    testDb.prepare('UPDATE places SET google_place_id = ? WHERE id = ?').run('ChIJ_legacy', google.id);
+    testDb.prepare('UPDATE places SET osm_id = ? WHERE id = ?').run('node:legacy', osm.id);
+
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'Renamed Google', provider: 'google', provider_place_id: 'ChIJ_legacy' })).toBe(google.id);
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'Renamed OSM', provider: 'openstreetmap', provider_place_id: 'node:legacy' })).toBe(osm.id);
+    expect(svc.findMatchingPlaceId(String(trip.id), { name: 'AMap collision', provider: 'amap', provider_place_id: 'ChIJ_legacy' })).toBeNull();
+  });
+
+  it('PLACES-SVC-011 — does NOT match a NAMED candidate to a different place at the same coordinates', () => {
     // The restaurant and the bar in the same building are two places. This is the
     // rule isPlaceDuplicate has always applied; the SQL copy used to disagree.
     const { user } = createUser(testDb);

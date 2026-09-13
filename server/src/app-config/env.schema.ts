@@ -9,6 +9,7 @@
  * listed here pass through untouched (Zod strips unknown keys, it does not
  * reject them).
  */
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { SUPPORTED_LANGUAGE_CODES } from '@trek/shared';
 import { parseDurationMs } from './parsers';
@@ -43,6 +44,42 @@ const url = optionalWith((v) => {
     return false;
   }
 }, 'must be a valid URL (with protocol)');
+const publicHttpUrl = optionalWith((v) => {
+  try {
+    const parsed = new URL(v);
+    const host = parsed.hostname;
+    const normalizedHost = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    if (parsed.username || parsed.password || normalizedHost.endsWith('.') || normalizedHost.includes('..')) return false;
+    if (normalizedHost !== normalizedHost.toLowerCase() || normalizedHost !== new URL(`http://${normalizedHost}`).hostname) return false;
+    const ipVersion = isIP(normalizedHost);
+    if (ipVersion === 6) return false;
+    if (ipVersion === 4) {
+      const octets = host.split('.').map(Number);
+      const specialIpv4 = (
+        octets[0] === 0
+        || octets[0] === 10
+        || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+        || octets[0] === 127
+        || (octets[0] === 169 && octets[1] === 254)
+        || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+        || (octets[0] === 192 && octets[1] === 0 && (octets[2] === 0 || octets[2] === 2))
+        || (octets[0] === 192 && octets[1] === 168)
+        || (octets[0] === 198 && octets[1] >= 18 && octets[1] <= 19)
+        || (octets[0] === 198 && octets[1] === 51 && octets[2] === 100)
+        || (octets[0] === 203 && octets[1] === 0 && octets[2] === 113)
+      );
+      return !specialIpv4;
+    }
+    return !(
+      host === 'localhost'
+      || host.endsWith('.local')
+      || host.endsWith('.internal')
+    );
+  } catch {
+    return false;
+  }
+}, 'must be a public HTTP(S) URL');
 const duration = optionalWith(
   (v) => parseDurationMs(v) != null,
   'must be a duration like "1h", "7d" or "30d"',
@@ -144,6 +181,12 @@ export const envSchema = z.object({
   TREK_MANAGED: boolStr,
   PLACES_API_BASE: url,
   PLACES_API_KEY: anyString,
+  AMAP_API_KEY: anyString,
+  AMAP_API_BASE: publicHttpUrl,
+  PLACES_PROVIDER_MODE: oneOf(['auto', 'google', 'amap', 'osm', 'openstreetmap']),
+  AMAP_TIMEOUT_MS: integer(1, 2_147_483_647, 'must be a whole number of milliseconds between 1 and 2147483647'),
+  AMAP_CACHE_TTL_SECONDS: positiveNumber,
+  AMAP_RATE_LIMIT_PER_MINUTE: positiveNumber,
   MAPBOX_ACCESS_TOKEN: anyString,
   CARTO_API_KEY: anyString,
   DEMO_MODE: boolStr,

@@ -84,6 +84,41 @@ export function candidateKey(placeId: string, identity: string): string {
   return `${placeId}~p${digest}`;
 }
 
+export function providerNamespacedDetailCacheKey(provider: string | null | undefined, placeId: string): string | null {
+  const canonical = provider === 'openstreetmap' ? 'osm' : provider;
+  const separator = placeId.indexOf(':');
+  if (separator > 0) {
+    const embeddedProvider = placeId.slice(0, separator);
+    const embeddedCanonical = embeddedProvider === 'openstreetmap' ? 'osm' : embeddedProvider;
+    if (embeddedCanonical && ['google', 'amap', 'osm'].includes(embeddedCanonical)) {
+      return `${embeddedCanonical}:${placeId.slice(separator + 1)}`;
+    }
+    // OSM identities use their feature type (`node`, `way`, or `relation`) as
+    // the prefix rather than the provider name. Preserve that identity in the
+    // same namespace as an explicit `openstreetmap` details response so the
+    // enrichment cache can be read before the provider lookup is repeated.
+    if (['node', 'way', 'relation'].includes(embeddedProvider)) {
+      return `osm:${placeId}`;
+    }
+  }
+  return canonical && ['google', 'amap', 'osm'].includes(canonical) ? `${canonical}:${placeId}` : null;
+}
+
+function detailCacheIdentity(req: MapsPlaceEnrichmentRequest): string | null {
+  const rawPlaceId = req.placeId?.trim();
+  if (!rawPlaceId) return null;
+
+  const explicitProvider = (req.details?.provider ?? req.details?.source) as string | undefined;
+  const fromPayload = providerNamespacedDetailCacheKey(explicitProvider, rawPlaceId);
+  if (fromPayload) return fromPayload;
+
+  const separator = rawPlaceId.indexOf(':');
+  if (separator > 0) {
+    return providerNamespacedDetailCacheKey(rawPlaceId.slice(0, separator), rawPlaceId.slice(separator + 1));
+  }
+  return null;
+}
+
 /**
  * What the free sources need to know about a place, kept apart from whatever
  * the maps provider returned. See `resolveIdentity` for why they do not merge.
@@ -272,8 +307,9 @@ export class PlaceEnrichmentService {
 
     const placeId = req.placeId?.trim() || `coords:${req.lat}:${req.lng}`;
     const lang = req.lang;
+    const cachePlaceId = detailCacheIdentity(req);
 
-    const cached = await this.readCache(placeId, lang);
+    const cached = cachePlaceId ? await this.readCache(cachePlaceId, lang) : null;
     if (cached) return cached;
 
     // One details lookup feeds all three halves: the pictures need its Commons
@@ -284,6 +320,7 @@ export class PlaceEnrichmentService {
     // comes along with the request. Refetching cost 12.8 seconds on a large
     // OSM relation, and it ran in parallel with the client's own lookup.
     const details = req.details ?? (await this.readDetails(userId, placeId, lang));
+    const canonicalCachePlaceId = detailCacheIdentity({ ...req, details }) ?? (req.placeId?.trim() ? null : placeId);
     const identity = await this.resolveIdentity(req, details);
 
     const [photos, description] = await Promise.all([
@@ -311,7 +348,7 @@ export class PlaceEnrichmentService {
       hours: collectHours(details) ?? collectHours(osmDetails),
       rating: collectRating(details) ?? collectRating(osmDetails),
     };
-    this.writeCache(placeId, lang, result);
+    if (canonicalCachePlaceId) this.writeCache(canonicalCachePlaceId, lang, result);
     return result;
   }
 

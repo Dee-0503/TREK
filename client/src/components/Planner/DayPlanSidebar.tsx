@@ -617,7 +617,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
 
       const legBetween = async (a: { lat: number; lng: number }, b: { lat: number; lng: number }, dayId: number, mode: string): Promise<RouteSegment | undefined> => {
         try {
-          const r = await calculateRouteWithLegs([a, b], { signal: controller.signal, profile: mode, tripId, dayId })
+          const r = await calculateRouteWithLegs([a, b], { signal: controller.signal, profile: mode, tripId, dayId, countryCode: (trip as Trip & { country_code?: string | null }).country_code ?? undefined })
           return r.legs[0] ? { ...r.legs[0], mode } : undefined
         } catch { return undefined }
       }

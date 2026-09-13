@@ -3,10 +3,25 @@ import {
   placeBulkDeleteRequestSchema,
   placeImportListRequestSchema,
   placeSchema,
+  placeProviderIdentitySchema,
 } from './place.schema';
 
 import { describe, it, expect } from 'vitest';
 
+describe('provider-neutral place contracts', () => {
+  it('accepts an AMap provider identity', () => {
+    expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({
+      provider: 'amap',
+      providerPlaceId: 'B0FFFAB6J2',
+    });
+  });
+
+  it('keeps legacy Google and OSM place payloads parseable', () => {
+    expect(placeSchema.safeParse({ id: 1, trip_id: 1, name: 'Google place', google_place_id: 'ChIJx' }).success).toBe(true);
+    expect(placeSchema.safeParse({ id: 2, trip_id: 1, name: 'OSM place', osm_id: 'node/42' }).success).toBe(true);
+  });
+
+});
 describe('placeSchema route_color (#776)', () => {
   const place = { id: 1, trip_id: 1, name: 'Walk' };
 

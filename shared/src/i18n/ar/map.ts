@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'تم حظر الوصول إلى الموقع. تحقق من إعدادات الجهاز؛ فالتطبيق المثبت لديه إذن موقع خاص به منفصل عن المتصفح.',
   'map.location.unavailable': 'تعذر تحديد موقعك.',
   'map.location.timeout': 'استغرق تحديد موقعك وقتًا طويلًا. حاول مرة أخرى تحت سماء مكشوفة.',
+  'map.provider.amap': 'خرائط AMap',
+  'map.provider.google': 'خرائط Google',
+  'map.provider.osm': 'خريطة الشارع المفتوحة',
+  'map.route.fallback': 'يُعرض المسار عبر خريطة الشارع المفتوحة لأن AMap غير متاح.',
 };
 export default map;

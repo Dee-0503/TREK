@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': '位置情報へのアクセスがブロックされています。端末の設定を確認してください。インストールしたアプリにはブラウザとは別の位置情報の許可があります。',
   'map.location.unavailable': '現在地を特定できませんでした。',
   'map.location.timeout': '位置情報の取得に時間がかかりすぎました。空がよく見える場所でもう一度お試しください。',
+  'map.provider.amap': '高徳地図',
+  'map.provider.google': 'Google マップ',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': '高徳地図を利用できないため、OpenStreetMap でルートを表示しています。',
 };
 export default map;

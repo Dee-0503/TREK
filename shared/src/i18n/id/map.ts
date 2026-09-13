@@ -22,5 +22,9 @@ const map: TranslationStrings = {
   'map.location.denied': 'Akses lokasi diblokir. Periksa pengaturan perangkat; aplikasi yang terpasang punya izin lokasi sendiri, terpisah dari browser.',
   'map.location.unavailable': 'Lokasi Anda tidak dapat ditentukan.',
   'map.location.timeout': 'Penentuan lokasi terlalu lama. Coba lagi di tempat dengan pandangan langit yang lebih terbuka.',
+  'map.provider.amap': 'AMap',
+  'map.provider.google': 'Google Maps',
+  'map.provider.osm': 'OpenStreetMap',
+  'map.route.fallback': 'Rute ditampilkan melalui OpenStreetMap karena AMap tidak tersedia.',
 };
 export default map;

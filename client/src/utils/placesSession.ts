@@ -34,6 +34,11 @@ export class PlacesSession {
     return this.token;
   }
 
+  /** Provider-neutral lookups (for example AMap) never carry a Google billing token. */
+  currentForProvider(provider?: string): string | undefined {
+    return provider === 'amap' ? undefined : this.current()
+  }
+
   /** The token without starting a session: a details lookup that no search led
    *  to must not open one, or it would be billed as an empty session. */
   peek(): string | undefined {

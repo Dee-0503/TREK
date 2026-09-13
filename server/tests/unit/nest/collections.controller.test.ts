@@ -121,13 +121,41 @@ describe('CollectionsController', () => {
   describe('membership lookup', () => {
     it('parses lat/lng when present', () => {
       const svc = makeService();
-      new CollectionsController(svc, new RuntimeEnvService(), storageStub).membership(user, 'gpid', undefined, 'Rome', '41.9', '12.5');
-      expect(svc.findMembership).toHaveBeenCalledWith(1, { google_place_id: 'gpid', google_ftid: undefined, name: 'Rome', lat: 41.9, lng: 12.5 });
+      new CollectionsController(svc, new RuntimeEnvService(), storageStub).membership(
+        user,
+        undefined,
+        undefined,
+        'gpid',
+        undefined,
+        undefined,
+        'Rome',
+        '41.9',
+        '12.5',
+      );
+      expect(svc.findMembership).toHaveBeenCalledWith(1, {
+        provider: undefined,
+        provider_place_id: undefined,
+        google_place_id: 'gpid',
+        google_ftid: undefined,
+        osm_id: undefined,
+        name: 'Rome',
+        lat: 41.9,
+        lng: 12.5,
+      });
     });
     it('leaves lat/lng undefined when absent', () => {
       const svc = makeService();
       new CollectionsController(svc, new RuntimeEnvService(), storageStub).membership(user);
-      expect(svc.findMembership).toHaveBeenCalledWith(1, { google_place_id: undefined, google_ftid: undefined, name: undefined, lat: undefined, lng: undefined });
+      expect(svc.findMembership).toHaveBeenCalledWith(1, {
+        provider: undefined,
+        provider_place_id: undefined,
+        google_place_id: undefined,
+        google_ftid: undefined,
+        osm_id: undefined,
+        name: undefined,
+        lat: undefined,
+        lng: undefined,
+      });
     });
   });
 
