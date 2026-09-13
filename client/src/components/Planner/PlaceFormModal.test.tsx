@@ -726,17 +726,17 @@ describe('PlaceFormModal', () => {
 
   // ── Location bias from the trip's existing places ───────────────────────────
 
-  it('FE-PLANNER-PLACEFORM-042: a tight cluster of trip places biases the autocomplete bounding box', async () => {
+  it('FE-PLANNER-PLACEFORM-042: a tight cluster of trip places sends the complete autocomplete request context', async () => {
     const user = userEvent.setup();
     const bodies: Record<string, unknown>[] = [];
     server.use(
       http.post('/api/maps/autocomplete', async ({ request }) => {
         bodies.push((await request.json()) as Record<string, unknown>);
-        return HttpResponse.json({ suggestions: [] });
+        return HttpResponse.json({ suggestions: [], source: 'amap' });
       }),
     );
     seedStore(useTripStore, {
-      trip: buildTrip({ id: 1 }),
+      trip: buildTrip({ id: 1, country_code: 'cn' }),
       places: [
         buildPlace({ lat: 48.85, lng: 2.34 }),
         buildPlace({ lat: 48.87, lng: 2.37 }),
@@ -746,13 +746,51 @@ describe('PlaceFormModal', () => {
     });
 
     render(<PlaceFormModal {...defaultProps} />);
+    await user.selectOptions(screen.getByLabelText('Provider'), 'amap');
     await user.type(screen.getByPlaceholderText('Search places...'), 'Eiffel');
 
     await waitFor(() => expect(bodies).toHaveLength(1));
-    expect(bodies[0].locationBias).toEqual({
-      low: { lat: 48.85, lng: 2.34 },
-      high: { lat: 48.87, lng: 2.37 },
+    expect(bodies[0]).toEqual({
+      input: 'Eiffel',
+      lang: 'en',
+      countryCode: 'CN',
+      providerOverride: 'amap',
+      locationBias: {
+        low: { lat: 48.85, lng: 2.34 },
+        high: { lat: 48.87, lng: 2.37 },
+      },
     });
+  });
+
+  it('FE-PLANNER-PLACEFORM-042b: full search keeps the existing center bias while autocomplete uses the bbox', async () => {
+    const user = userEvent.setup();
+    seedStore(useTripStore, {
+      trip: buildTrip({ id: 1, country_code: 'cn' }),
+      places: [
+        buildPlace({ lat: 48.85, lng: 2.34 }),
+        buildPlace({ lat: 48.87, lng: 2.37 }),
+      ],
+    });
+    server.use(
+      http.post('/api/maps/search', async ({ request }) => {
+        expect(await request.json()).toEqual({
+          query: 'Eiffel',
+          lang: 'en',
+          countryCode: 'CN',
+          providerOverride: 'amap',
+          locationBias: { lat: 48.86, lng: 2.355 },
+        });
+        return HttpResponse.json({ places: [], source: 'amap' });
+      }),
+    );
+
+    render(<PlaceFormModal {...defaultProps} />);
+    await user.selectOptions(screen.getByLabelText('Provider'), 'amap');
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Eiffel');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+
+    await waitFor(() => expect(searchInput).toHaveValue('Eiffel'));
   });
 
   it('FE-PLANNER-PLACEFORM-043: places spread over more than 500 km send no location bias', async () => {

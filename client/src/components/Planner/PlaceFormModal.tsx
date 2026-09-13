@@ -259,7 +259,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     try {
       const context = {
         countryCode: (tripObj as { country_code?: string | null } | null)?.country_code?.toUpperCase(),
-        locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined,
+        locationBias,
         lang: language,
         providerOverride,
         sessionToken: providerOverride === 'amap' ? undefined : placesSessionRef.current.current(),
