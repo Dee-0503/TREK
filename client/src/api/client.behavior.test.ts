@@ -401,6 +401,18 @@ describe('client > maps provider context', () => {
     expect(requests[1]?.body).toEqual({ input: '外', ...autocompleteContext })
   })
 
+  it('FE-APIWIRE-044a: forwards provider identity and Google session tokens for Google details', async () => {
+    let query = ''
+    server.use(http.get('/api/maps/details/:id', ({ request }) => {
+      query = new URL(request.url).search
+      return HttpResponse.json({ place: null })
+    }))
+
+    await mapsApi.details('google-poi-1', { lang: 'en', provider: 'google', sessionToken: 'google-session' })
+
+    expect(query).toBe('?lang=en&providerOverride=google&sessionToken=google-session')
+  })
+
   it('FE-APIWIRE-044: omits Google session tokens for AMap details', async () => {
     let query = ''
     server.use(http.get('/api/maps/details/:id', ({ request }) => {
@@ -410,7 +422,7 @@ describe('client > maps provider context', () => {
 
     await mapsApi.details('amap-poi-1', { lang: 'zh-CN', provider: 'amap', sessionToken: 'must-not-leak' })
 
-    expect(query).toBe('?lang=zh-CN')
+    expect(query).toBe('?lang=zh-CN&providerOverride=amap')
   })
 })
 

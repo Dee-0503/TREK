@@ -401,6 +401,15 @@ describe('calculateRouteWithLegs', () => {
     }), undefined)
   })
 
+  it('FE-COMP-ROUTECALCULATOR-051: normalizes lowercase and padded China country codes', async () => {
+    const routeSpy = vi.spyOn((await import('../../api/client')).mapsApi, 'route').mockResolvedValue({
+      coordinates: [[31.23, 121.47], [31.24, 121.48]], distance: 1000, duration: 120,
+      routeSource: { provider: 'amap', fallback: false }, legs: [],
+    })
+    await calculateRouteWithLegs(freshWaypoints(), { profile: 'driving', countryCode: ' cn ', providerOverride: 'amap' })
+    expect(routeSpy).toHaveBeenCalledWith(expect.objectContaining({ countryCode: 'CN' }), undefined)
+  })
+
   it('FE-COMP-ROUTECALCULATOR-033: returns an empty route for fewer than 2 waypoints without calling OSRM', async () => {
     const result = await calculateRouteWithLegs([wp1])
     expect(result).toEqual({ coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] })

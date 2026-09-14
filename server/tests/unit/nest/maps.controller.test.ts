@@ -196,6 +196,15 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       expect(details).toHaveBeenLastCalledWith(3, 'p1', 'de', undefined, {});
     });
 
+    it('forwards normalized provider context while keeping the Google session token', async () => {
+      const details = vi.fn().mockResolvedValue({ place: { id: 'p1' } });
+      await makeController({ detailsDisabled: () => false, details })
+        .details(user, 'p1', undefined, 'de', undefined, 'a-b_C9', ' cn ', '31.2', '121.5', 'amap');
+      expect(details).toHaveBeenCalledWith(3, 'p1', 'de', 'a-b_C9', {
+        countryCode: 'CN', latitude: 31.2, longitude: 121.5, override: 'amap',
+      });
+    });
+
     it('maps a service error', async () => {
       const details = vi.fn().mockRejectedValue(withError(404, 'Not found'));
       expect(await thrown(() => makeController({ detailsDisabled: () => false, details }).details(user, 'p1'))).toEqual({

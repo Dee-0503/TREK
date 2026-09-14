@@ -293,6 +293,7 @@ export async function calculateRouteWithLegs(
     return { coordinates: [], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'insufficient_waypoints' }, legs: [] }
   }
 
+  const normalizedCountryCode = countryCode?.trim().toUpperCase() || undefined
   const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';')
   // The cached result carries formatted leg distances, so the active distance unit is
   // part of the key — otherwise switching km↔mi would return stale text (#1300).
@@ -300,7 +301,7 @@ export async function calculateRouteWithLegs(
   // the same coordinates on a different day), so its key includes tripId/dayId;
   // the built-in OSRM profiles are context-free and leave those out.
   const pluginScope = profile.startsWith('plugin:') ? `:${tripId ?? ''}:${dayId ?? ''}` : ''
-  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}:${countryCode ?? ''}:${providerOverride ?? ''}`
+  const cacheKey = `${profile}:${getDistanceUnit()}:${coords}${pluginScope}:${normalizedCountryCode ?? ''}:${providerOverride ?? ''}`
   const cached = routeCache.get(cacheKey)
   if (cached) return cached
 
@@ -350,8 +351,8 @@ export async function calculateRouteWithLegs(
   }
 
   const osrmProfile = (profile === 'walking' || profile === 'cycling') ? profile : 'driving'
-  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && (countryCode === 'CN' || providerOverride !== undefined)) {
-    const result = await mapsApi.route({ profile: osrmProfile as 'driving' | 'walking' | 'cycling', waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode, providerOverride }, signal)
+  if ((profile === 'driving' || profile === 'walking' || profile === 'cycling') && (normalizedCountryCode === 'CN' || providerOverride !== undefined)) {
+    const result = await mapsApi.route({ profile: osrmProfile as 'driving' | 'walking' | 'cycling', waypoints: waypoints.map(p => ({ lat: p.lat, lng: p.lng })), countryCode: normalizedCountryCode, providerOverride }, signal)
     const legs: RouteSegment[] = result.legs.map(leg => ({ ...leg }))
     const routed: SharedRouteWithLegs = { ...result, legs }
     routeCache.set(cacheKey, routed)

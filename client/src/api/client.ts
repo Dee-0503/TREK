@@ -1048,7 +1048,11 @@ export const mapsApi = {
   },
   details: (placeId: string, context: { lang?: string; provider?: 'google' | 'amap' | 'osm'; sessionToken?: string } | string = {}, legacySessionToken?: string) => {
     const normalized = typeof context === 'string' ? { lang: context, sessionToken: legacySessionToken } : context
-    const params = normalized.provider === 'amap' ? { lang: normalized.lang } : { lang: normalized.lang, sessionToken: normalized.sessionToken }
+    const params = {
+      lang: normalized.lang,
+      ...(normalized.provider ? { providerOverride: normalized.provider } : {}),
+      ...(normalized.provider === 'amap' ? {} : { sessionToken: normalized.sessionToken }),
+    }
     return apiClient.get(`/maps/details/${encodeURIComponent(placeId)}`, { params }).then(r => checkInDev(mapsPlaceDetailsResultSchema, r.data, 'maps.details'))
   },
   // Pictures and a description for a place that is being looked at but not yet
