@@ -45,8 +45,9 @@ function parseGeographicContext(values: {
 }): GeographicContext & { override?: ProviderOverride } {
   const context: GeographicContext & { override?: ProviderOverride } = {};
   if (values.countryCode) {
-    if (!/^[A-Za-z]{2}$/.test(values.countryCode)) throw new HttpException({ error: 'Invalid countryCode' }, 400);
-    context.countryCode = values.countryCode.toUpperCase();
+    const countryCode = values.countryCode.trim();
+    if (!/^[A-Za-z]{2}$/.test(countryCode)) throw new HttpException({ error: 'Invalid countryCode' }, 400);
+    context.countryCode = countryCode.toUpperCase();
   }
   for (const [key, raw, min, max] of [
     ['latitude', values.latitude, -90, 90],
@@ -183,9 +184,11 @@ export class MapsController {
       return { place: null, disabled: true };
     }
     try {
+      const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
+      const validSessionToken = SESSION_TOKEN.test(sessionToken ?? '') ? sessionToken : undefined;
       return expand
-        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1', parseGeographicContext({ countryCode, latitude, longitude, providerOverride }))
-        : await this.maps.details(user.id, placeId, lang, SESSION_TOKEN.test(sessionToken ?? '') ? sessionToken : undefined, parseGeographicContext({ countryCode, latitude, longitude, providerOverride }));
+        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1', context)
+        : await this.maps.details(user.id, placeId, lang, context.override === 'amap' ? undefined : validSessionToken, context);
     } catch (err: unknown) {
       console.error('Maps details error:', err);
       throw toHttpException(err, 'Error fetching place details', 500);
