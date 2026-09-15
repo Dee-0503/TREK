@@ -48,7 +48,7 @@ describe('AmapProvider mocked HTTP adapter', () => {
   });
 
   it('uses the official polygon endpoint for bounded viewport POI search', async () => {
-    readJson.mockResolvedValue({ status: '1', pois: [poi] });
+    readJson.mockResolvedValue({ status: '1', pois: [{ ...poi, pname: '上海市', cityname: '上海市', adname: '浦东新区' }] });
     const result = await new AmapProvider().searchPois!('restaurant', { south: 31.2, west: 121.4, north: 31.3, east: 121.5 }, { lang: 'zh-CN' });
     const url = new URL(fetchFollow.mock.calls[0][0]);
     expect(url.pathname).toBe('/v3/place/polygon');
@@ -56,7 +56,7 @@ describe('AmapProvider mocked HTTP adapter', () => {
     expect(url.searchParams.get('offset')).toBe('25');
     expect(url.searchParams.get('extensions')).toBe('all');
     expect(url.searchParams.get('polygon')?.split('|')).toHaveLength(5);
-    expect(result.places[0]).toMatchObject({ id: 'amap:B123', source: 'amap', structured_address: null });
+    expect(result.places[0]).toMatchObject({ id: 'amap:B123', source: 'amap', structured_address: { province: '上海市', city: '上海市', district: '浦东新区' } });
   });
 
   it('maps weekly and today hours without inventing hours when absent', async () => {
