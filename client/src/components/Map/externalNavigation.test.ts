@@ -8,6 +8,13 @@ describe('AMap external navigation builders', () => {
     expect(buildAmapPlaceUrl({ provider: 'amap', provider_place_id: 'B1', name: '外滩', lat: 31.23, lng: 121.49 }, { countryCode: 'US' })).toBeNull()
   })
 
+  it('uses the documented WGS84 marker URL when an AMap result lacks an ID', () => {
+    const url = buildAmapPlaceUrl({ provider: 'amap', provider_place_id: null, name: '外滩', lat: 31.23, lng: 121.49 }, { countryCode: 'CN' }, { callnative: false })
+    expect(url).toContain('https://uri.amap.com/marker?')
+    expect(url).toContain('coordinate=wgs84')
+    expect(url).toContain('position=121.49%2C31.23')
+  })
+
   it('builds encoded provider-qualified place detail URL', () => {
     const url = buildAmapPlaceUrl(
       { provider: 'amap', provider_place_id: 'B1', name: '外滩 & 广场', lat: 31.23, lng: 121.49 },

@@ -62,12 +62,24 @@ export function buildAmapPlaceUrl(
   options: { callnative?: boolean } = {},
 ): string | null {
   if (!isMainlandContext(context) || place.provider !== 'amap') return null
-  if (!place.provider_place_id?.trim() || !place.name?.trim() || !validPoint(place)) return null
-  // The documented POI-detail contract accepts only the provider POI ID
-  // (plus optional source/native-handoff flags); do not add marker-only fields.
-  const params = [`poiid=${encoded(place.provider_place_id.trim())}`]
+  if (place.provider_place_id?.trim()) {
+    // The documented POI-detail contract accepts only the provider POI ID
+    // (plus optional native-handoff flags); do not add marker-only fields.
+    const params = [`poiid=${encoded(place.provider_place_id.trim())}`]
+    if (shouldCallNative(options.callnative)) params.push('callnative=1')
+    return `${AMAP_PLACE_URI}?${params.join('&')}`
+  }
+  // A provider-qualified result without an ID can still use the documented
+  // marker endpoint. Explicitly declare WGS84 so the URI host converts the
+  // persisted coordinate; do not silently invent a POI identity.
+  if (!place.name?.trim() || !validPoint(place)) return null
+  const params = [
+    `position=${encoded(`${place.lng},${place.lat}`)}`,
+    `name=${encoded(place.name.trim())}`,
+    'coordinate=wgs84',
+  ]
   if (shouldCallNative(options.callnative)) params.push('callnative=1')
-  return `${AMAP_PLACE_URI}?${params.join('&')}`
+  return `https://uri.amap.com/marker?${params.join('&')}`
 }
 
 function amapMode(profile: ExternalRouteProfile): 'car' | 'walk' | 'ride' | null {
