@@ -625,8 +625,8 @@ export class MapsService {
   async pois(category: string, bbox: { south: number; west: number; north: number; east: number }, lang?: string, context: ProviderContext = {}) {
     const selected = this.providerRouter?.resolvePlaceProvider(context) ?? 'osm';
     if (selected === 'amap' && this.amapProvider) {
-      const center = { latitude: (bbox.south + bbox.north) / 2, longitude: (bbox.west + bbox.east) / 2 };
-      const result = await this.amapProvider.search(category, { lang, context: { ...context, ...center } });
+      if (!this.amapProvider.searchPois) return this.searchOverpassPois(category, bbox, lang);
+      const result = await this.amapProvider.searchPois(category, bbox, { lang, context });
       return {
         pois: result.places.map((place) => ({
           osm_id: place.providerIdentity?.providerPlaceId ?? place.id,

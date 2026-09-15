@@ -47,6 +47,18 @@ describe('AmapProvider mocked HTTP adapter', () => {
     expect(result.places[0]).not.toHaveProperty('amap_place_id');
   });
 
+  it('uses the official polygon endpoint for bounded viewport POI search', async () => {
+    readJson.mockResolvedValue({ status: '1', pois: [poi] });
+    const result = await new AmapProvider().searchPois!('restaurant', { south: 31.2, west: 121.4, north: 31.3, east: 121.5 }, { lang: 'zh-CN' });
+    const url = new URL(fetchFollow.mock.calls[0][0]);
+    expect(url.pathname).toBe('/v3/place/polygon');
+    expect(url.searchParams.get('types')).toBe('餐饮服务');
+    expect(url.searchParams.get('offset')).toBe('25');
+    expect(url.searchParams.get('extensions')).toBe('all');
+    expect(url.searchParams.get('polygon')?.split('|')).toHaveLength(5);
+    expect(result.places[0]).toMatchObject({ id: 'amap:B123', source: 'amap' });
+  });
+
   it('maps weekly and today hours without inventing hours when absent', async () => {
     readJson.mockResolvedValueOnce({ status: '1', pois: [poi] });
     const weekly = await new AmapProvider().search('hours-week');

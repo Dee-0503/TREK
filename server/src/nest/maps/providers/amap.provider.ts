@@ -62,6 +62,21 @@ const inflight = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { provider: 'amap'; fetchedAt: number; value: unknown }>();
 const MAX_INFLIGHT_ENTRIES = 128;
 
+const AMAP_POI_TYPES: Record<string, string> = {
+  restaurant: '餐饮服务', cafe: '餐饮服务', bar: '餐饮服务', hotel: '住宿服务',
+  sights: '风景名胜', museum: '科教文化服务', nature: '风景名胜', activity: '体育休闲服务',
+  shopping: '购物服务', supermarket: '购物服务',
+};
+
+function polygonFor(bbox: { south: number; west: number; north: number; east: number }): string {
+  const corners = [
+    { lat: bbox.north, lng: bbox.west }, { lat: bbox.north, lng: bbox.east },
+    { lat: bbox.south, lng: bbox.east }, { lat: bbox.south, lng: bbox.west },
+    { lat: bbox.north, lng: bbox.west },
+  ];
+  return corners.map((point) => { const converted = AmapCoordinates.toProvider(point); return `${converted.lng.toFixed(6)},${converted.lat.toFixed(6)}`; }).join('|');
+}
+
 function error(status: number, code: string, message: string): AmapError {
   const err = new Error(message) as AmapError;
   err.status = status;
@@ -206,6 +221,21 @@ export class AmapProvider implements MapsProvider, RouteProvider {
         keywords: query.trim(), show_fields: 'business', ...this.contextParams(options),
       }, amapSearchResponseSchema);
       return { places: data.pois.map((raw) => { const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location); if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response'); const place = publicPlace(poi.id, poi, pos); if (place.opening_hours === undefined) delete place.opening_hours; return place; }), source: 'amap' };
+    });
+  }
+
+  async searchPois(category: string, bbox: { south: number; west: number; north: number; east: number }, options: Record<string, unknown> = {}): Promise<MapsSearchResult> {
+    const bounded = { south: Math.max(-90, Math.min(90, bbox.south)), west: Math.max(-180, Math.min(180, bbox.west)), north: Math.max(-90, Math.min(90, bbox.north)), east: Math.max(-180, Math.min(180, bbox.east)) };
+    return this.cached('pois', { category, bounded, options }, async () => {
+      const data = await this.request('/v3/place/polygon', {
+        polygon: polygonFor(bounded), types: AMAP_POI_TYPES[category] ?? category,
+        offset: '25', page: '1', extensions: 'all', ...this.contextParams(options),
+      }, amapSearchResponseSchema);
+      return { places: data.pois.map((raw) => {
+        const poi = amapPoiSchema.parse(raw); const pos = coordinate(poi.location);
+        if (!pos) throw error(502, 'invalid_response', 'AMap returned an invalid response');
+        const place = publicPlace(poi.id, poi, pos); if (place.opening_hours === undefined) delete place.opening_hours; return place;
+      }), source: 'amap' };
     });
   }
 
