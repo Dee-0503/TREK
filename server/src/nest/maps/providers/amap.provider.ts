@@ -57,6 +57,13 @@ const amapRouteResponseSchema = amapResponseSchema.extend({
   }).passthrough(),
 });
 
+const amapCyclingResponseSchema = z.object({
+  errcode: z.literal(0),
+  data: z.object({ paths: z.array(z.object({
+    distance: z.number(), duration: z.number(), steps: z.array(z.object({ polyline: z.string().min(1) }).passthrough()).optional(),
+  }).passthrough()) }).passthrough(),
+}).passthrough();
+
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_CACHE_ENTRIES = 128;
 const inflight = new Map<string, Promise<unknown>>();
@@ -177,18 +184,19 @@ export class AmapProvider implements MapsProvider, RouteProvider {
 
   async route(profile: RouteProfile, waypoints: RouteWaypoint[], options: { signal?: AbortSignal } = {}): Promise<import('@trek/shared').RouteWithLegs> {
     if (waypoints.length < 2) throw error(400, 'insufficient_waypoints', 'At least 2 waypoints required');
-    const path = profile === 'driving' ? '/v5/direction/driving' : profile === 'walking' ? '/v5/direction/walking' : '/v5/direction/bicycling';
+    const path = profile === 'driving' ? '/v3/direction/driving' : profile === 'walking' ? '/v3/direction/walking' : '/v4/direction/bicycling';
     const results = await Promise.all(waypoints.slice(0, -1).map(async (from, index) => {
       const to = waypoints[index + 1];
       const providerFrom = AmapCoordinates.toProvider(from);
       const providerTo = AmapCoordinates.toProvider(to);
-      const data = await this.request(path, {
-        origin: `${providerFrom.lng},${providerFrom.lat}`,
-        destination: `${providerTo.lng},${providerTo.lat}`,
-        waypoints: '',
-      }, amapRouteResponseSchema, options.signal);
-      if (!data.route.paths.length) throw error(502, 'empty_route', 'AMap returned an empty route');
-      const pathData = data.route.paths[0];
+      const data = profile === 'cycling'
+        ? await this.request(path, { origin: `${providerFrom.lng},${providerFrom.lat}`, destination: `${providerTo.lng},${providerTo.lat}` }, amapCyclingResponseSchema, options.signal)
+        : await this.request(path, { origin: `${providerFrom.lng},${providerFrom.lat}`, destination: `${providerTo.lng},${providerTo.lat}`, ...(profile === 'driving' ? { strategy: '0', extensions: 'all', waypoints: '' } : {}) }, amapRouteResponseSchema, options.signal);
+      const paths = profile === 'cycling'
+        ? (data as z.infer<typeof amapCyclingResponseSchema>).data.paths
+        : (data as z.infer<typeof amapRouteResponseSchema>).route.paths;
+      if (!paths.length) throw error(502, 'empty_route', 'AMap returned an empty route');
+      const pathData = paths[0];
       const coordinates = pathData.steps?.flatMap(step => step.polyline.split(';').map(pair => {
         const [lng, lat] = pair.split(',').map(Number);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw error(502, 'invalid_response', 'AMap returned an invalid response');
