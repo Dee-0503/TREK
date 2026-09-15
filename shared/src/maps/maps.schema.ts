@@ -9,9 +9,11 @@ export const providerOverrideSchema = mapProviderSchema;
 export type ProviderOverride = z.infer<typeof providerOverrideSchema>;
 
 export const geographicContextSchema = z.object({
-  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  // Context is evidence for provider selection, not persisted provider identity.
+  countryCode: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
+  providerOverride: providerOverrideSchema.optional(),
 });
 export type GeographicContext = z.infer<typeof geographicContextSchema>;
 
@@ -136,13 +138,12 @@ const latLng = z.object({ lat: z.number(), lng: z.number() });
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
+  lang: z.string().optional(),
   ...requestContext,
   // Optional bias toward a coordinate (lat/lng[/radius]); improves
   // foreign-region queries. z.number() is finite-only (zod v4), matching the
   // legacy Number.isFinite() check; radius was never validated beyond "number".
   locationBias: latLng.extend({ radius: z.number().optional() }).optional(),
-  countryCode: z.string().regex(/^[A-Za-z]{2}$/).optional(),
-  providerOverride: z.enum(['google', 'amap', 'osm']).optional(),
 });
 export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 
@@ -165,6 +166,10 @@ export const mapsReverseQuerySchema = z.object({
   lat: z.string().min(1),
   lng: z.string().min(1),
   lang: z.string().optional(),
+  countryCode: geographicContextSchema.shape.countryCode,
+  latitude: geographicContextSchema.shape.latitude,
+  longitude: geographicContextSchema.shape.longitude,
+  providerOverride: providerOverrideSchema.optional(),
 });
 export type MapsReverseQuery = z.infer<typeof mapsReverseQuerySchema>;
 

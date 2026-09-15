@@ -104,7 +104,6 @@ export class MapsController {
   async search(
     @CurrentUser() user: User,
     @Body() body: MapsSearchDto,
-    @Query('lang') lang?: string,
   ): Promise<MapsSearchResult> {
     const context: GeographicContext & { override?: ProviderOverride } = {
       countryCode: body.countryCode?.toUpperCase(),
@@ -113,7 +112,7 @@ export class MapsController {
       override: body.providerOverride,
     };
     try {
-      return await this.maps.search(user.id, body.query, lang, body.locationBias, context);
+      return await this.maps.search(user.id, body.query, body.lang, body.locationBias, context);
     } catch (err: unknown) {
       console.error('Maps search error:', err);
       throw toHttpException(err, 'Search error', 500);
@@ -284,8 +283,9 @@ export class MapsController {
     if (!lat || !lng) {
       throw new HttpException({ error: 'lat and lng required' }, 400);
     }
+    const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
     try {
-      return await this.maps.reverse(lat, lng, lang, parseGeographicContext({ countryCode, latitude, longitude, providerOverride }));
+      return await this.maps.reverse(lat, lng, lang, context);
     } catch {
       // The legacy route swallows reverse-geocode failures into an empty result.
       return { name: null, address: null };

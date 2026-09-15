@@ -342,7 +342,7 @@ describe('Tool: get_place_details', () => {
 
     await withHarness(user.id, async (h) => {
       await h.client.callTool({ name: 'get_place_details', arguments: { placeId: 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ' } });
-      expect(MapsService.prototype.getPlaceDetails).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'en');
+      expect(MapsService.prototype.getPlaceDetails).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'en', undefined, { countryCode: undefined, latitude: undefined, longitude: undefined, override: undefined });
       expect(MapsService.prototype.getPlaceDetailsExpanded).not.toHaveBeenCalled();
     });
   });
@@ -373,7 +373,7 @@ describe('Tool: get_place_details', () => {
       const data = parseToolResult(result) as any;
       expect(data.details.summary).toBe('Wrought-iron lattice tower.');
       expect(data.details.reviews).toHaveLength(1);
-      expect(MapsService.prototype.getPlaceDetailsExpanded).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'de', false);
+      expect(MapsService.prototype.getPlaceDetailsExpanded).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'de', false, { countryCode: undefined, latitude: undefined, longitude: undefined, override: undefined });
       expect(MapsService.prototype.getPlaceDetails).not.toHaveBeenCalled();
     });
   });
@@ -387,7 +387,32 @@ describe('Tool: get_place_details', () => {
         name: 'get_place_details',
         arguments: { placeId: 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', expand: true, refresh: true },
       });
-      expect(MapsService.prototype.getPlaceDetailsExpanded).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'en', true);
+      expect(MapsService.prototype.getPlaceDetailsExpanded).toHaveBeenCalledWith(user.id, 'ChIJD7fiBh9u5kcRYJSMaMOCCwQ', 'en', true, { countryCode: undefined, latitude: undefined, longitude: undefined, override: undefined });
+    });
+  });
+
+  it('forwards explicit geographic context and provider override', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(MapsService.prototype.getPlaceDetails).mockClear();
+    await withHarness(user.id, async (h) => {
+      await h.client.callTool({ name: 'get_place_details', arguments: {
+        placeId: 'amap:B0FFFAB6J2', lang: 'zh-CN', countryCode: 'CN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap',
+      }});
+      expect(MapsService.prototype.getPlaceDetails).toHaveBeenCalledWith(user.id, 'amap:B0FFFAB6J2', 'zh-CN', undefined, {
+        countryCode: 'CN', latitude: 31.2, longitude: 121.5, override: 'amap',
+      });
+    });
+  });
+
+  it('rejects invalid geographic context before calling the service', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(MapsService.prototype.getPlaceDetails).mockClear();
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'get_place_details', arguments: {
+        placeId: 'p1', countryCode: 'CHN',
+      }});
+      expect(result.isError).toBe(true);
+      expect(MapsService.prototype.getPlaceDetails).not.toHaveBeenCalled();
     });
   });
 
@@ -487,16 +512,26 @@ describe('Tool: search_pois', () => {
 // ---------------------------------------------------------------------------
 
 describe('Tool: reverse_geocode', () => {
-  it('returns result from mocked service', async () => {
+  it('forwards explicit geographic context to reverse geocoding', async () => {
     const { user } = createUser(testDb);
+    vi.mocked(MapsService.prototype.reverseGeocode).mockClear();
     await withHarness(user.id, async (h) => {
-      const result = await h.client.callTool({
-        name: 'reverse_geocode',
-        arguments: { lat: 48.8566, lng: 2.3522 },
+      await h.client.callTool({ name: 'reverse_geocode', arguments: {
+        lat: 31.2, lng: 121.5, lang: 'zh-CN', countryCode: 'CN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap',
+      }});
+      expect(MapsService.prototype.reverseGeocode).toHaveBeenCalledWith('31.2', '121.5', 'zh-CN', {
+        context: { countryCode: 'CN', latitude: 31.2, longitude: 121.5, override: 'amap' },
       });
-      const data = parseToolResult(result) as any;
-      expect(data.name).toBe('Paris');
-      expect(data.address).toBe('France');
+    });
+  });
+
+  it('rejects invalid reverse geographic context', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(MapsService.prototype.reverseGeocode).mockClear();
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'reverse_geocode', arguments: { lat: 31.2, lng: 121.5, countryCode: 'CHN' } });
+      expect(result.isError).toBe(true);
+      expect(MapsService.prototype.reverseGeocode).not.toHaveBeenCalled();
     });
   });
 });

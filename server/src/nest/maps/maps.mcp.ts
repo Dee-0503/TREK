@@ -1,5 +1,6 @@
 import { McpController, Tool, TOOL_ANNOTATIONS_READONLY, errorResult, ok, type McpContext } from '../../nest-mcp';
 import { z } from 'zod';
+import { geographicContextSchema } from '@trek/shared';
 import { POI_CATEGORY_KEYS } from './maps.helpers';
 import { MapsService } from './maps.service';
 
@@ -20,6 +21,7 @@ export class MapsMcp {
     description: 'Fetch detailed information about a place by its provider-qualified place ID. The plain lookup returns name, address, coordinates, rating, opening hours, phone and website, and always answers with an empty review list. Set expand only when visitor reviews or the editorial summary are what was actually asked for.',
     inputSchema: {
       placeId: z.string().describe('Provider-qualified place ID (for example amap:B0FFFAB6J2, node:123, or a Google Place ID)'),
+      ...geographicContextSchema.shape,
       lang: z.string().optional().default('en'),
       expand: z.boolean().optional().default(false).describe('Also fetch up to five visitor reviews and the editorial summary. Billed as an Enterprise SKU, so leave it off unless the answer needs them'),
       refresh: z.boolean().optional().default(false).describe('Bypass the cached expanded payload and re-fetch from the provider. Only does anything together with expand, and pays the expanded price again'),
@@ -28,7 +30,7 @@ export class MapsMcp {
     access: { group: 'geo', mode: 'read' },
   })
   async getPlaceDetails(
-    { placeId, lang, expand, refresh }: { placeId: string; lang?: string; expand?: boolean; refresh?: boolean },
+    { placeId, lang, expand, refresh, countryCode, latitude, longitude, providerOverride }: { placeId: string; lang?: string; expand?: boolean; refresh?: boolean; countryCode?: string; latitude?: number; longitude?: number; providerOverride?: 'google' | 'amap' | 'osm' },
     ctx: McpContext,
   ) {
     // The admin kill switch, checked before either path. An instance owner who
@@ -46,9 +48,10 @@ export class MapsMcp {
 
     // Same split the REST route makes, and for the same reason: the expanded
     // field mask is the expensive one, so nothing reaches it unless it was asked for.
+    const context = { countryCode, latitude, longitude, override: providerOverride };
     const details = expand
-      ? await this.maps.getPlaceDetailsExpanded(ctx.userId, placeId, lang ?? 'en', refresh ?? false)
-      : await this.maps.getPlaceDetails(ctx.userId, placeId, lang ?? 'en');
+      ? await this.maps.getPlaceDetailsExpanded(ctx.userId, placeId, lang ?? 'en', refresh ?? false, context)
+      : await this.maps.getPlaceDetails(ctx.userId, placeId, lang ?? 'en', undefined, context);
     return ok({ details });
   }
 
@@ -58,13 +61,14 @@ export class MapsMcp {
     inputSchema: {
       lat: z.number(),
       lng: z.number(),
+      ...geographicContextSchema.shape,
       lang: z.string().optional().default('en'),
     },
     annotations: TOOL_ANNOTATIONS_READONLY,
     access: { group: 'geo', mode: 'read' },
   })
-  async reverseGeocode({ lat, lng, lang }: { lat: number; lng: number; lang?: string }, _ctx: McpContext) {
-    const result = await this.maps.reverseGeocode(String(lat), String(lng), lang ?? 'en');
+  async reverseGeocode({ lat, lng, lang, countryCode, latitude, longitude, providerOverride }: { lat: number; lng: number; lang?: string; countryCode?: string; latitude?: number; longitude?: number; providerOverride?: 'google' | 'amap' | 'osm' }, _ctx: McpContext) {
+    const result = await this.maps.reverseGeocode(String(lat), String(lng), lang ?? 'en', { context: { countryCode, latitude, longitude, override: providerOverride } });
     return ok(result);
   }
 

@@ -32,6 +32,9 @@ interface PlPlaceSearchProps {
   planner: TripPlanner
   /** Search bias derived from the trip's existing places (trip centre). */
   locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } }
+  /** Geographic evidence used by the server provider router. */
+  countryCode?: string
+  providerOverride?: 'google' | 'amap' | 'osm'
   onPick: (pick: PlSearchPick) => void
   /** True while a suggestion's details are being resolved (name spinner). */
   onResolvingChange?: (resolving: boolean) => void
@@ -60,7 +63,7 @@ function placeToPick(place: MapsPlace): PlSearchPick {
  * centre, autocomplete dropdown, plus Google-Maps-URL and "lat, lng" paste
  * detection — the mobile counterpart of PlaceFormModal's search block.
  */
-export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvingChange }: PlPlaceSearchProps) {
+export default function PlPlaceSearch({ planner, locationBias, countryCode, providerOverride, onPick, onResolvingChange }: PlPlaceSearchProps) {
   const { t, language, toast } = planner
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MapsPlace[]>([])
@@ -85,7 +88,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
       const controller = new AbortController()
       abortRef.current = controller
       try {
-        const result = await mapsApi.autocomplete(input, language, locationBias, controller.signal, placesSessionRef.current.current())
+        const result = await mapsApi.autocomplete(input, { lang: language, countryCode, providerOverride, locationBias, sessionToken: placesSessionRef.current.current() }, undefined, controller.signal)
         setSuggestions(result.suggestions || [])
       } catch (err: unknown) {
         // Superseded request — axios rejects an aborted call with CanceledError.
@@ -93,7 +96,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
         setSuggestions([])
       }
     },
-    [language, locationBias],
+    [language, locationBias, countryCode, providerOverride],
   )
 
   // Debounced autocomplete — URLs and coordinate pastes go to the search button.
@@ -147,7 +150,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
           return
         }
       }
-      const result = await mapsApi.search(trimmed, language)
+      const result = await mapsApi.search(trimmed, { lang: language, countryCode, providerOverride, locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
       setResults(result.places || [])
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
@@ -169,14 +172,14 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
       let place: MapsPlace | null = null
       try {
         // Spends the session the suggestions opened.
-        const result = await mapsApi.details(suggestion.placeId, language, placesSessionRef.current.peek())
+        const result = await mapsApi.details(suggestion.placeId, { lang: language, provider: suggestion.placeId.startsWith('amap:') ? 'amap' : providerOverride, countryCode, sessionToken: suggestion.placeId.startsWith('amap:') ? undefined : placesSessionRef.current.peek() })
         if (result.place && result.place.lat != null && result.place.lng != null) place = result.place
       } catch {
         // fall through to text search
       }
       if (!place) {
         const fullQuery = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(fullQuery, language)
+        const search = await mapsApi.search(fullQuery, { lang: language, countryCode, providerOverride, locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
         place = (search.places?.[0] as MapsPlace | undefined) ?? null
       }
       if (place) {

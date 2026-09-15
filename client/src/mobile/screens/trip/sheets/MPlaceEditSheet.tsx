@@ -298,7 +298,7 @@ export default function MPlaceEditSheet({ planner, onOpenExpense }: MPlaceEditSh
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[6px] pt-[2px]" onPaste={handlePaste}>
-        <PlPlaceSearch planner={planner} locationBias={locationBias} onPick={applyPick} onResolvingChange={setResolvingPick} />
+        <PlPlaceSearch planner={planner} locationBias={locationBias} countryCode={(planner.trip as { country_code?: string | null } | null)?.country_code?.toUpperCase()} onPick={applyPick} onResolvingChange={setResolvingPick} />
 
         <Eyebrow className="mb-[5px] mt-3 uppercase">{t('places.formName')} *</Eyebrow>
         <input

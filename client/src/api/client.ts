@@ -8,7 +8,7 @@ import {
   unreadCountResultSchema, type UnreadCountResult,
   channelTestResultSchema,
   mapsSearchResultSchema, mapsAutocompleteResultSchema, mapsPlaceDetailsResultSchema,
-  mapsPlacePhotoResultSchema, mapsReverseResultSchema, mapsResolveUrlResultSchema, mapsRouteResultSchema, type MapsRouteResult, type MapsRouteRequest, type MapsSearchRequest, type MapsAutocompleteRequest,
+  mapsPlacePhotoResultSchema, mapsReverseResultSchema, mapsResolveUrlResultSchema, mapsRouteResultSchema, type MapsRouteRequest, type MapsSearchRequest, type MapsAutocompleteRequest, type GeographicContext, type ProviderOverride,
   mapsPlaceEnrichmentResultSchema,
   type NotificationRespondRequest,
   type SettingUpsertRequest, type SettingsBulkRequest,
@@ -1046,12 +1046,15 @@ export const mapsApi = {
       : { input, ...context }
     return apiClient.post('/maps/autocomplete', body, { signal }).then(r => checkInDev(mapsAutocompleteResultSchema, r.data, 'maps.autocomplete'))
   },
-  details: (placeId: string, context: { lang?: string; provider?: 'google' | 'amap' | 'osm'; sessionToken?: string } | string = {}, legacySessionToken?: string) => {
+  details: (placeId: string, context: { lang?: string; provider?: ProviderOverride; providerOverride?: ProviderOverride; countryCode?: string; latitude?: number; longitude?: number; sessionToken?: string } | string = {}, legacySessionToken?: string) => {
     const normalized = typeof context === 'string' ? { lang: context, sessionToken: legacySessionToken } : context
     const params = {
       lang: normalized.lang,
-      ...(normalized.provider ? { providerOverride: normalized.provider } : {}),
-      ...(normalized.provider === 'amap' ? {} : { sessionToken: normalized.sessionToken }),
+      ...(normalized.countryCode ? { countryCode: normalized.countryCode } : {}),
+      ...(normalized.latitude !== undefined ? { latitude: normalized.latitude } : {}),
+      ...(normalized.longitude !== undefined ? { longitude: normalized.longitude } : {}),
+      ...((normalized.providerOverride ?? normalized.provider) ? { providerOverride: normalized.providerOverride ?? normalized.provider } : {}),
+      ...((normalized.providerOverride ?? normalized.provider) === 'amap' ? {} : { sessionToken: normalized.sessionToken }),
     }
     return apiClient.get(`/maps/details/${encodeURIComponent(placeId)}`, { params }).then(r => checkInDev(mapsPlaceDetailsResultSchema, r.data, 'maps.details'))
   },
@@ -1069,7 +1072,11 @@ export const mapsApi = {
   placePhotoCredit: (key: string) =>
     apiClient.get(`/maps/enrichment/credit/${encodeURIComponent(key)}`).then(r => r.data as { credit: string | null }),
   placePhoto: (placeId: string, lat?: number, lng?: number, name?: string) => apiClient.get(`/maps/place-photo/${encodeURIComponent(placeId)}`, { params: { lat, lng, name } }).then(r => checkInDev(mapsPlacePhotoResultSchema, r.data, 'maps.placePhoto')),
-  reverse: (lat: number, lng: number, lang?: string) => apiClient.get('/maps/reverse', { params: { lat, lng, lang } }).then(r => checkInDev(mapsReverseResultSchema, r.data, 'maps.reverse')),
+  reverse: (lat: number, lng: number, context?: (GeographicContext & { lang?: string }) | string, legacyLang?: string) => {
+    const normalized = typeof context === 'string' ? { lang: context } : { ...(context ?? {}), lang: legacyLang }
+    const { providerOverride, ...query } = normalized
+    return apiClient.get('/maps/reverse', { params: { lat, lng, ...query, ...(providerOverride ? { providerOverride } : {}) } }).then(r => checkInDev(mapsReverseResultSchema, r.data, 'maps.reverse'))
+  },
   resolveUrl: (url: string) => apiClient.post('/maps/resolve-url', { url }).then(r => checkInDev(mapsResolveUrlResultSchema, r.data, 'maps.resolveUrl')),
   // OSM-only POI explore: places of a category within the current map viewport bbox.
   // Overpass can be slow on a fresh (uncached) area, so this call gets a longer

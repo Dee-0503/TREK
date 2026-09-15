@@ -47,7 +47,7 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
   describe('POST /search', () => {
     it('returns the service result', async () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
-      const res = await makeController({ search }).search(user, { query: 'berlin' }, 'de');
+      const res = await makeController({ search }).search(user, { query: 'berlin', lang: 'de' });
       expect(res).toEqual({ places: [], source: 'osm' });
       expect(search).toHaveBeenCalledWith(3, 'berlin', 'de', undefined, {
         countryCode: undefined,
@@ -60,13 +60,19 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
     it('forwards a valid locationBias to the service', async () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
       const bias = { lat: 1, lng: 2, radius: 5000 };
-      await makeController({ search }).search(user, { query: 'x', locationBias: bias }, 'de');
+      await makeController({ search }).search(user, { query: 'x', lang: 'de', locationBias: bias });
       expect(search).toHaveBeenCalledWith(3, 'x', 'de', bias, {
         countryCode: undefined,
         latitude: 1,
         longitude: 2,
         override: undefined,
       });
+    });
+
+    it('prefers the body language over the removed query-string language', async () => {
+      const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
+      await makeController({ search }).search(user, { query: 'x', lang: 'zh-CN' });
+      expect(search).toHaveBeenCalledWith(3, 'x', 'zh-CN', undefined, expect.any(Object));
     });
 
     it('maps a service error to its status + message', async () => {
@@ -434,10 +440,32 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
   });
 
   describe('GET /reverse', () => {
-    it('forwards lang through to the service', async () => {
+    it('forwards lang and normalized geographic context through to the service', async () => {
       const reverse = vi.fn().mockResolvedValue({ name: null, address: null });
-      await makeController({ reverse }).reverse('1', '2', 'fr');
-      expect(reverse).toHaveBeenCalledWith('1', '2', 'fr', {});
+      await makeController({ reverse }).reverse('1', '2', 'fr', ' cN ', '31.2', '121.5', 'amap');
+      expect(reverse).toHaveBeenCalledWith('1', '2', 'fr', {
+        countryCode: 'CN', latitude: 31.2, longitude: 121.5, override: 'amap',
+      });
+    });
+
+    it.each([
+      ['bad', undefined, undefined, 'Invalid countryCode'],
+      ['CN', '91', undefined, 'Invalid latitude'],
+      ['CN', undefined, '181', 'Invalid longitude'],
+    ])('rejects invalid context (%s)', async (countryCode, latitude, longitude, message) => {
+      const reverse = vi.fn();
+      expect(await thrown(() => makeController({ reverse }).reverse('1', '2', undefined, countryCode, latitude, longitude))).toEqual({
+        status: 400, body: { error: message },
+      });
+      expect(reverse).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown provider override', async () => {
+      const reverse = vi.fn();
+      expect(await thrown(() => makeController({ reverse }).reverse('1', '2', undefined, 'US', undefined, undefined, 'bing'))).toEqual({
+        status: 400, body: { error: 'Invalid providerOverride' },
+      });
+      expect(reverse).not.toHaveBeenCalled();
     });
   });
 });

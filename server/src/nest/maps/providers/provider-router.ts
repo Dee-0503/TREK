@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common';
 import type { GeographicContext, MapProvider, ProviderOverride, RouteProviderOverride } from '@trek/shared';
 import { readEnv } from '../../../app-config';
 
-export type ProviderContext = GeographicContext & { override?: ProviderOverride };
+export type ProviderContext = GeographicContext & { override?: ProviderOverride | 'openstreetmap' };
 export type RouteProviderContext = GeographicContext & { override?: RouteProviderOverride };
+
+function requestedOverride(context: { providerOverride?: ProviderOverride; override?: ProviderOverride | 'openstreetmap' }): ProviderOverride | undefined {
+  const override = context.providerOverride ?? context.override;
+  return override === 'openstreetmap' ? 'osm' : override;
+}
 
 /** Deterministic server-side selection of the configured maps provider. */
 @Injectable()
@@ -26,8 +31,8 @@ export class ProviderRouter {
   }
 
   private resolve(context: GeographicContext & { override?: MapProvider | 'openstreetmap' }, enabled: MapProvider[]): MapProvider {
-    if (context.override) {
-      const override = context.override === 'openstreetmap' ? 'osm' : context.override;
+    const override = requestedOverride(context);
+    if (override) {
       if (enabled.includes(override)) return override;
     }
     const mode = readEnv().maps.placesProviderMode;

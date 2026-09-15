@@ -77,9 +77,23 @@ describe('mapsReverseQuerySchema', () => {
     expect(mapsReverseQuerySchema.safeParse({ lat: '52.5', lng: '13.4' }).success).toBe(true);
     expect(mapsReverseQuerySchema.safeParse({ lat: '52.5' }).success).toBe(false);
   });
+
+  it('normalizes country codes and preserves valid routing context', () => {
+    const parsed = mapsReverseQuerySchema.parse({
+      lat: '31.2', lng: '121.5', countryCode: 'cN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap',
+    });
+    expect(parsed).toMatchObject({ countryCode: 'CN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap' });
+  });
+
+  it('rejects malformed geographic context', () => {
+    expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', countryCode: 'CHN' }).success).toBe(false);
+    expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', latitude: 91 }).success).toBe(false);
+    expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', providerOverride: 'unknown' }).success).toBe(false);
+  });
 });
 
 describe('mapsResolveUrlRequestSchema', () => {
+
   it('requires a non-empty url', () => {
     expect(
       mapsResolveUrlRequestSchema.safeParse({
