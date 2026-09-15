@@ -554,6 +554,13 @@ const nominatimStub = vi.fn().mockResolvedValue({
 // ── resolveGoogleMapsUrl coordinate extraction ────────────────────────────────
 
 describe('resolveGoogleMapsUrl coordinate extraction (ReDoS guards)', () => {
+  it('blocks AMap share URLs without fetching or scraping them', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(svc.resolveGoogleMapsUrl('https://uri.amap.com/marker?position=121.49,31.23')).rejects.toMatchObject({ status: 422, code: 'unsupported_provider_link' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('MAPS-020: extracts lat/lng from @lat,lng pattern', async () => {
     vi.stubGlobal('fetch', nominatimStub);
     const result = await svc.resolveGoogleMapsUrl('https://www.google.com/maps/@48.8566,2.3522,15z');
