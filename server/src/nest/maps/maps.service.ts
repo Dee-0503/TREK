@@ -2161,6 +2161,11 @@ export class MapsService {
   async resolveGoogleMapsUrl(
     url: string,
   ): Promise<{ lat: number; lng: number; name: string | null; address: string | null; google_ftid: string | null }> {
+    const parsedInput = new URL(url);
+    const hostname = parsedInput.hostname.toLowerCase();
+    if (hostname === 'amap.com' || hostname.endsWith('.amap.com') || hostname === 'amap.com.cn' || hostname.endsWith('.amap.com.cn')) {
+      throw Object.assign(new Error('AMap share links are not supported for import'), { status: 422, code: 'unsupported_provider_link' });
+    }
     let resolvedUrl = url;
 
     // Extract coordinates from a string (URL or page body). Google Maps encodes
