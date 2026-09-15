@@ -9,6 +9,7 @@ import { ChevronDown, ChevronRight, ChevronUp, Compass, Navigation, RotateCcw, E
 import { type PickedPlace } from './TransitSearchPanel'
 import { assignmentsApi, reservationsApi, daysApi } from '../../api/client'
 import { calculateRouteWithLegs, optimizeRoute, generateGoogleMapsUrl, generateCoMapsUrl, type NamedWaypoint } from '../Map/RouteCalculator'
+import { buildAmapRouteUrl } from '../Map/externalNavigation'
 import GoogleMapsIcon from '../shared/GoogleMapsIcon'
 import PlaceAvatar from '../shared/PlaceAvatar'
 import ConfirmDialog from '../shared/ConfirmDialog'
@@ -2031,7 +2032,9 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                               // Flat entries, one per app: the menu has room to
                               // grow and a submenu would need a component that
                               // does not exist here.
-                              const navTargets = getNavigationTargets(place)
+                              const navTargets = getNavigationTargets(place, undefined, {
+                                countryCode: (trip as Trip & { country_code?: string | null }).country_code ?? undefined,
+                              })
                               ctxMenu.open(e, [
                                 canEditDays && onEditPlace && { label: t('common.edit'), icon: Pencil, onClick: () => onEditPlace(place, assignment.id) },
                                 canEditDays && onRemoveAssignment && { label: t('planner.removeFromDay'), icon: Trash2, onClick: () => onRemoveAssignment(day.id, assignment.id) },
@@ -2762,7 +2765,20 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                           <RouteIcon size={12} strokeWidth={2} />
                           {t('dayplan.route')}
                         </button>
-                        {/* Open the day's stops as a route in Google Maps (planned order). #1255 */}
+                        {/* Open the day's stops in AMap when the trip has explicit Mainland China context. */}
+                        {(() => {
+                          const url = buildAmapRouteUrl(dayExportStops(), day.default_transport_mode ?? routeProfile, {
+                            countryCode: (trip as Trip & { country_code?: string | null }).country_code ?? undefined,
+                          })
+                          return url ? <button type="button"
+                            onClick={() => openNavigationTarget({ id: 'amap', label: 'AMap', url })}
+                            aria-label="AMap"
+                            title="AMap"
+                            className="bg-transparent text-content-secondary"
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-faint)', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                          >AMap</button> : null
+                        })()}
+
                         <button type="button"
                           onClick={() => {
                             const url = generateGoogleMapsUrl(dayExportStops())

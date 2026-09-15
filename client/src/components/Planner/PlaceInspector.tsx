@@ -343,9 +343,11 @@ export default function PlaceInspector({
   // server does on the way in now.
   const websiteUrl = safeHttpUrl(place.website) ?? safeHttpUrl(googleDetails?.website)
   // Prefer the place's stored ftid; if it has none yet, use the one just fetched from Google.
+  const tripCountryCode = useTripStore(s => s.trip?.country_code)
   const navigationTargets = getNavigationTargets(
     place ? { ...place, google_ftid: place.google_ftid || googleDetails?.google_ftid || null } : null,
     googleDetails?.google_maps_url,
+    { countryCode: tripCountryCode ?? undefined },
   )
   const selectedDay = days?.find(d => d.id === selectedDayId)
   const weekdayIndex = getWeekdayIndex(selectedDay?.date, placeTimeZone)

@@ -6,6 +6,7 @@ import {
   getAccommodationAnchors, getDayBookendHotels, shouldDrawEveningLeg, shouldDrawMorningLeg,
 } from '../../../../utils/dayOrder'
 import type { Accommodation, Assignment, Day } from '../../../../types'
+import { buildAmapRouteUrl, type ExternalNavigationContext } from '../../../../components/Map/externalNavigation'
 
 /**
  * Day-route helpers shared by the plan timeline and the day sheet — the exact
@@ -93,6 +94,22 @@ export function dayExportStops(
     && bookends.evening?.place_lat != null && bookends.evening?.place_lng != null
     ? { lat: bookends.evening.place_lat, lng: bookends.evening.place_lng, name: bookends.evening.place_name } : null
   return [...(morning ? [morning] : []), ...stops, ...(evening ? [evening] : [])]
+}
+
+export function dayAmapUrl(
+  day: Day,
+  days: Day[],
+  dayAssignments: Assignment[],
+  accommodations: Accommodation[],
+  bookendFromAccommodation: boolean,
+  profile: RouteProfileKey,
+  context?: ExternalNavigationContext | null,
+): string | null {
+  return buildAmapRouteUrl(
+    dayExportStops(day, days, dayAssignments, accommodations, bookendFromAccommodation),
+    profile,
+    context,
+  )
 }
 
 /** Google-Maps directions URL over the day's bookended stops. */

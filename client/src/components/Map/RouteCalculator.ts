@@ -3,6 +3,7 @@ import { pluginsApi, mapsApi } from '../../api/client'
 import type { DistanceUnit, RouteResult, RouteSegment, Waypoint, RouteAnchors, RouteWithLegs as SharedRouteWithLegs } from '../../types'
 import type { RouteProviderOverride } from '@trek/shared'
 import { formatDistance } from '../../utils/units'
+import { buildAmapRouteUrl, type ExternalNavigationContext } from './externalNavigation'
 
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
 
@@ -152,6 +153,14 @@ export function generateCoMapsUrl(places: NamedWaypoint[], profile: RouteProfile
   }
   const pins = valid.map((p) => `ll=${p.lat},${p.lng}&n=${label(p)}`).join('&')
   return `https://comaps.at/map?v=1&${pins}`
+}
+
+export function generateAmapUrl(
+  places: NamedWaypoint[],
+  profile: RouteProfileKey = 'driving',
+  context?: ExternalNavigationContext | null,
+): string | null {
+  return buildAmapRouteUrl(places, profile, context)
 }
 
 // Squared planar distance — enough for nearest-neighbor comparisons and cheaper than a full haversine.

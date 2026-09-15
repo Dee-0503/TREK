@@ -2,10 +2,13 @@ import type { AssignmentPlace, Place } from '../../types'
 import { getCoMapsUrlForPlace } from './placeCoMaps'
 import { getGoogleMapsUrlForPlace } from './placeGoogleMaps'
 import { getOpenStreetMapUrlForPlace } from './placeOpenStreetMap'
+import { buildAmapPlaceUrl, type ExternalNavigationContext } from '../Map/externalNavigation'
 
-type PlaceLike = Pick<Place | AssignmentPlace, 'name' | 'address' | 'lat' | 'lng' | 'google_place_id' | 'google_ftid'>
+type PlaceLike = Omit<Pick<Place | AssignmentPlace, 'name' | 'address' | 'lat' | 'lng' | 'google_place_id' | 'google_ftid' | 'provider' | 'provider_place_id'>, 'provider'> & {
+  provider?: string | null
+}
 
-export type NavigationAppId = 'google' | 'waze' | 'apple' | 'osm' | 'comaps'
+export type NavigationAppId = 'google' | 'waze' | 'apple' | 'osm' | 'comaps' | 'amap'
 
 export interface NavigationTarget {
   id: NavigationAppId
@@ -59,10 +62,16 @@ export function showsAppleMaps(): boolean {
 export function getNavigationTargets(
   place: PlaceLike | null | undefined,
   detailsUrl?: string | null,
+  context?: ExternalNavigationContext | null,
 ): NavigationTarget[] {
   if (!place) return []
   const targets: NavigationTarget[] = []
   const name = place.name?.trim()
+
+  const amapUrl = place.lat != null && place.lng != null
+    ? buildAmapPlaceUrl({ ...place, lat: place.lat, lng: place.lng }, context)
+    : null
+  if (amapUrl) targets.push({ id: 'amap', label: 'AMap', url: amapUrl })
 
   const googleUrl = getGoogleMapsUrlForPlace(place, detailsUrl)
   if (googleUrl) targets.push({ id: 'google', label: 'Google Maps', url: googleUrl })

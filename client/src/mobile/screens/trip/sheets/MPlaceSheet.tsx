@@ -240,7 +240,9 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
   // One app installed-and-offered means no picker: the tap opens it, which is
   // what this button has always done. The sheet only appears when there is an
   // actual choice to make.
-  const navTargets = getNavigationTargets(place)
+  const navTargets = getNavigationTargets(place, undefined, {
+    countryCode: (planner.trip as { country_code?: string | null } | null)?.country_code ?? undefined,
+  })
   const openDirections = () => {
     if (navTargets.length === 1) openNavigationTarget(navTargets[0])
     else if (navTargets.length > 1) setNavOpen(true)

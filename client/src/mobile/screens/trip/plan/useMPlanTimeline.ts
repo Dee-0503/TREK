@@ -5,7 +5,7 @@ import { assignmentsApi, reservationsApi, weatherApi } from '../../../../api/cli
 import { usePluginStore } from '../../../../store/pluginStore'
 import { getDayBookendHotels } from '../../../../utils/dayOrder'
 import { getDisplayTimeForDay, getMergedItems, getTransportForDay, hasCarrierEndpointOnDay } from '../../../../utils/dayMerge'
-import { dayCoMapsUrl, dayGoogleMapsUrl, optimizeDayOrder } from '../lib/dayRoute'
+import { dayCoMapsUrl, dayGoogleMapsUrl, dayAmapUrl, optimizeDayOrder } from '../lib/dayRoute'
 import {
   buildPlanRows, breaksChronology, findUpNext, hotelChipsForDay, hotelLegsForDay, itemHasTime,
   type HotelLegs, type PlanRow, type TransportEntry,
@@ -329,6 +329,16 @@ export function useMPlanTimeline(planner: TripPlanner) {
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }, [day, dayAssignments, days, tripAccommodations, settings, dayHasCarrier])
 
+  const exportAmap = useCallback(() => {
+    if (!day) return
+    const url = dayAmapUrl(
+      day, days, dayAssignments, tripAccommodations, settings.optimize_from_accommodation !== false,
+      day.default_transport_mode ?? routeProfile,
+      { countryCode: (planner.trip as { country_code?: string | null } | null)?.country_code ?? undefined },
+    )
+    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+  }, [day, dayAssignments, days, tripAccommodations, settings, routeProfile, planner.trip])
+
   const exportCoMaps = useCallback(() => {
     if (!day) return
     const url = dayCoMapsUrl(
@@ -385,7 +395,7 @@ export function useMPlanTimeline(planner: TripPlanner) {
     moveRow, removeAssignment, editAssignment, editTransport, openTransitJourney,
     moveRowTo,
     addPlace, addBooking, addTransport,
-    optimize, exportGoogleMaps, exportCoMaps, renameDay, fullPlaceOf,
+    optimize, exportGoogleMaps, exportCoMaps, exportAmap, renameDay, fullPlaceOf,
     routeModeOptions, setLegMode,
   }
 }
