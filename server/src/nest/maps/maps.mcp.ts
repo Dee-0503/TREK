@@ -93,7 +93,7 @@ export class MapsMcp {
    */
   @Tool({
     name: 'search_pois',
-    description: 'List OpenStreetMap points of interest of one category inside a map rectangle, with address, opening hours, website, phone and cuisine wherever OSM carries them. This is the discovery tool: use it to answer "what is around here" for a neighbourhood or a whole city district. Prefer search_place when the user already named the place they mean. Never calls Google, so it costs nothing and works on an instance with no Places key.',
+    description: 'List provider-neutral points of interest of one category inside a map rectangle, with address, opening hours, website, phone and cuisine wherever OSM carries them. This is the discovery tool: use it to answer "what is around here" for a neighbourhood or a whole city district. Prefer search_place when the user already named the place they mean. Never calls Google, so it costs nothing and works on an instance with no Places key.',
     inputSchema: {
       category: z.enum(POI_CATEGORY_KEYS).describe('Which kind of place to look for'),
       bbox: z.object({
@@ -103,20 +103,21 @@ export class MapsMcp {
         east: z.number().min(-180).max(180).describe('Eastern edge, longitude'),
       }).describe('The rectangle to search. Anything wider than 0.5 degrees is narrowed to a centred window so the query stays fast; the answer reports that as `clamped`'),
       lang: z.string().max(35).optional().describe('Language for the POI names, e.g. "de" or "ja". Falls back to the OSM international name and then the local one'),
+      ...geographicContextSchema.shape,
     },
     annotations: TOOL_ANNOTATIONS_READONLY,
     access: { group: 'geo', mode: 'read' },
   })
   async searchPois(
-    { category, bbox, lang }: {
+    { category, bbox, lang, countryCode, latitude, longitude, providerOverride }: {
       category: string;
       bbox: { south: number; west: number; north: number; east: number };
-      lang?: string;
+      lang?: string; countryCode?: string; latitude?: number; longitude?: number; providerOverride?: 'google' | 'amap' | 'osm';
     },
     _ctx: McpContext,
   ) {
     try {
-      return ok(await this.maps.pois(category, bbox, lang));
+      return ok(await this.maps.pois(category, bbox, lang, { countryCode, latitude, longitude, override: providerOverride }));
     } catch {
       // Overpass is a set of public mirrors; an outage there is not a bad request.
       return errorResult('POI search failed.');

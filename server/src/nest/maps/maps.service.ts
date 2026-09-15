@@ -431,7 +431,7 @@ interface OverpassPoiElement {
 
 interface PoiSearchResult {
   pois: OverpassPoi[];
-  source: 'openstreetmap';
+  source: 'openstreetmap' | 'amap';
   truncated: boolean;
   // True when the requested viewport was too large and got shrunk to a centred
   // window before querying — the results then cover the middle of the view only.
@@ -622,7 +622,31 @@ export class MapsService {
   }
 
   // OSM-only POI search by category within a viewport bbox (never calls Google).
-  pois(category: string, bbox: { south: number; west: number; north: number; east: number }, lang?: string) {
+  async pois(category: string, bbox: { south: number; west: number; north: number; east: number }, lang?: string, context: ProviderContext = {}) {
+    const selected = this.providerRouter?.resolvePlaceProvider(context) ?? 'osm';
+    if (selected === 'amap' && this.amapProvider) {
+      const center = { latitude: (bbox.south + bbox.north) / 2, longitude: (bbox.west + bbox.east) / 2 };
+      const result = await this.amapProvider.search(category, { lang, context: { ...context, ...center } });
+      return {
+        pois: result.places.map((place) => ({
+          osm_id: place.providerIdentity?.providerPlaceId ?? place.id,
+          name: place.name,
+          lat: place.lat,
+          lng: place.lng,
+          category,
+          poi_type: place.types?.[0] ?? category,
+          address: place.address || null,
+          website: place.website ?? null,
+          phone: place.phone ?? null,
+          opening_hours: place.opening_hours?.join('; ') ?? null,
+          cuisine: null,
+          source: 'amap' as const,
+        })),
+        source: 'amap' as const,
+        truncated: false,
+        clamped: false,
+      };
+    }
     return this.searchOverpassPois(category, bbox, lang);
   }
 
