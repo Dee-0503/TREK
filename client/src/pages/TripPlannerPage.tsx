@@ -297,7 +297,7 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
     setMobileSidebarOpen(null)
   } : undefined
 
-  const poi = usePoiExplore()
+  const poi = usePoiExplore({ countryCode: (trip as { country_code?: string | null } | null)?.country_code ?? undefined })
   const [glMap, setGlMap] = useState<CompassMap | null>(null)
   const poiPillEnabled = useSettingsStore(s => s.settings.map_poi_pill_enabled) !== false
 

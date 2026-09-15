@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
+import type { GeographicContext } from '@trek/shared'
 import { mapsApi } from '../../api/client'
 import { useTranslation } from '../../i18n'
 import type { Poi } from './poiCategories'
@@ -17,7 +18,7 @@ function isAbortError(err: unknown): boolean {
  * the results stale (`moved`) so the pill can offer "search this area". This keeps
  * Overpass load (and visual churn) down.
  */
-export function usePoiExplore() {
+export function usePoiExplore(context?: GeographicContext) {
   const { locale } = useTranslation()
   const [active, setActive] = useState<Set<string>>(() => new Set())
   const [byCat, setByCat] = useState<Record<string, Poi[]>>({})
@@ -56,7 +57,9 @@ export function usePoiExplore() {
     setLoading(key, true)
     setError(key, false)
     try {
-      const res = await mapsApi.pois(key, bbox, locale, ctrl.signal)
+      const res = context
+        ? await mapsApi.pois(key, bbox, locale, ctrl.signal, context)
+        : await mapsApi.pois(key, bbox, locale, ctrl.signal)
       // Drop the result if the user toggled this category off while the (slow)
       // Overpass request was in flight — otherwise stale results re-appear.
       setByCat(prev => (activeRef.current.has(key) ? { ...prev, [key]: res.pois } : prev))

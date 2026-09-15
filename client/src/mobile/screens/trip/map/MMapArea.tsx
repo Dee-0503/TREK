@@ -26,7 +26,7 @@ import type { MMapAreaProps } from '../MTripShell'
  * same set the places browser renders, so the two can't desync.
  */
 export default function MMapArea({ planner, shell }: MMapAreaProps) {
-  const poi = usePoiExplore()
+  const poi = usePoiExplore({ countryCode: (planner.trip as { country_code?: string | null } | null)?.country_code ?? undefined })
   const [glMap, setGlMap] = useState<CompassMap | null>(null)
   const poiPillEnabled = useSettingsStore(s => s.settings.map_poi_pill_enabled) !== false
 
