@@ -19,7 +19,8 @@ type AmapError = Error & { status: number; code: string };
 
 const amapPoiSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), address: z.string().optional(),
-  location: z.string().regex(/^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$/), type: z.string().optional(), tel: z.string().optional(),
+  location: z.string().regex(/^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$/), type: z.string().optional(), typecode: z.string().optional(), tel: z.string().optional(),
+  pname: z.string().optional(), cityname: z.string().optional(), adname: z.string().optional(),
   website: z.string().optional(),
   business: z.object({
     opentime_today: z.string().optional(),
@@ -103,6 +104,7 @@ function publicPlace(id: string, poi: z.infer<typeof amapPoiSchema>, pos: { lat:
     id: namespacedId(id),
     name: poi.name ?? '',
     address: poi.address ?? '',
+    structured_address: (poi.pname || poi.cityname || poi.adname) ? { province: poi.pname ?? null, city: poi.cityname ?? null, district: poi.adname ?? null } : null,
     lat: pos.lat,
     lng: pos.lng,
     website: safeText(poi.website),

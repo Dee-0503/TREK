@@ -56,7 +56,7 @@ describe('AmapProvider mocked HTTP adapter', () => {
     expect(url.searchParams.get('offset')).toBe('25');
     expect(url.searchParams.get('extensions')).toBe('all');
     expect(url.searchParams.get('polygon')?.split('|')).toHaveLength(5);
-    expect(result.places[0]).toMatchObject({ id: 'amap:B123', source: 'amap' });
+    expect(result.places[0]).toMatchObject({ id: 'amap:B123', source: 'amap', structured_address: null });
   });
 
   it('maps weekly and today hours without inventing hours when absent', async () => {

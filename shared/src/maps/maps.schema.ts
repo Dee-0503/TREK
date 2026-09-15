@@ -178,11 +178,19 @@ export const mapsResolveUrlRequestSchema = z.object({
 });
 export type MapsResolveUrlRequest = z.infer<typeof mapsResolveUrlRequestSchema>;
 
+export const structuredAddressSchema = z.object({
+  province: z.string().nullable().optional(), city: z.string().nullable().optional(),
+  district: z.string().nullable().optional(), street: z.string().nullable().optional(),
+  number: z.string().nullable().optional(),
+});
+export type StructuredAddress = z.infer<typeof structuredAddressSchema>;
+
 /** Provider-neutral place projection shared by search and detail responses. */
 export const mapPlaceProjectionSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   address: z.string().optional(),
+  structured_address: structuredAddressSchema.nullable().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
   google_place_id: z.string().nullable().optional(),
