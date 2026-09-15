@@ -126,7 +126,7 @@ export type RouteResult = z.infer<typeof routeResultSchema>;
 export const mapsRouteRequestSchema = z.object({
   profile: z.enum(['driving', 'walking', 'cycling']),
   waypoints: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).min(2),
-  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  countryCode: geographicContextSchema.shape.countryCode,
   providerOverride: routeProviderOverrideSchema.optional(),
 });
 export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
