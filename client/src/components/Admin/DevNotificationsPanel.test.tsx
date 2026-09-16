@@ -68,7 +68,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
     await user.click(screen.getByText('Simple → Me').closest('button')!);
     await waitFor(() => expect(capturedBody).toBeDefined());
     expect(capturedBody).toMatchObject({
@@ -86,7 +86,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
     await user.click(screen.getByText('Simple → Me').closest('button')!);
     expect(await screen.findByText('Sent: simple-me')).toBeInTheDocument();
   });
@@ -100,7 +100,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
 
     // The request handler never resolves, so sending stays true after the click settles
     await user.click(screen.getByText('Simple → Me').closest('button')!);
@@ -119,7 +119,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
     await user.click(screen.getByText('Simple → Me').closest('button')!);
     expect(await screen.findByText('No channel configured')).toBeInTheDocument();
   });
@@ -132,7 +132,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
     await user.click(screen.getByText('Simple → Me').closest('button')!);
     expect(await screen.findByText('Failed')).toBeInTheDocument();
   });
@@ -182,7 +182,7 @@ describe('DevNotificationsPanel', () => {
     );
     const user = userEvent.setup();
     render(<><ToastContainer /><DevNotificationsPanel /></>);
-    await screen.findByText('Type Testing');
+    await screen.findByText('Trip-Scoped Events');
 
     await user.click(screen.getByText('Boolean → Me').closest('button')!);
     await screen.findByText('Sent: boolean-me');
