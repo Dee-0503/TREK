@@ -272,10 +272,8 @@ export default function PlaceInspector({
     })
   }, [place, openSavePicker])
 
-  // Sits above the `if (!place)` bail-out below: a hook after an early return is
-  // only reached while a place is selected, so deselecting one mid-session
-  // changes the hook count and React tears the tree down.
   const placeId = place?.id
+  const tripCountryCode = useTripStore(s => s.trip?.country_code)
   const handleFileUpload = useCallback(async (e) => {
     const selectedFiles = Array.from((e.target as HTMLInputElement).files || [])
     if (!selectedFiles.length || !onFileUpload || !placeId) return
@@ -343,7 +341,6 @@ export default function PlaceInspector({
   // server does on the way in now.
   const websiteUrl = safeHttpUrl(place.website) ?? safeHttpUrl(googleDetails?.website)
   // Prefer the place's stored ftid; if it has none yet, use the one just fetched from Google.
-  const tripCountryCode = useTripStore(s => s.trip?.country_code)
   const navigationTargets = getNavigationTargets(
     place ? { ...place, google_ftid: place.google_ftid || googleDetails?.google_ftid || null } : null,
     googleDetails?.google_maps_url,
