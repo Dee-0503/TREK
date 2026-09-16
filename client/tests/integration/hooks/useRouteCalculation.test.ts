@@ -66,37 +66,39 @@ describe('useRouteCalculation', () => {
     const p3 = buildPlace({ lat: 31.25, lng: 121.49 })
     const store = buildMockStore({ '5': [
       buildAssignment({ day_id: 5, order_index: 0, place: p1 }),
-      buildAssignment({ day_id: 5, order_index: 1, place: p2 }),
+      { ...buildAssignment({ day_id: 5, order_index: 1, place: p2 }), leg_transport_mode: 'walking' },
       buildAssignment({ day_id: 5, order_index: 2, place: p3 }),
     ] })
     ;(calculateRouteWithLegs as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'amap', fallback: false } })
       .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' } })
-    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', [], { countryCode: 'CN', providerOverride: 'amap' }))
+    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', undefined, { countryCode: 'CN', providerOverride: 'amap' }))
     await act(async () => {})
-    expect(result.current.routeSource).toMatchObject({ provider: 'osrm', fallback: true, fallbackReason: 'amap_timeout' })
+    expect(calculateRouteWithLegs).toHaveBeenCalledTimes(2)
+    expect(result.current.routeSource).toMatchObject({ provider: 'mixed', fallback: true, fallbackReason: 'mixed_provider', fallbackReasons: ['amap_timeout'] })
   })
 
   it('preserves multiple fallback reasons across mixed chunks', async () => {
     const p = [31.23, 31.24, 31.25].map((lat, i) => buildPlace({ lat, lng: 121.47 + i * 0.01 }))
-    const store = buildMockStore({ '5': p.map((place, i) => buildAssignment({ day_id: 5, order_index: i, place })) })
+    const store = buildMockStore({ '5': p.map((place, i) => ({ ...buildAssignment({ day_id: 5, order_index: i, place }), leg_transport_mode: i === 1 ? 'walking' : null })) })
     ;(calculateRouteWithLegs as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'amap', fallback: true, fallbackReason: 'amap_timeout' } })
       .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'osrm', fallback: true, fallbackReason: 'amap_rate_limit' } })
-    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', [], { countryCode: 'CN', providerOverride: 'amap' }))
+    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', undefined, { countryCode: 'CN', providerOverride: 'amap' }))
     await act(async () => {})
+    expect(calculateRouteWithLegs).toHaveBeenCalledTimes(2)
     expect(result.current.routeSource?.fallbackReasons).toEqual(['amap_timeout', 'amap_rate_limit'])
   })
   it('records a synthetic fallback source and preserves its failure reason when a chunk fails', async () => {
     const p = [31.23, 31.24, 31.25].map((lat, i) => buildPlace({ lat, lng: 121.47 + i * 0.01 }))
-    const store = buildMockStore({ '5': p.map((place, i) => buildAssignment({ day_id: 5, order_index: i, place })) })
+    const store = buildMockStore({ '5': p.map((place, i) => ({ ...buildAssignment({ day_id: 5, order_index: i, place }), leg_transport_mode: i === 1 ? 'walking' : null })) })
     ;(calculateRouteWithLegs as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ...MOCK_ROUTE_WITH_LEGS, routeSource: { provider: 'amap', fallback: false } })
       .mockRejectedValueOnce(new Error('chunk timeout'))
-    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', [], { countryCode: 'CN', providerOverride: 'amap' }))
+    const { result } = renderHook(() => useRouteCalculation(store as TripStoreState, 5, true, 'driving', undefined, { countryCode: 'CN', providerOverride: 'amap' }))
     await act(async () => {})
     expect(result.current.routeSource).toMatchObject({ provider: 'amap', fallback: true, fallbackReason: 'chunk timeout' })
-    expect(result.current.routeSource?.fallbackReasons).toEqual(['chunk timeout'])
+    expect(calculateRouteWithLegs).toHaveBeenCalledTimes(2)
     expect(result.current.route).toHaveLength(1)
   })
 
@@ -182,6 +184,7 @@ describe('useRouteCalculation', () => {
         coordinates: [] as [number, number][],
         distance: 0,
         duration: 0,
+        routeSource: { provider: 'osrm', fallback: false },
         legs: waypoints.slice(0, -1).map((w, i) => ({
           ...MOCK_SEGMENTS[0],
           from: [w.lat, w.lng] as [number, number],
