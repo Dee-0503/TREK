@@ -92,10 +92,12 @@ describe('DevNotificationsPanel', () => {
   });
 
   it('FE-ADMIN-DEVNOTIF-007: all buttons disabled while a send is in-flight', async () => {
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
     server.use(
       http.post('/api/admin/dev/test-notification', async () => {
-        await new Promise(() => {}); // never resolves — simulates in-flight
-        return HttpResponse.json({ ok: true });
+        await pending
+        return HttpResponse.json({ ok: true })
       }),
     );
     const user = userEvent.setup();
@@ -109,6 +111,8 @@ describe('DevNotificationsPanel', () => {
       const buttons = screen.getAllByRole('button');
       buttons.forEach(btn => expect(btn).toBeDisabled());
     });
+    release();
+    await waitFor(() => expect(screen.getByText('Simple → Me').closest('button')).toBeEnabled());
   });
 
   it('FE-ADMIN-DEVNOTIF-008: the server error field is what the toast shows', async () => {
