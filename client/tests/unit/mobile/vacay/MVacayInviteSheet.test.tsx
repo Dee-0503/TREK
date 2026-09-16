@@ -74,7 +74,7 @@ describe('MVacayInviteSheet', () => {
     const send = await screen.findByRole('button', { name: 'Send Invite' });
     expect(send).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select user' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Select user' }));
     fireEvent.click(screen.getByRole('button', { name: 'bob' }));
     expect(screen.getByRole('button', { name: 'Send Invite' })).toBeEnabled();
   });

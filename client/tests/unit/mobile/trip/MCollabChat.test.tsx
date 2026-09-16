@@ -248,7 +248,7 @@ describe('MCollabChat', () => {
 
     expect(await screen.findByText('Landed safely')).toBeInTheDocument()
     expect(sentBodies).toEqual([{ text: 'Landed safely' }])
-    expect(input).toHaveValue('')
+    await waitFor(() => expect(input).toHaveValue(''))
   })
 
   it('FE-MOB-CCHAT-014: keeps the draft and toasts when sending fails', async () => {

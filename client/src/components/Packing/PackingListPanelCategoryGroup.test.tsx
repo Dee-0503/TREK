@@ -289,7 +289,7 @@ describe('KategorieGruppe — bulk actions', () => {
     fireEvent.click(screen.getByText('Delete List'))
 
     await waitFor(() => expect(onDeleteAll).toHaveBeenCalledWith(items))
-    expect(screen.queryByText('Delete List')).toBeNull()
+    await waitFor(() => expect(screen.queryByText('Delete List')).toBeNull())
   })
 
   it('FE-W5CAT-015: the scrim closes the category menu', () => {

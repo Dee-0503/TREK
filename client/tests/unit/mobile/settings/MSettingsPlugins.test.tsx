@@ -443,7 +443,7 @@ describe('MSettingsPlugins', () => {
     expect(frame).toHaveAttribute('data-path', 'settings.html');
     expect(frame).toHaveAttribute('data-title', 'Weather Pro');
     // Declared-field form and framed surface are two separate cards
-    expect(screen.getAllByText('Weather Pro')).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByText('Weather Pro')).toHaveLength(2));
   });
 
   it('FE-MOB-SETPLG-023: several active plugins each get their own form', async () => {
