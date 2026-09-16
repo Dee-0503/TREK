@@ -12,6 +12,7 @@ import DevNotificationsPanel from './DevNotificationsPanel';
 const ADMIN_USER = buildUser({ id: 1, username: 'testadmin', role: 'admin' });
 
 beforeEach(() => {
+  server.resetHandlers();
   resetAllStores();
   seedStore(useAuthStore, { user: ADMIN_USER, isAuthenticated: true });
 });
