@@ -6,15 +6,29 @@
  * dependency-free.
  */
 
-/** Bumped on any breaking change to the plugin API surface. Embed as `apiVersion` in your manifest. */
-export const PLUGIN_API_VERSION = 1 as const;
+import type { PLUGIN_ENTITY_FIELDS } from './generated/host-facts.js';
+
+/**
+ * Bumped on any breaking change to the plugin API surface. Embed as `apiVersion` in your
+ * manifest. Generated from TREK's protocol/envelope.ts, so it is the version the host
+ * implements, and `validate` refuses a manifest declaring a newer one.
+ */
+export { PLUGIN_API_VERSION } from './generated/host-facts.js';
 
 // Core entity shapes returned by ctx reads/writes. Only `id` is guaranteed; the rest
-// are the fields plugins most commonly use (typed for autocomplete), left optional
-// because they mirror raw DB rows — and every shape keeps an index signature, so no
-// column is ever hidden from you.
+// are the fields plugins most commonly use (typed for autocomplete), left optional.
+// What a row actually carries is the published field list in PLUGIN_ENTITY_FIELDS
+// (generated from TREK's output contract): a row holds those fields and no others, so
+// a column TREK adds later is not delivered until TREK publishes it there. The index
+// signature types the published fields these interfaces do not name.
 export interface Trip { id: number; user_id?: number; title?: string; start_date?: string | null; end_date?: string | null; currency?: string | null; [k: string]: unknown }
-export interface Place { id: number; trip_id?: number; name?: string; lat?: number | null; lng?: number | null; day_id?: number | null; category_id?: number | null; notes?: string | null; [k: string]: unknown }
+export interface Place {
+  id: number; trip_id?: number; name?: string; lat?: number | null; lng?: number | null;
+  /** @deprecated Never delivered: a place has no day of its own. Its days are the
+   * `assignments` of `trips.getDays()`, each carrying `day_id` and `place_id`. */
+  day_id?: number | null;
+  category_id?: number | null; notes?: string | null; [k: string]: unknown;
+}
 export interface Day { id: number; trip_id?: number; date?: string | null; title?: string | null; [k: string]: unknown }
 export interface Reservation { id: number; trip_id?: number; type?: string; [k: string]: unknown }
 export interface PackingItem { id: number; trip_id?: number; name?: string; [k: string]: unknown }
@@ -22,6 +36,25 @@ export interface TripFile { id: number; trip_id?: number; filename?: string; [k:
 export interface BudgetItem { id: number; trip_id?: number; name?: string; total_price?: number | null; currency?: string | null; [k: string]: unknown }
 export interface Assignment { id: number; day_id?: number; place_id?: number; notes?: string | null; [k: string]: unknown }
 export interface User { id: number; username?: string; display_name?: string | null; avatar?: string | null; [k: string]: unknown }
+
+// Every field an entity interface above names has to be one TREK delivers. A field
+// that is not in PLUGIN_ENTITY_FIELDS fails this check at compile time, so the
+// interfaces cannot promise a field the host drops. `Place.day_id` predates the
+// contract and is the one deprecated exception.
+type NamedKeys<T> = keyof { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
+type Undelivered<T, E extends keyof typeof PLUGIN_ENTITY_FIELDS> = Exclude<NamedKeys<T>, (typeof PLUGIN_ENTITY_FIELDS)[E][number]>;
+type NoneUndelivered<T extends never> = T;
+type EntityFieldsAreDelivered = [
+  NoneUndelivered<Undelivered<Trip, 'trip'>>,
+  NoneUndelivered<Exclude<Undelivered<Place, 'place'>, 'day_id'>>,
+  NoneUndelivered<Undelivered<Day, 'day'>>,
+  NoneUndelivered<Undelivered<Reservation, 'reservation'>>,
+  NoneUndelivered<Undelivered<PackingItem, 'packingItem'>>,
+  NoneUndelivered<Undelivered<TripFile, 'tripFile'>>,
+  NoneUndelivered<Undelivered<BudgetItem, 'budgetItem'>>,
+  NoneUndelivered<Undelivered<Assignment, 'assignment'>>,
+  NoneUndelivered<Undelivered<User, 'user'>>,
+];
 
 /** Every ctx.* call is rate-limited per plugin at the host RPC dispatch boundary:
  * burst 60, sustained 20/s, 16 in-flight. A throttled call is refused (retryable)
@@ -41,9 +74,15 @@ export interface PluginContext {
   settings: {
     get(key: string): Promise<unknown>;
   };
-  /** Your OWN sqlite database (`db:own`) — a separate file the plugin never gets a
+  /** Your OWN sqlite database (`db:own`): a separate file the plugin never gets a
    * path or connection to directly. Quota: 256 MB per plugin (writes past it fail);
-   * result sets are capped at 100,000 rows. See `tx()` below for the atomic-batch cap. */
+   * result sets are capped at 100,000 rows, and a `query`, a `tx` or an `exec` script
+   * without args gets 2 s of wall-clock time, checked between the rows it reads and
+   * the statements it runs (past it, it throws, a `tx` rolls back and a script stops
+   * before its next statement). An `exec` with bound args (one statement) and
+   * `migrate` are not timed, and no single statement can be stopped midway (a read
+   * only between its rows).
+   * See `tx()` below for the atomic-batch cap and README § Runtime limits. */
   db: {
     query<T = unknown>(sql: string, ...args: unknown[]): Promise<T[]>;
     exec(sql: string, ...args: unknown[]): Promise<{ changes: number }>;
@@ -476,6 +515,103 @@ export interface PlaceDetailProvider {
    * The host caps results at 12 items per provider. */
   getDetails(placeId: number, ctx: PluginContext): Promise<PlaceDetailItem[]>;
 }
+/**
+ * A place a search provider found, in the shape the host turns into a search row.
+ *
+ * `rating` is the one field open data cannot answer, and the reason this hook exists:
+ * OpenStreetMap carries no ratings at all, so "the best one around here" needs an
+ * index that has them. Zero to five, the scale every such index uses.
+ */
+export interface SearchResultPlace {
+  /** Stable id in your own index. The host namespaces it as `plugin:<yourId>:<id>`. */
+  id?: string;
+  name: string;
+  lat: number;
+  lng: number;
+  address?: string;
+  rating?: number;
+  website?: string;
+  phone?: string;
+  category?: string;
+  description?: string;
+}
+/** What the host asks a search provider to look for. */
+export interface SearchRequest {
+  query: string;
+  /** The most rows worth returning. The host caps it at 20 whatever it is asked for. */
+  limit: number;
+  /** The caller's language tag, for indexes that carry localized names. */
+  lang?: string;
+  /** Where the person is looking, when there is somewhere to bias toward. */
+  near?: { lat: number; lng: number };
+  /** Category search within a Roadtrip search rectangle. Older hosts omit these fields. */
+  category?: string;
+  bounds?: { south: number; west: number; north: number; east: number };
+}
+export interface SearchProvider {
+  /** Places for a query, drawn into TREK's own search list beside the core results.
+   * Needs `hook:search-provider`. The host caps results at 20 places per provider and
+   * gives you 2 seconds to answer, because somebody is waiting on the list.
+   *
+   * Called for an explicit search, not for every keystroke: an external index has rate
+   * limits, and a request per typed letter would spend them on words nobody finished. */
+  search(request: SearchRequest, ctx: PluginContext): Promise<SearchResultPlace[]>;
+  /** Optional: places for the query while it is still being typed, shown under the
+   * core suggestions in the place search's dropdown. Implement it only when your index
+   * can take a request per keystroke, such as one you keep locally; leave it out and
+   * your places appear once the search is run, as before.
+   *
+   * Called from the second typed character on, with `limit` 3, and given 800 ms. The
+   * host keeps at most 3 rows across every provider, so return your best few, and
+   * `near` is where the person is planning. Picking a row takes it as it is, so fill in
+   * what you know (address, website, phone) here rather than later. */
+  suggest?(request: SearchRequest, ctx: PluginContext): Promise<SearchResultPlace[]>;
+}
+/**
+ * What the host asks a POI category provider for: the places of ONE of your declared
+ * `capabilities.poiCategories` inside the map area the user is looking at.
+ */
+export interface PoiCategoryRequest {
+  /** One of your own `capabilities.poiCategories` ids. The host never sends any other. */
+  category: string;
+  /** The viewport, narrowed to at most 0.5 degrees a side and folded onto -180..180. */
+  bounds: { south: number; west: number; north: number; east: number };
+  /** The user's TREK language (`de`, `zh-TW`...), for indexes with localized names. */
+  lang?: string;
+  /** The most places worth returning. The host keeps at most 60 whatever you send. */
+  limit: number;
+}
+/** One row only your index knows, shown in the map popup: a trail length, a step-free entrance. */
+export interface PoiDetail {
+  /** At most 40 characters. */
+  label: string;
+  /** At most 120 characters. */
+  value: string;
+}
+/** A place in one of your categories. */
+export interface PoiCategoryPlace {
+  /** Stable id in your own index. The host namespaces it as `plugin:<yourId>:<id>`. */
+  id?: string;
+  name: string;
+  lat: number;
+  lng: number;
+  address?: string;
+  website?: string;
+  phone?: string;
+  /** Zero to five. */
+  rating?: number;
+  /** At most 6 rows. */
+  details?: PoiDetail[];
+}
+export interface PoiCategoryProvider {
+  /** Places for a chip you added to the trip map's "Explore places" pill.
+   * Needs `hook:poi-category-provider` and the category declared in
+   * `capabilities.poiCategories`. Runs as the user who picked the chip, so
+   * `ctx.settings.get()` is theirs. The host keeps places inside `bounds` only, at most
+   * 60 of them, and gives you 8 seconds to answer. Called when the user picks the chip
+   * or asks to search the area again, not on every pan. */
+  getPois(request: PoiCategoryRequest, ctx: PluginContext): Promise<PoiCategoryPlace[]>;
+}
 /** A validation/warning a plugin raises on a trip; TREK surfaces it in the planner. */
 export interface TripWarning { level: 'info' | 'warning' | 'error'; message: string; dayId?: number; placeId?: number; }
 export interface WarningProvider {
@@ -828,6 +964,8 @@ export interface PluginDefinition {
     photoProvider?: PhotoProvider;
     calendarSource?: CalendarSource;
     placeDetailProvider?: PlaceDetailProvider;
+    searchProvider?: SearchProvider;
+    poiCategoryProvider?: PoiCategoryProvider;
     warningProvider?: WarningProvider;
     tableContributor?: TableContributor;
     mapMarkerProvider?: MapMarkerProvider;
@@ -877,6 +1015,11 @@ export {
 export {
   EVENT_FAMILIES, EVENT_SNAPSHOT_GRANT, KNOWN_PERMISSIONS,
 } from './generated/host-facts.js';
+// What ctx results carry: the published fields of each entity, the fields holding rows
+// of another entity, and what each method returns.
+export { PLUGIN_ENTITY_FIELDS, PLUGIN_ENTITY_NESTED, PLUGIN_METHOD_RESULT } from './generated/host-facts.js';
+// The lucide icons a `capabilities.poiCategories` entry may use, and the per-plugin cap.
+export { POI_CATEGORY_ICONS, POI_CATEGORY_MAX } from './generated/host-facts.js';
 
 /** Scope for host-managed, per-user session state in a sandboxed plugin UI. */
 export type PluginSessionStorageScope = 'plugin' | 'trip';

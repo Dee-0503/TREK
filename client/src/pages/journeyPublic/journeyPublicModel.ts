@@ -6,6 +6,8 @@
 
 export interface PublicEntry {
   id: number
+  type?: string | null
+  sort_order?: number | null
   title?: string | null
   story?: string | null
   entry_date: string
@@ -30,6 +32,9 @@ export interface PublicPhoto {
   caption?: string | null
   // 'image' (default) or 'video' (#823)
   media_type?: string | null
+  /** Null on a local clip whose poster frame could not be grabbed; the page
+   *  draws a marked tile instead of an <img> then (#2341). */
+  thumbnail_path?: string | null
   duration_ms?: number | null
 }
 
@@ -44,6 +49,9 @@ export interface PublicGalleryPhoto {
   caption?: string | null
   // 'image' (default) or 'video' (#823)
   media_type?: string | null
+  /** Null on a local clip whose poster frame could not be grabbed; the gallery
+   *  draws a marked tile instead of an <img> then (#2341). */
+  thumbnail_path?: string | null
   duration_ms?: number | null
   /** Where and when the picture was taken (#1614). Absent for most photos, and the
    *  coordinates are withheld entirely unless the owner shared the map. */

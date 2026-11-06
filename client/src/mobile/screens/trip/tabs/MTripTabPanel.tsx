@@ -6,6 +6,8 @@ import MCostsTab from './MCostsTab'
 import MFilesTab from './MFilesTab'
 import MCollabTab from './MCollabTab'
 import MListsTab from './MListsTab'
+import MRoadtripTab from '../roadtrip/MRoadtripTab'
+import MJourneyDetail from '../../journey/MJourneyDetail'
 import PluginFrame from '../../../../components/Plugins/PluginFrame'
 
 /**
@@ -55,6 +57,19 @@ export default function MTripTabPanel({ planner, shell, tab }: MTripTabPanelProp
       return <MCollabTab planner={planner} shell={shell} />
     case 'listen':
       return <MListsTab planner={planner} shell={shell} />
+    // The only tab with two halves of its own: the chain, or the same map showing
+    // the stage. Both are this one component, because they share a stage and the
+    // switch between them must not lose it.
+    case 'roadtrip':
+      return <MRoadtripTab planner={planner} shell={shell} tab={tab} />
+    // The journal the trip links: the Journey addon's own phone screen, moved
+    // below the trip's floating top controls: its bars measure from --m-safe-top.
+    case 'journal':
+      return planner.journalId == null ? null : (
+        <div className="absolute inset-0 overflow-hidden [--m-safe-top:calc(env(safe-area-inset-top,0px)+62px)]">
+          <MJourneyDetail journeyId={planner.journalId} embedded />
+        </div>
+      )
     default:
       return <TabScroller>{null}</TabScroller>
   }

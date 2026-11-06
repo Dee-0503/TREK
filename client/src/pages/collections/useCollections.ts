@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from '../../i18n'
 import { useElementSize } from '../../hooks/useElementSize'
 import { useElementRect } from '../../hooks/useElementRect'
 import { useSettingsStore } from '../../store/settingsStore'
 import { useAuthStore } from '../../store/authStore'
 import { useToast } from '../../components/shared/Toast'
+import { collectionsApi } from '../../api/collections'
+import { downloadCollectionFile, downloadCollectionGpx, type CollectionExportFormat } from '../../components/Collections/collectionFile'
 import { getApiErrorMessage } from '../../types'
+import { canAddToCollection, canRemoveFromCollection, collectionRoleOf } from '../../utils/collectionAccess'
 import { addListener, removeListener } from '../../api/websocket'
 import { useCollectionStore, ALL_SAVED } from '../../store/collectionStore'
 import type { ActiveCollectionId } from '../../store/collectionStore'
 import { categoriesApi } from '../../api/client'
-import type { Collection, CollectionStatus } from '@trek/shared'
+import type { Collection, CollectionStatus, CollectionFile } from '@trek/shared'
 import type { Category, Place } from '../../types'
 import { filterPlaces, sortPlaces, statusCounts, mappablePlaces, presentCategories, presentLabels } from './collectionsModel'
 import type { CollectionLabelUpdateRequest } from '@trek/shared'
+
+/** Quiet time after the last collections:* event before the page reloads. */
+const WS_RELOAD_SETTLE_MS = 400
 
 /**
  * Collections page logic — owns the page-local UI state (new/edit-list forms,
@@ -69,12 +75,19 @@ export function useCollections() {
   const [showShare, setShowShare] = useState(false)
   const [showAddPlace, setShowAddPlace] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  // Export / import as a file (#2198) — distinct from showImport above, which
+  // is the "pull places out of one of my trips" dialog.
+  const [exporting, setExporting] = useState(false)
+  const [showImportFile, setShowImportFile] = useState(false)
   // The place ids the Copy-to-trip modal is open for (null = closed). Single
   // place from the detail panel, or the select-mode set for a bulk copy.
   const [copyIds, setCopyIds] = useState<number[] | null>(null)
 
-  // Initial load.
-  useEffect(() => { loadAll() }, [])
+  // Initial load. listsLoaded says the rail is fresh from this visit, which
+  // the route check below waits for before it calls a list id unknown. A load
+  // that fails leaves it off, so an offline page never drops the route.
+  const [listsLoaded, setListsLoaded] = useState(false)
+  useEffect(() => { loadAll().then(() => setListsLoaded(true), () => setListsLoaded(false)) }, [])
 
   // Central admin-defined categories, for assigning a category to a saved place.
   const [categories, setCategories] = useState<Category[]>([])
@@ -98,18 +111,67 @@ export function useCollections() {
     return () => cancelAnimationFrame(raf)
   }, [view, isWide])
 
+  // The invite notification links to /collections/:id, a list the invitee
+  // cannot read before they accept (#2645). When the route is such an invite
+  // the page offers it instead of opening the list, and lists it first.
+  const routeInvite = useMemo(() => {
+    if (!routeId) return null
+    const id = Number(routeId)
+    return incomingInvites.find(inv => inv.collection_id === id) ?? null
+  }, [routeId, incomingInvites])
+  const orderedInvites = useMemo(
+    () => (routeInvite ? [routeInvite, ...incomingInvites.filter(inv => inv !== routeInvite)] : incomingInvites),
+    [routeInvite, incomingInvites],
+  )
+
   // Keep the active list in sync with the URL (/collections/:id, or the
-  // "All saved" union at /collections).
+  // "All saved" union at /collections). A pending invite on the route shows
+  // the union behind its card.
   useEffect(() => {
-    const next: ActiveCollectionId = routeId ? Number(routeId) : ALL_SAVED
+    const next: ActiveCollectionId = routeId && !routeInvite ? Number(routeId) : ALL_SAVED
     if (Number.isNaN(next as number)) return
     if (next !== activeId) setActive(next)
-    // Only re-run when the route or the loaded list set changes.
+    // Only re-run when the route, the loaded list set or the invite on it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeId, collections.length])
+  }, [routeId, collections.length, routeInvite])
+
+  // A route id that is neither one of the lists nor a pending invite is a link
+  // to something gone: a declined or withdrawn invite, a deleted list, one the
+  // person was removed from. Drop it once the lists are in, rather than leave
+  // the URL on a list the page cannot show.
+  useEffect(() => {
+    if (!listsLoaded || loading || !routeId) return
+    const id = Number(routeId)
+    if (Number.isNaN(id)) return
+    if (collections.some(l => l.id === id) || incomingInvites.some(inv => inv.collection_id === id)) return
+    navigate('/collections', { replace: true })
+  }, [listsLoaded, loading, routeId, collections, incomingInvites, navigate])
+
+  // A link to one saved place (/collections/:id?place=<id>, the assistant's
+  // "Open in Collections") opens it once the list on the route holds it, and
+  // then drops the param, so a reload or the back button does not reopen it.
+  // A list that has loaded without the place (deleted or moved since) drops
+  // the param too, rather than leave the URL on a place the page cannot show.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const linkedPlaceId = Number(searchParams.get('place'))
+  useEffect(() => {
+    if (!Number.isInteger(linkedPlaceId) || linkedPlaceId <= 0 || placesLoading) return
+    if (typeof activeId !== 'number' || String(activeId) !== routeId) return
+    const held = places.some(p => p.id === linkedPlaceId && p.collection_id === activeId)
+    if (!held && places.some(p => p.collection_id !== activeId)) return
+    if (held) setSelectedPlaceId(linkedPlaceId)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('place')
+      return next
+    }, { replace: true })
+  }, [linkedPlaceId, placesLoading, activeId, routeId, places, setSelectedPlaceId, setSearchParams])
 
   // Live sync via WebSocket. collections:deleted / :removed must bounce a member
   // off a list that was removed (or that they were kicked from) under them.
+  const wsReloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeIdRef = useRef(activeId)
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
   const handleWsMessage = useCallback((msg: { type: string; collectionId?: number }) => {
     if (!msg.type?.startsWith('collections:')) return
     if (msg.type === 'collections:deleted' || msg.type === 'collections:removed') {
@@ -125,15 +187,26 @@ export function useCollections() {
     // invite / accepted / declined / cancelled / left / updated → refresh the
     // rail, and refresh the active list WITHOUT clearing the current selection or
     // select-mode (setActive would reset selectedPlaceId → close the open detail).
-    loadAll()
-    if (typeof activeId === 'number') loadCollection(activeId)
-    else if (activeId === ALL_SAVED) setActive(ALL_SAVED)
+    // An agent saving places one by one over MCP sends one event per place, so
+    // the reload waits until they stop instead of re-reading every list per event
+    // (#2559), and then reads whatever list is open by that time.
+    if (wsReloadTimer.current !== null) clearTimeout(wsReloadTimer.current)
+    wsReloadTimer.current = setTimeout(() => {
+      wsReloadTimer.current = null
+      loadAll()
+      const current = activeIdRef.current
+      if (typeof current === 'number') loadCollection(current)
+      else if (current === ALL_SAVED) refreshActive()
+    }, WS_RELOAD_SETTLE_MS)
   }, [activeId])
 
   useEffect(() => {
     addListener(handleWsMessage)
     return () => removeListener(handleWsMessage)
   }, [handleWsMessage])
+  useEffect(() => () => {
+    if (wsReloadTimer.current !== null) clearTimeout(wsReloadTimer.current)
+  }, [])
 
   // ── Derived ─────────────────────────────────────────────────────────
   const activeCollection = useMemo(
@@ -147,13 +220,9 @@ export function useCollections() {
   // "All saved" spans many lists (each enforced per-place on the server), so it
   // stays permissive on the client; a viewer of a shared list loses add/edit/delete.
   const currentUserId = useAuthStore(s => s.user?.id)
-  const myRole = useMemo(() => {
-    if (isOwner) return 'owner' as const
-    const me = members.find(m => m.user_id === currentUserId && !m.is_owner)
-    return me?.role ?? null
-  }, [isOwner, members, currentUserId])
+  const myRole = useMemo(() => collectionRoleOf(isOwner, members, currentUserId), [isOwner, members, currentUserId])
   const canEdit = isAllSaved || myRole === 'owner' || myRole === 'admin' || myRole === 'editor'
-  const canDelete = isAllSaved || myRole === 'owner' || myRole === 'admin'
+  const canDelete = isAllSaved || canRemoveFromCollection(myRole)
 
   // Sharing is offered on any real (non "All saved") list the user can see. The
   // badge counts everyone but the owner — accepted collaborators + pending invites.
@@ -164,6 +233,15 @@ export function useCollections() {
   useEffect(() => { setShowShare(false) }, [activeId])
 
   const ownedLists = useMemo(() => collections.filter(c => c.is_owner !== false), [collections])
+  /**
+   * Lists a file may be added to: the person's own, plus a shared one where
+   * they are an editor or an admin. Same rule the server applies on the way in,
+   * so the import dialog never offers a list the import would refuse.
+   */
+  const writableLists = useMemo(
+    () => collections.filter(c => canAddToCollection(c, currentUserId)),
+    [collections, currentUserId],
+  )
   const sharedLists = useMemo(() => collections.filter(c => c.is_owner === false), [collections])
 
   // Labels are per-collection, so never apply them on the "All saved" union.
@@ -198,6 +276,88 @@ export function useCollections() {
   }, [navigate])
 
   const handlePlaceAdded = useCallback(() => { refreshActive() }, [refreshActive])
+
+  /**
+   * Download the active list as a file, in the format picked from the menu.
+   *
+   * The file is fetched rather than built from what this page holds: the page
+   * has the places for display, the server decides what may leave the instance.
+   * A GPX holds only places with coordinates, so the rest are counted and the
+   * count is said; a list with none at all gets no empty file (#2301).
+   */
+  const handleExportList = useCallback(async (format: CollectionExportFormat = 'trek') => {
+    if (typeof activeId !== 'number') return
+    setExporting(true)
+    try {
+      if (format === 'trek') {
+        downloadCollectionFile(await collectionsApi.exportFile(activeId))
+        return
+      }
+      const result = await collectionsApi.exportGpx(activeId)
+      if (result.waypoints === 0) {
+        toast.warning(t('collections.file.gpxNothing'))
+        return
+      }
+      downloadCollectionGpx(result.name, result.gpx)
+      if (result.omitted > 0) toast.info(t('collections.file.gpxOmitted', { count: result.omitted }))
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('common.error')))
+    } finally {
+      setExporting(false)
+    }
+  }, [activeId, toast, t])
+
+  /** A GPX read into a list file for the import dialog to show. The server does the parsing. */
+  const handleReadGpx = useCallback(
+    (gpx: string, fileName: string) => collectionsApi.readGpx({ gpx, file_name: fileName }),
+    [],
+  )
+
+  /**
+   * Read a chosen file and create the list it describes.
+   *
+   * Lands on the new list, because that is the thing the person was after and
+   * an import that leaves you where you were reads as one that did nothing.
+   */
+  const handleImportFile = useCallback(async (file: CollectionFile, name?: string) => {
+    const result = await collectionsApi.importFile({ file, name })
+    await loadAll()
+    const created = result.collection as Collection
+    navigate(`/collections/${created.id}`)
+    if (result.skipped > 0) {
+      toast.info(t('collections.file.doneSkipped', { count: result.imported, skipped: result.skipped }))
+    } else {
+      toast.success(t('collections.file.done', { count: result.imported }))
+    }
+    setShowImportFile(false)
+  }, [loadAll, navigate, toast, t])
+
+  /**
+   * Read a chosen file into a list that is already there.
+   *
+   * Lands on that list, for the same reason a new one does. Nothing in it is
+   * overwritten: the server counts the places it already had and leaves them,
+   * and the toast says so rather than letting a file quietly do less than it
+   * looked like it would.
+   */
+  const handleImportFileInto = useCallback(async (file: CollectionFile, collectionId: number) => {
+    const result = await collectionsApi.importFileInto(collectionId, { file })
+    const name = (result.collection as Collection).name
+    const duplicates = result.duplicates ?? 0
+    await loadAll()
+    if (activeId === collectionId) refreshActive()
+    else navigate(`/collections/${collectionId}`)
+    if (result.imported === 0 && duplicates > 0) {
+      toast.info(t('collections.file.doneIntoNothing', { name }))
+    } else if (duplicates > 0) {
+      toast.success(t('collections.file.doneIntoDuplicates', { count: result.imported, duplicates, name }))
+    } else if (result.skipped > 0) {
+      toast.info(t('collections.file.doneSkipped', { count: result.imported, skipped: result.skipped }))
+    } else {
+      toast.success(t('collections.file.doneInto', { count: result.imported, name }))
+    }
+    setShowImportFile(false)
+  }, [activeId, loadAll, refreshActive, navigate, toast, t])
 
   const handleDeleteList = useCallback(async () => {
     if (confirmDeleteList == null) return
@@ -391,7 +551,7 @@ export function useCollections() {
     collections, ownedLists, sharedLists, activeCollection, isAllSaved, isOwner,
     myRole, canEdit, canDelete,
     canShare, shareMemberCount,
-    activeId, places, visiblePlaces, mappable, hasMappable, members, incomingInvites, counts,
+    activeId, places, visiblePlaces, mappable, hasMappable, members, incomingInvites, routeInvite, orderedInvites, counts,
     view, statusFilter, categoryFilter, categoryOptions, ratingFilter, sortMode, search, selectedPlaceId, selectMode, selectedIds,
     labels, labelFilter, labelOptions,
     loading, placesLoading,
@@ -405,6 +565,9 @@ export function useCollections() {
     editorTarget, setEditorTarget, handleEditorCreated,
     showAddPlace, setShowAddPlace, handlePlaceAdded,
     showImport, setShowImport,
+    exporting, handleExportList,
+    showImportFile, setShowImportFile, handleImportFile, handleImportFileInto, handleReadGpx,
+    writableLists,
     confirmDeleteList, setConfirmDeleteList,
     mobileRailOpen, setMobileRailOpen,
     showShare, setShowShare, handleAfterLeave,

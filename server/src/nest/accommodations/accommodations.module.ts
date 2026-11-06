@@ -1,15 +1,13 @@
-import { Module } from '@nestjs/common';
-import { AccommodationsController } from './accommodations.controller';
-import { AccommodationsService } from './accommodations.service';
-import { AccommodationsRpc } from './accommodations.rpc';
-import { AccommodationsMcp } from './accommodations.mcp';
-import { PlacesModule } from '../places/places.module';
-import { AuthModule } from '../auth/auth.module';
-import { DatabaseModule } from '../database/database.module';
-import { PermissionsModule } from '../permissions/permissions.module';
-import { RealtimeModule } from '../realtime/realtime.module';
-import { PluginGuardsModule } from '../plugins/host/plugin-guards.module';
+import { PluginGuardsModule } from '../../nest-rpc/plugin-guards.module';
 import { McpSharedModule } from '../mcp-shared/mcp-shared.module';
+import { PermissionsModule } from '../permissions/permissions.module';
+import { PlacesModule } from '../places/places.module';
+import { RealtimeModule } from '../realtime/realtime.module';
+import { AccommodationsDomainModule } from './accommodations-domain.module';
+import { AccommodationsController } from './accommodations.controller';
+import { AccommodationsMcp } from './accommodations.mcp';
+import { AccommodationsRpc } from './accommodations.rpc';
+import { Module } from '@nestjs/common';
 
 /**
  * Accommodations. One fachlichkeit, one module: the routes used to sit in
@@ -20,11 +18,27 @@ import { McpSharedModule } from '../mcp-shared/mcp-shared.module';
  * which is a foreign key, not a module edge. PlacesModule is here only because
  * create_place_accommodation writes a place and a stay in one transaction --
  * the same reason DaysMcp could drop it.
+ *
+ * AssignmentsDomainModule is the service half only, the same leaf PlacesModule
+ * already imports, so the day stop a booking implies is written through
+ * AssignmentsService instead of a second copy of its SQL. No edge back: that
+ * module reaches permissions, query helpers, journey and realtime, none of
+ * which comes near accommodations.
  */
 @Module({
-  imports: [McpSharedModule, PermissionsModule, RealtimeModule, PluginGuardsModule, DatabaseModule, PlacesModule, AuthModule],
+  imports: [
+    McpSharedModule,
+    PermissionsModule,
+    RealtimeModule,
+    PluginGuardsModule,
+    PlacesModule,
+    AccommodationsDomainModule,
+  ],
   controllers: [AccommodationsController],
-  providers: [AccommodationsService, AccommodationsRpc, AccommodationsMcp],
-  exports: [AccommodationsService],
+  providers: [AccommodationsRpc, AccommodationsMcp],
+  // The MODULE, not the provider: Nest refuses to export a provider that belongs to
+  // an imported module, and the service lives in the domain module now. Re-exporting
+  // the module gives every existing importer the same service it always got.
+  exports: [AccommodationsDomainModule],
 })
 export class AccommodationsModule {}

@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { applyGlobalMiddleware, routingCspOrigins } from '../../../src/middleware/globalMiddleware';
+
 import express from 'express';
 import request from 'supertest';
-import { applyGlobalMiddleware } from '../../../src/middleware/globalMiddleware';
+import { describe, it, expect, afterEach } from 'vitest';
 
 async function directiveSources(name: string): Promise<string[]> {
   const app = express();
@@ -12,8 +13,8 @@ async function directiveSources(name: string): Promise<string[]> {
   const csp = String(res.headers['content-security-policy'] || '');
   const directive = csp
     .split(';')
-    .map(d => d.trim())
-    .find(d => d.startsWith(name));
+    .map((d) => d.trim())
+    .find((d) => d.startsWith(name));
 
   return directive ? directive.split(/\s+/).slice(1) : [];
 }
@@ -45,10 +46,86 @@ describe('global CSP: the other shipped raster presets (#2180)', () => {
     expect(await connectSrcSources()).toContain('https://tiles.stadiamaps.com');
   });
 
+  it('allows the OpenTopoMap apex and tile shards used by the Tours planner', async () => {
+    const sources = await connectSrcSources();
+    expect(sources).toContain('https://tile.opentopomap.org');
+    expect(sources).toContain('https://*.tile.opentopomap.org');
+  });
+
+  it('allows the OpenSeaMap seamark host a paddle tour can lay over its map', async () => {
+    expect(await connectSrcSources()).toContain('https://tiles.openseamap.org');
+  });
+
+  it('allows the OpenSnowMap piste host the Tours planner can lay over its map (SKI-01)', async () => {
+    expect(await connectSrcSources()).toContain('https://tiles.opensnowmap.org');
+  });
+
+  it('allows the OpenHikingMap host the Tours planner offers as a hiking base map (MAP-01)', async () => {
+    expect(await connectSrcSources()).toContain('https://tile.openmaps.fr');
+  });
+
+  it('allows the CyclOSM shards the Tours planner offers as a cycling base map (BIK-06), and nothing wider', async () => {
+    const sources = await connectSrcSources();
+    for (const shard of ['a', 'b', 'c']) expect(sources).toContain(`https://${shard}.tile-cyclosm.openstreetmap.fr`);
+    expect(sources).not.toContain('https://*.openstreetmap.fr');
+  });
+
   it('keeps the routing host, which is a different host and covers nothing here', async () => {
     // routing.openstreetmap.de was on the list all along and looks close enough
     // to hide the gap: a CSP source matches a host, not a suffix of one.
     expect(await connectSrcSources()).toContain('https://routing.openstreetmap.de/');
+  });
+});
+
+describe('global CSP: the second routing engine', () => {
+  it('allows the public Valhalla, which is a shipped default like the OSRM hosts', async () => {
+    // It is asked only when a leg should avoid tolls, a motorway or a ferry — the
+    // question the OSRM hosts answer with HTTP 400, because their car profile carries
+    // no excludable classes. Left out here it fails the way CSP always fails a fetch:
+    // silently, with the switch working and no tile of an answer arriving.
+    expect(await connectSrcSources()).toContain('https://valhalla1.openstreetmap.de');
+  });
+
+  it('names the origin without a path, because it is a POST to /route', async () => {
+    // The OSRM entries carry `/route/v1/` because a source with a path matches that
+    // path alone, and OSRM is only ever asked there. Valhalla is a different shape and
+    // would grow endpoints (isochrones, map matching), so the origin is the right unit.
+    const sources = await connectSrcSources();
+    expect(sources).not.toContain('https://valhalla1.openstreetmap.de/route');
+  });
+});
+
+describe('global CSP: the imagery host (#2307)', () => {
+  it('allows server.arcgisonline.com, which a GL map reaches through fetch', async () => {
+    // The gap hid behind Leaflet for as long as Leaflet was the only renderer to
+    // show the imagery: it loads a tile as an <img>, and img-src allows `https:`
+    // outright. A GL map reads the raster through fetch to hand it to WebGL, so
+    // it lands on connect-src instead and was refused with nothing to see for it.
+    expect(await connectSrcSources()).toContain('https://server.arcgisonline.com');
+  });
+
+  it('names the apex host, because img-src is what used to carry it', async () => {
+    // img-src keeps its blanket `https:`, which is why Leaflet never noticed. The
+    // fix belongs on connect-src alone; widening img-src further would buy nothing
+    // and widening connect-src to a wildcard would not match the apex anyway.
+    const sources = await connectSrcSources();
+    expect(sources).not.toContain('https://*.arcgisonline.com');
+    expect(await directiveSources('img-src')).toContain('https:');
+  });
+});
+
+describe('global CSP: the elevation tiles of the 3D tour view', () => {
+  it('allows the Terrarium tiles, which MapLibre and the flyover preload fetch', async () => {
+    // The 3D view drapes the route over Mapzen's open elevation model on AWS Open
+    // Data. MapLibre reads raster-dem tiles through fetch, and the corridor preload
+    // warms the cache with fetch too, so both land on connect-src; img-src is not asked.
+    expect(await connectSrcSources()).toContain('https://elevation-tiles-prod.s3.amazonaws.com');
+  });
+
+  it('names that one bucket host, not every S3 bucket', async () => {
+    const sources = await connectSrcSources();
+    expect(sources).not.toContain('https://*.s3.amazonaws.com');
+    expect(sources).not.toContain('https://*.amazonaws.com');
   });
 });
 
@@ -63,6 +140,21 @@ describe('global CSP: script-src', () => {
     // this every .heic upload fails in the browser. See the comment on the
     // directive for how to actually get rid of it.
     expect(await directiveSources('script-src')).toContain("'unsafe-eval'");
+  });
+});
+
+describe('global CSP: media-src (#2341)', () => {
+  it('allows blob:, which is where a picked clip lives until it is uploaded', async () => {
+    // The editor previews the clip and grabs its poster frame through a <video>
+    // on an object URL. With media-src unset the browser fell back to
+    // default-src, which never admits blob:, so the preview stayed empty and
+    // the clip went up without a poster. Nothing of this shows in dev: Vite
+    // serves the document there and helmet never sees it.
+    expect(await directiveSources('media-src')).toContain('blob:');
+  });
+
+  it("keeps 'self' so the uploaded clip still plays from /api/photos", async () => {
+    expect(await directiveSources('media-src')).toContain("'self'");
   });
 });
 
@@ -86,8 +178,8 @@ describe('forced-HTTPS redirect', () => {
 
   it('redirects to the configured APP_URL host, not the Host header the caller sent', async () => {
     process.env.FORCE_HTTPS = 'true';
-    process.env.APP_URL = 'https://trip.pakulat.org';
-    expect(await redirectLocation()).toBe('https://trip.pakulat.org/trips');
+    process.env.APP_URL = 'https://trip.example.invalid';
+    expect(await redirectLocation()).toBe('https://trip.example.invalid/trips');
   });
 
   it('falls back to the request host when APP_URL is unset', async () => {
@@ -106,7 +198,7 @@ describe('forced-HTTPS redirect', () => {
 
   it('leaves an already-secure request alone, and never redirects the health probe', async () => {
     process.env.FORCE_HTTPS = 'true';
-    process.env.APP_URL = 'https://trip.pakulat.org';
+    process.env.APP_URL = 'https://trip.example.invalid';
     const app = express();
     applyGlobalMiddleware(app);
     app.get('/trips', (_req, res) => res.json({ ok: true }));
@@ -120,5 +212,58 @@ describe('forced-HTTPS redirect', () => {
     // bounced to a hostname it cannot resolve.
     const probe = await request(app).get('/api/health');
     expect(probe.status).toBe(200);
+  });
+});
+
+describe('routingCspOrigins', () => {
+  it('CSP-ROUTING-001: keeps only the origin, because a path source matches that path alone', () => {
+    // A router is asked at several paths (/route/v1/…, /table/v1/…); pinning one would
+    // block the rest without an error the app could report.
+    expect(routingCspOrigins(['https://osrm.example.org/route/v1/driving'])).toEqual(['https://osrm.example.org']);
+  });
+
+  it('CSP-ROUTING-002: a port belongs to the origin and is kept', () => {
+    expect(routingCspOrigins(['http://192.0.2.1:5000'])).toEqual(['http://192.0.2.1:5000']);
+  });
+
+  it('CSP-ROUTING-003: anything that is not an http(s) URL widens nothing', () => {
+    // A bad settings row must not be able to loosen the policy.
+    expect(routingCspOrigins(['', null, undefined, 'not a url', 'javascript:alert(1)', 'ftp://x/y'])).toEqual([]);
+  });
+
+  it('CSP-ROUTING-004: the same host twice is one source', () => {
+    expect(
+      routingCspOrigins(['https://osrm.example.org/route/v1/driving', 'https://osrm.example.org/table/v1/driving']),
+    ).toEqual(['https://osrm.example.org']);
+  });
+
+  it('CSP-ROUTING-006: both engines get named, because both are reached from the browser', () => {
+    // bootstrap hands in the OSRM default and the Valhalla default together. An
+    // instance that configures its own Valhalla and leaves OSRM public still has to
+    // have that host in the policy, and the other way round.
+    expect(routingCspOrigins(['https://osrm.example.org/route/v1/driving', 'https://valhalla.example.org'])).toEqual([
+      'https://osrm.example.org',
+      'https://valhalla.example.org',
+    ]);
+    expect(routingCspOrigins([null, 'https://valhalla.example.org'])).toEqual(['https://valhalla.example.org']);
+  });
+});
+
+describe('connect-src with a self-hosted router', () => {
+  it('CSP-ROUTING-005: a configured origin is named, or the browser blocks it silently', async () => {
+    const app = express();
+    applyGlobalMiddleware(app, { extraConnectSrc: ['https://osrm.example.org'] });
+    app.get('/probe', (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get('/probe');
+    const csp = String(res.headers['content-security-policy'] || '');
+    const connect = csp
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.startsWith('connect-src'))!;
+
+    expect(connect).toContain('https://osrm.example.org');
+    // The public hosts stay, so an instance can be switched back without another deploy.
+    expect(connect).toContain('https://routing.openstreetmap.de/');
   });
 });

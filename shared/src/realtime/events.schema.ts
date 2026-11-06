@@ -1,3 +1,6 @@
+import { roadtripDayBoundaryListSchema } from '../roadtrip/day-boundary.schema';
+import { roadtripPreferencesSchema } from '../roadtrip/preferences.schema';
+
 import { z } from 'zod';
 
 /**
@@ -14,7 +17,8 @@ import { z } from 'zod';
  *   schemas below describe the fields BESIDES `type`.
  * - MCP-originated broadcasts add a `_source: 'mcp'` marker key to the payload
  *   (server/src/mcp/tools/_shared.ts). Zod object schemas strip unknown keys,
- *   so it needs no per-event modeling.
+ *   so it needs no per-event modeling, except in a strict schema, which names
+ *   it (`settings:updated`).
  *
  * Deliberately NOT in the registry:
  * - The dynamic plugin namespace: trip broadcasts force-namespaced to
@@ -60,6 +64,10 @@ export const TREK_WS_EVENTS = {
   'place:created': { scope: 'trip', payload: z.object({ place: entity }) },
   'place:updated': { scope: 'trip', payload: z.object({ place: entity }) },
   'place:deleted': { scope: 'trip', payload: z.object({ placeId: id }) },
+  // Invalidate the trip's Tours list; affected ids let peers exclude new Tours immediately.
+  'tours:changed': { scope: 'trip', payload: z.object({ placeIds: idList.optional() }) },
+  // CW-03: the stations of a city walk visited or skipped on one of its days, all of them as they are now.
+  'tours:visits': { scope: 'trip', payload: z.object({ assignmentId: id, visits: z.array(entity) }) },
 
   // ── Assignments ──────────────────────────────────────────────────────────
   'assignment:created': { scope: 'trip', payload: z.object({ assignment: entity }) },
@@ -91,6 +99,30 @@ export const TREK_WS_EVENTS = {
     scope: 'trip',
     payload: z.union([z.object({ orderedIds: idList }), z.object({ day: entity })]),
   },
+
+  // ── Road trip ────────────────────────────────────────────────────────────
+  // The points a drive is routed through, and the tracks a day follows. Broadcast in one
+  // event carrying the day's whole list rather than one event per point: a via has no
+  // identity anyone reads, the client keeps them per day anyway, and a drag is a rapid
+  // burst of writes whose only interesting state is the one that lands last.
+  //
+  // These used to be silent, on the reasoning that a via is how one person draws a route
+  // rather than a change to the itinerary everybody reads. That does not hold: two people
+  // planning a road trip see the same line on the same map, and a reshaped drive changes
+  // every arrival time after it.
+  //
+  // The via writes send dayId as text, the way the routes always did, on every surface.
+  // Assignments, accommodations and hike plans still send it as a number; the client
+  // reads it through Number(), so both forms stay valid here.
+  'roadtripVia:changed': {
+    scope: 'trip',
+    payload: z.object({ dayId: id, vias: z.array(entity) }),
+  },
+  'roadtripTrack:changed': {
+    scope: 'trip',
+    payload: z.object({ dayId: id, track: entity.nullable() }),
+  },
+  'roadtripBoundary:changed': { scope: 'trip', payload: roadtripDayBoundaryListSchema },
 
   // ── Day notes ────────────────────────────────────────────────────────────
   'dayNote:created': { scope: 'trip', payload: z.object({ dayId: id, note: entity }) },
@@ -134,6 +166,8 @@ export const TREK_WS_EVENTS = {
     scope: 'trip',
     payload: z.object({ category: z.string(), assignees: z.array(z.unknown()) }),
   },
+  // The list's new order, as packing:reordered carries it.
+  'todo:reordered': { scope: 'trip', payload: z.object({ orderedIds: idList }) },
 
   // ── Budget ───────────────────────────────────────────────────────────────
   'budget:created': { scope: 'trip', payload: z.object({ item: entity }) },
@@ -168,7 +202,8 @@ export const TREK_WS_EVENTS = {
     payload: z.union([z.object({ reservation: entity }), empty]),
   },
   'reservation:deleted': { scope: 'trip', payload: z.object({ reservationId: id }) },
-  // DRIFT: REST sends { positions, day_id }; the MCP tool sends { positions, dayId }.
+  // REST sends { positions, day_id }; the MCP tool sends { positions, day_id, dayId },
+  // keeping the dayId key it always sent next to REST's.
   'reservation:positions': {
     scope: 'trip',
     payload: z.union([
@@ -205,16 +240,34 @@ export const TREK_WS_EVENTS = {
   'trip:deleted': { scope: 'trip', payload: z.object({ id }) },
   'member:added': { scope: 'trip', payload: z.object({ member: entity }) },
   'member:removed': { scope: 'trip', payload: z.object({ userId: id }) },
+  // A guest renamed: who it is and the new name, nothing more. A member row
+  // can carry an email, which no fellow traveller's tab needs for a rename.
+  'member:updated': { scope: 'trip', payload: z.object({ member: z.strictObject({ id, username: z.string() }) }) },
+  // The trip's linked journal changed. A signal only: what each member may see of
+  // it differs, so every client asks for its own view of the link.
+  'trip:journal:changed': { scope: 'trip', payload: empty },
 
   // ── Files ────────────────────────────────────────────────────────────────
   'file:created': { scope: 'trip', payload: z.object({ file: entity }) },
   'file:updated': { scope: 'trip', payload: z.object({ file: entity }) },
   'file:deleted': { scope: 'trip', payload: z.object({ fileId: id }) },
+  // A sync run moved documents. Also sent, with both counts at zero, when a
+  // binding is created or removed or its connection is deleted. Carries counts
+  // rather than the documents themselves: the client already learns about each
+  // one through file:created, and this is what tells the sync panel to refresh
+  // its status line.
+  'docsync:changed': {
+    scope: 'trip',
+    payload: z.object({ linkId: id, pulled: z.number(), pushed: z.number() }),
+  },
 
   // ── Collab ───────────────────────────────────────────────────────────────
   'collab:note:created': { scope: 'trip', payload: z.object({ note: entity }) },
   'collab:note:updated': { scope: 'trip', payload: z.object({ note: entity }) },
   'collab:note:deleted': { scope: 'trip', payload: z.object({ noteId: id }) },
+  'collab:link:created': { scope: 'trip', payload: z.object({ link: entity }) },
+  'collab:link:updated': { scope: 'trip', payload: z.object({ link: entity }) },
+  'collab:link:deleted': { scope: 'trip', payload: z.object({ linkId: id }) },
   'collab:poll:created': { scope: 'trip', payload: z.object({ poll: entity }) },
   'collab:poll:voted': { scope: 'trip', payload: z.object({ poll: entity }) },
   'collab:poll:closed': { scope: 'trip', payload: z.object({ poll: entity }) },
@@ -232,9 +285,29 @@ export const TREK_WS_EVENTS = {
   // ── Memories ─────────────────────────────────────────────────────────────
   'memories:updated': { scope: 'trip', payload: z.object({ userId: id }) },
 
+  'roadtripPreferences:changed': { scope: 'trip', payload: z.object({ preferences: roadtripPreferencesSchema }) },
+
   // ── Notifications (user-scoped) ──────────────────────────────────────────
   'notification:new': { scope: 'user', payload: z.object({ notification: entity }) },
   'notification:updated': { scope: 'user', payload: z.object({ notification: entity }) },
+  // Every notification of the user was marked read at once: the bell reads its list again.
+  'notification:read-all': { scope: 'user', payload: empty },
+
+  // ── The user's own lists and settings (user-scoped) ─────────────────────
+  // A trip appeared on the user's list (created, copied): the dashboard reads it again.
+  'trips:changed': { scope: 'user', payload: empty },
+  // Display settings changed. Names the keys only, never their values: the
+  // receiving tab reads the settings again through its own session. Strict, so a
+  // payload that carries a value along fails the registry instead of passing
+  // with the value stripped; only the MCP marker may come with it.
+  'settings:updated': {
+    scope: 'user',
+    payload: z.strictObject({ keys: z.array(z.string()), _source: z.literal('mcp').optional() }),
+  },
+  // The user's tags changed (created, renamed, deleted): the tag pickers read them again.
+  'tags:changed': { scope: 'user', payload: empty },
+  // Countries, regions or bucket list entries changed: the atlas reads them again.
+  'atlas:changed': { scope: 'user', payload: empty },
 
   // ── Collections (user-scoped) ────────────────────────────────────────────
   'collections:updated': { scope: 'user', payload: z.object({ collectionId: id }) },
@@ -265,6 +338,10 @@ export const TREK_WS_EVENTS = {
   'vacay:shared-update': { scope: 'user', payload: empty },
 
   // ── Journey (user-scoped; broadcastJourneyEvent injects journeyId) ──────
+  // The journey itself changed (title, trips, preferences) or went away: the
+  // journey list and an open journey read it again, or leave it.
+  'journey:updated': { scope: 'user', payload: z.object({ journeyId: id }) },
+  'journey:deleted': { scope: 'user', payload: z.object({ journeyId: id }) },
   'journey:trip:synced': { scope: 'user', payload: z.object({ journeyId: id, tripId: id }) },
   'journey:entry:created': { scope: 'user', payload: z.object({ journeyId: id, entry: entity }) },
   // DRIFT: the soft-delete path emits { journeyId, entryId } under :updated
@@ -282,6 +359,24 @@ export const TREK_WS_EVENTS = {
     scope: 'user',
     payload: z.object({ journeyId: id, targetUserId: id, role: z.unknown() }),
   },
+  /*
+   * Photos on the journey learned when (or where) they were taken (#1587).
+   *
+   * Sent once per batch of provider photos (Immich, Synology) added, after the
+   * detached capture-time backfill wrote something, and to everyone on the
+   * journey including whoever added them: the add answered before the backfill
+   * ran, so the importer's own reload still had the new photos at the end of the
+   * gallery. Content-free, the gallery order is the server's to work out.
+   *
+   * Never for a device upload: those go one file per request, so an event per
+   * request would reload every open client once per uploaded photo.
+   */
+  'journey:photos:updated': { scope: 'user', payload: z.object({ journeyId: id }) },
+  /*
+   * A day's recorded route was taken over, replaced or removed (JRN-01). Sent
+   * after the write to everyone on the journey; the map reads the days again.
+   */
+  'journey:recording:updated': { scope: 'user', payload: z.object({ journeyId: id, date: z.string() }) },
 
   /*
    * The Studio book was saved (#1973).
@@ -309,12 +404,14 @@ export const TREK_WS_EVENTS = {
     scope: 'user',
     payload: z.object({
       journeyId: id,
-      peers: z.array(z.object({
-        socketId: z.number(),
-        userId: id,
-        username: z.string(),
-        avatar: z.string().nullable().optional(),
-      })),
+      peers: z.array(
+        z.object({
+          socketId: z.number(),
+          userId: id,
+          username: z.string(),
+          avatar: z.string().nullable().optional(),
+        }),
+      ),
     }),
   },
 

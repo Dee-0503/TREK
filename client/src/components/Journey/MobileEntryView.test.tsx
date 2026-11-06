@@ -1,4 +1,4 @@
-// FE-COMP-JENTRYVIEW-001 to FE-COMP-JENTRYVIEW-017
+// FE-COMP-JENTRYVIEW-001 to FE-COMP-JENTRYVIEW-022
 
 import { render, screen, fireEvent } from '../../../tests/helpers/render'
 import { resetAllStores, seedStore } from '../../../tests/helpers/store'
@@ -136,6 +136,18 @@ describe('MobileEntryView', () => {
     expect(container.querySelector('svg.lucide-camera')).toBeNull()
   })
 
+  it('FE-COMP-JENTRYVIEW-021: the hero holds the proportions of the photo and shows its thumbnail before the original arrives (#2907)', () => {
+    const { container } = renderView(buildEntry({ photos: [{ ...buildPhoto(4), width: 3000, height: 2000 }] }))
+    const hero = container.querySelector('img') as HTMLImageElement
+    expect(hero.style.aspectRatio).toBe('3000 / 2000')
+    expect(hero.style.backgroundImage).toContain('/api/photos/4/thumbnail')
+  })
+
+  it('FE-COMP-JENTRYVIEW-022: a photo without recorded dimensions still reserves a 4:3 hero', () => {
+    const { container } = renderView(buildEntry({ photos: [buildPhoto(4)] }))
+    expect((container.querySelector('img') as HTMLImageElement).style.aspectRatio).toBe('4 / 3')
+  })
+
   it('FE-COMP-JENTRYVIEW-008: several photos add a counter and a thumbnail strip', () => {
     const { container } = renderView(buildEntry({ photos: [buildPhoto(4), buildPhoto(5), buildPhoto(6)] }))
     expect(screen.getByText('3 photos')).toBeInTheDocument()
@@ -233,5 +245,26 @@ describe('MobileEntryView', () => {
     expect(screen.getByRole('button', { name: /Bearbeiten/ })).toBeInTheDocument()
     expect(screen.queryByText('Amazing')).not.toBeInTheDocument()
     expect(screen.queryByText('Sunny')).not.toBeInTheDocument()
+  })
+
+  it('FE-COMP-JENTRYVIEW-019: a clip is drawn from its poster, in the hero as in the strip (#2341)', () => {
+    // Its original is the video file, which an <img> cannot show, so the hero used
+    // to be a broken image for every clip, poster or not.
+    const clip = { ...buildPhoto(4), media_type: 'video', provider: 'local', thumbnail_path: 'journey/poster.jpg' }
+    const { container } = renderView(buildEntry({ photos: [clip, buildPhoto(5)] }))
+    const images = container.querySelectorAll('img')
+    expect(images[0]).toHaveAttribute('src', '/api/photos/4/thumbnail')
+    expect(images[1]).toHaveAttribute('src', '/api/photos/4/thumbnail')
+    expect(container.querySelectorAll('svg.lucide-play')).toHaveLength(2)
+  })
+
+  it('FE-COMP-JENTRYVIEW-020: a clip without a poster keeps the play badge and asks for no image at all', () => {
+    const clip = { ...buildPhoto(4), media_type: 'video', provider: 'local', thumbnail_path: null }
+    const { container } = renderView(buildEntry({ photos: [clip, buildPhoto(5)] }))
+    const images = container.querySelectorAll('img')
+    // The second photo's strip thumbnail is the only image left.
+    expect(images).toHaveLength(1)
+    expect(images[0]).toHaveAttribute('src', '/api/photos/5/thumbnail')
+    expect(container.querySelectorAll('svg.lucide-play')).toHaveLength(2)
   })
 })

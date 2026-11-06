@@ -1,6 +1,6 @@
-import { SetMetadata } from '@nestjs/common';
 import { RuntimeEnvService } from '../app-config/runtime-env.service';
 import { byCodeUnit } from './compare';
+import { SetMetadata } from '@nestjs/common';
 
 /** Metadata key `@ManagedForbidden()` writes. */
 export const MANAGED_FORBIDDEN = 'trek:managed-forbidden';
@@ -77,6 +77,9 @@ export function isManagedBlocked(env: RuntimeEnvService): boolean {
  * the tiles it fetches.
  */
 export const MANAGED_LOCKED_SETTING_KEYS = [
+  // The operator's for the same reason maps_api_key is: Amap bills the account
+  // the key belongs to, and on a managed install that account is theirs.
+  'amap_api_key',
   'carto_api_key',
   'llm_api_key',
   'llm_base_url',
@@ -88,6 +91,13 @@ export const MANAGED_LOCKED_SETTING_KEYS = [
   'oidc_login',
   'oidc_registration',
   'openweather_api_key',
+  // Place search and routing are the operator's on a managed install: the
+  // services, their allowance and who answers come with the instance.
+  'places_provider',
+  'routing_base_url',
+  'routing_valhalla_provider',
+  // The operator issues a managed install its key through TREK_SERVICES_KEY.
+  'service_key',
   'smtp_from',
   'smtp_host',
   'smtp_pass',
@@ -95,6 +105,7 @@ export const MANAGED_LOCKED_SETTING_KEYS = [
   'smtp_skip_tls_verify',
   'smtp_user',
   'unsplash_api_key',
+  'valhalla_base_url',
   'webauthn_origins',
   'webauthn_rp_id',
 ] as const;
@@ -108,6 +119,7 @@ export const MANAGED_LOCKED_PROFILE_KEYS = [
   'maps_api_key',
   'openweather_api_key',
   'unsplash_api_key',
+  'amap_api_key',
 ] as const;
 
 /**
@@ -143,6 +155,8 @@ export const MANAGED_CUSTOMER_KEYS = [
   'require_mfa',
   'temperature_unit',
   'time_format',
+  'week_start',
+  'date_format',
 ] as const;
 
 const LOCKED = new Set<string>(MANAGED_LOCKED_SETTING_KEYS);

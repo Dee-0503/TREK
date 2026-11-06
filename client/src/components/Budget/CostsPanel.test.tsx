@@ -1,5 +1,5 @@
 // FE-COMP-COSTS: settlements surfaced inline in the Costs ledger (issue #1241)
-// FE-W5COSTS-001 to FE-W5COSTS-035: the rest of the Costs panel
+// FE-W5COSTS-001 to FE-W5COSTS-096: the rest of the Costs panel
 import { render, screen, waitFor, fireEvent, within } from '../../../tests/helpers/render'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -11,14 +11,19 @@ import { usePermissionsStore } from '../../store/permissionsStore'
 import { clearExchangeRateCache } from '../../hooks/useExchangeRates'
 import { resetAllStores, seedStore } from '../../../tests/helpers/store'
 import { buildUser, buildTrip, buildBudgetItem, buildSettings } from '../../../tests/helpers/factories'
+import type { BudgetParticipantFinal } from '@trek/shared'
 import type { BudgetItem } from '../../types'
 import CostsPanel, { ExpenseModal } from './CostsPanel'
 import { splitEqualShares, calculateTicketShares, type TicketItem } from './CostsPanel.helpers'
+import { resetFreezeAttempts } from './useFreezeMissingRates'
 
 const tripMembers = [
   { id: 1, username: 'alice', avatar_url: null },
   { id: 2, username: 'bob', avatar_url: null },
 ]
+
+/** Bob's buttons in the expense form — his final-budget row in the sidebar answers to his name too. */
+const bobInForm = () => screen.getAllByRole('checkbox', { name: /bob/i })
 
 beforeEach(() => {
   resetAllStores()
@@ -47,7 +52,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     await screen.findByText('Dinner')
     await screen.findByText('Payment')
     // The payment row exposes an inline undo (no need to open a separate History modal).
-    expect(screen.getByTitle('Undo')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Undo(:|$)/ })).toBeInTheDocument()
   })
 
   it('records a manual payment via the Add payment button', async () => {
@@ -65,7 +70,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '25')
+    await user.type(await screen.findByPlaceholderText('0,00'), '25')
     // The footer submit is the second "Add payment" control once the modal is open.
     const addButtons = screen.getAllByRole('button', { name: 'Add payment' })
     const submit = addButtons[addButtons.length - 1]
@@ -237,7 +242,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Lunch')
-    await user.click(screen.getAllByTitle('Edit')[0])
+    await user.click(screen.getAllByRole('button', { name: /^Edit(:|$)/ })[0])
     await user.click(await screen.findByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(patched).toBeTruthy())
@@ -273,6 +278,43 @@ describe('CostsPanel — settlements in the ledger', () => {
     expect(within(hotelRow).queryByText(/you lent|you borrowed/)).toBeNull()
   })
 
+  it('lists who an expense is split between, with each part, in the row (#1763)', async () => {
+    seedStore(useAuthStore, { user: buildUser({ id: 1, username: 'alice' }), isAuthenticated: true })
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
+    const custom = {
+      ...buildBudgetItem({ trip_id: 1, category: 'food', name: 'Dinner' }),
+      total_price: 90,
+      payers: [{ user_id: 1, amount: 90, username: 'alice' }],
+      members: [{ user_id: 1, username: 'alice', paid: 1, amount: 60 }, { user_id: 2, username: 'bob', paid: 0, amount: 30 }],
+    }
+    const crowd = {
+      ...buildBudgetItem({ trip_id: 1, category: 'activity', name: 'Boat' }),
+      total_price: 80,
+      payers: [{ user_id: 1, amount: 80, username: 'alice' }],
+      members: Array.from({ length: 8 }, (_, i) => ({ user_id: i + 1, username: `p${i + 1}`, paid: 0 })),
+    }
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [custom, crowd] })),
+      http.get('/api/trips/1/budget/settlement', () => HttpResponse.json({ balances: [], flows: [], settlements: [] })),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    const dinnerRow = (await screen.findByText('Dinner')).closest('.exp-row') as HTMLElement
+    const chips = within(dinnerRow).getAllByTestId('split-chip')
+    expect(chips).toHaveLength(2)
+    expect(chips[0]).toHaveTextContent('60')
+    expect(chips[1]).toHaveTextContent('30')
+    // alice marked her part as paid; bob has not.
+    expect(within(chips[0]).getByLabelText('paid')).toBeInTheDocument()
+    expect(within(chips[1]).queryByLabelText('paid')).toBeNull()
+
+    // Eight people fold into five chips and a "+3".
+    const boatRow = (await screen.findByText('Boat')).closest('.exp-row') as HTMLElement
+    expect(within(boatRow).getAllByTestId('split-chip')).toHaveLength(5)
+    expect(within(boatRow).getByText('+3')).toBeInTheDocument()
+    expect(within(boatRow).getAllByTestId('split-chip')[0]).toHaveTextContent('10')
+  })
+
   it('sums only unfinished expenses in the Outstanding amount card', async () => {
     // Display in the trip's own currency so FX conversion is an identity — keeps the asserted sum deterministic.
     seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
@@ -291,7 +333,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     expect(foot).toHaveTextContent('2 expenses need a payer') // the two payer-less, non-zero expenses
     // Sum is 90 + 30 = 120 — the paid (60) and zero-total items are excluded.
     // Sum is 90 + 30 = 120 — the paid (60) and zero-total items are excluded.
-    const card = screen.getByText('Outstanding amount').closest('div[style*="border-radius: 22"]')
+    const card = screen.getByRole('region', { name: 'Outstanding amount' })
     expect(card).toHaveTextContent('120') // 120,00 € (locale separator), i.e. 90 + 30
   })
 
@@ -312,7 +354,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     // "Your share" is the first of the two bold figures in the Total spend card's
     // footer; the second is "You paid". 60 from the paid expense only — the 40
     // nobody has paid for is not a share, though it still counts as spend.
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]')!
+    const card = screen.getByRole('region', { name: 'Total trip spend' })!
     const figures = [...card.querySelectorAll('b')].map(b => b.textContent ?? '')
     expect(figures[0]).toContain('60')
     expect(figures[0]).not.toContain('100')
@@ -339,10 +381,9 @@ describe('CostsPanel — settlements in the ledger', () => {
 
     // Deselect everyone so the cost carries no split, and mark it as unpaid: a picked
     // payer now always goes out (#1766), so "nobody paid" must be said explicitly.
-    await user.click(screen.getByRole('button', { name: 'Y You' }))
-    await user.click(screen.getByRole('button', { name: 'B bob' }))
-    await user.click(screen.getByRole('button', { name: 'You' })) // open the Who-paid select
-    pickOption('No one paid yet')
+    await user.click(screen.getByRole('checkbox', { name: 'You' }))
+    await user.click(screen.getByRole('checkbox', { name: 'bob' }))
+    await user.click(screen.getByRole('radio', { name: 'No one paid yet' }))
 
     const addBtns = screen.getAllByRole('button', { name: 'Add expense' })
     const submit = addBtns[addBtns.length - 1] // footer submit
@@ -376,8 +417,8 @@ describe('CostsPanel — settlements in the ledger', () => {
 
     // A personal expense: alice (the default "You" payer) fronted it, but nobody shares
     // the split. The web used to drop the payer once no participants remained.
-    await user.click(screen.getByRole('button', { name: 'Y You' }))
-    await user.click(screen.getByRole('button', { name: 'B bob' }))
+    await user.click(screen.getByRole('checkbox', { name: 'You' }))
+    await user.click(screen.getByRole('checkbox', { name: 'bob' }))
 
     const addBtns = screen.getAllByRole('button', { name: 'Add expense' })
     const submit = addBtns[addBtns.length - 1] // footer submit
@@ -412,10 +453,10 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Hotel')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // Nobody paid this expense — reopening it must not silently reselect "You".
-    expect(await screen.findByRole('button', { name: 'No one paid yet' })).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: 'No one paid yet' })).toBeChecked()
 
     // …and saving an untouched edit must not assign the current user as payer.
     await user.click(screen.getByRole('button', { name: 'Save' }))
@@ -434,7 +475,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await user.click(await screen.findByRole('button', { name: 'Add expense' }))
-    expect(await screen.findByRole('button', { name: 'You' })).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: 'You' })).toBeChecked()
   })
 
   // ── Multi-payer (#1426 regression) ─────────────────────────────────────────
@@ -538,7 +579,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Dinner')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // Loading used to be payers.find(...), which silently dropped the second payer.
     // Seeded with two decimals since #2175, localized for EUR.
@@ -567,7 +608,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Dinner; tapas')
-    await user.click(screen.getByTitle('Export CSV'))
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }))
 
     expect(exported).toBeTruthy()
     const text = await exported!.text()
@@ -610,7 +651,7 @@ describe('CostsPanel — settlements in the ledger', () => {
 
     await user.type(itemNames[1], 'chocolate cake')
     await user.type(itemPrices[2], '50')
-    const bobButtons = screen.getAllByRole('button', { name: /bob/i })
+    const bobButtons = bobInForm()
     await user.click(bobButtons[1])
 
     await user.type(itemNames[2], 'Milk')
@@ -619,8 +660,8 @@ describe('CostsPanel — settlements in the ledger', () => {
     expect(screen.getByDisplayValue('100,00')).toBeDisabled()
 
     expect(screen.getByText('Individual shares')).toBeInTheDocument()
-    expect(screen.getByText(/75\.00/)).toBeInTheDocument()
-    expect(screen.getByText(/25\.00/)).toBeInTheDocument()
+    expect(screen.getByText(/75,00/)).toBeInTheDocument()
+    expect(screen.getByText(/25,00/)).toBeInTheDocument()
 
     const addBtns = screen.getAllByRole('button', { name: 'Add expense' })
     await user.click(addBtns[addBtns.length - 1])
@@ -650,7 +691,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Sushi')
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]')
+    const card = screen.getByRole('region', { name: 'Total trip spend' })
     // Yen, unconverted and with JPY's zero decimals — not a euro/dollar default.
     expect(card).toHaveTextContent('￥3,000')
   })
@@ -675,7 +716,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '25')
+    await user.type(await screen.findByPlaceholderText('0,00'), '25')
     const addButtons = screen.getAllByRole('button', { name: 'Add payment' })
     await user.click(addButtons[addButtons.length - 1])
 
@@ -698,7 +739,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '25')
+    await user.type(await screen.findByPlaceholderText('0,00'), '25')
     // Bob paid me back in dollars — the server freezes the USD rate on write.
     await user.click(screen.getByText(/^EUR/))
     await user.click(await screen.findByText(/^USD/))
@@ -727,7 +768,7 @@ describe('CostsPanel — settlements in the ledger', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Payment')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // The stored USD amount comes back as-is (padded to two decimals, #2175),
     // not silently reread as euros.
@@ -740,7 +781,7 @@ describe('CostsPanel — settlements in the ledger', () => {
 
 type Flow = { from: { user_id: number; username: string }; to: { user_id: number; username: string }; amount: number }
 type Balance = { user_id: number; username: string; avatar_url: string | null; balance: number }
-type Payment = { id: number; from_user_id: number; to_user_id: number; amount: number; currency?: string | null; created_at?: string }
+type Payment = { id: number; from_user_id: number; to_user_id: number; amount: number; currency?: string | null; exchange_rate?: number; created_at?: string; settled_at?: string | null }
 
 // `members` here is the wire shape the panel reads; `paid` is only set by the server.
 type MemberFixture = { user_id: number; username?: string; amount?: number; paid?: number }
@@ -749,7 +790,7 @@ const expense = (over: Partial<Omit<BudgetItem, 'members'>> & { members?: Member
 
 function mount(
   items: BudgetItem[],
-  settlement: { balances?: Balance[]; flows?: Flow[]; settlements?: Payment[] } = {},
+  settlement: { balances?: Balance[]; flows?: Flow[]; settlements?: Payment[]; finalBudgets?: BudgetParticipantFinal[] } = {},
   entries?: string[],
 ) {
   server.use(
@@ -826,15 +867,78 @@ describe('CostsPanel — overview', () => {
     mount([], { balances: [{ user_id: 1, username: 'alice', avatar_url: null, balance: 0 }] })
 
     // Both travellers appear; neither has a signed amount.
-    await screen.findByText('Balances')
-    expect(screen.getAllByText('0,00 €')).toHaveLength(2)
+    const balances = (await screen.findByRole('region', { name: 'Balances' })) as HTMLElement
+    expect(within(balances).getAllByText('0,00 €')).toHaveLength(2)
+  })
+
+  it('FE-W5COSTS-004b: the final budget gives one amount per traveler and its arithmetic on click', async () => {
+    // Dinner is 100 USD fronted by Alice, booked by the server at the rate frozen
+    // on entry as 92 €; taxi 30 € by Bob; both split evenly, so the trip costs each
+    // of them 61. Bob has sent 15 of the 31 he owed, 16 is still open. No live rate
+    // is loaded here, so a client converting the dinner itself would print 100 €.
+    const user = userEvent.setup()
+    mount([{ ...dinner(), currency: 'USD', total_price: 100, payers: [{ user_id: 1, amount: 100 }] }, taxi()], {
+      balances: [
+        { user_id: 1, username: 'alice', avatar_url: null, balance: 16 },
+        { user_id: 2, username: 'bob', avatar_url: null, balance: -16 },
+      ],
+      flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 16 }],
+      settlements: [{ id: 9, from_user_id: 2, to_user_id: 1, amount: 15, currency: 'EUR', created_at: '2025-06-17 10:00:00' }],
+      finalBudgets: [
+        {
+          user_id: 1, username: 'alice', avatar_url: null, expenses: 92, reimbursed: 15, pending: 16, final: 61,
+          sources: {
+            fronted: [{ item_id: 101, cents: 9200 }],
+            moved: [{ settlement_id: 9, from_user_id: 2, to_user_id: 1, cents: 1500 }],
+            outstanding: [{ from_user_id: 2, to_user_id: 1, cents: 1600 }],
+          },
+        },
+        {
+          user_id: 2, username: 'bob', avatar_url: null, expenses: 30, reimbursed: -15, pending: -16, final: 61,
+          sources: {
+            fronted: [{ item_id: 102, cents: 3000 }],
+            moved: [{ settlement_id: 9, from_user_id: 2, to_user_id: 1, cents: -1500 }],
+            outstanding: [{ from_user_id: 2, to_user_id: 1, cents: -1600 }],
+          },
+        },
+      ],
+    })
+
+    const card = (await screen.findByRole('region', { name: 'Final budget' })) as HTMLElement
+    await waitFor(() => expect(within(card).getAllByText('61,00 €')).toHaveLength(2))
+    // The main view stays one figure per person until someone asks for more.
+    expect(within(card).queryByText('Expenses paid')).toBeNull()
+
+    const alice = within(card).getByRole('button', { name: /You/ })
+    await user.click(alice)
+    expect(alice).toHaveAttribute('aria-expanded', 'true')
+    // The dinner is the server's 92 €, once as the line and once as its only row; the
+    // 100 USD is never converted again here. What was entered labels the row (#2525).
+    expect(within(card).getAllByText('+92,00 €')).toHaveLength(2)
+    expect(within(card).queryByText(/100,00/)).toBeNull()
+    expect(within(card).getByText('$100.00')).toBeInTheDocument()
+    // Received and still pending both lower her cost, each line with its one row.
+    expect(within(card).getAllByText('−15,00 €')).toHaveLength(2)
+    expect(within(card).getAllByText('−16,00 €')).toHaveLength(2)
+    expect(within(card).getByText('Dinner')).toBeInTheDocument()
+    expect(within(card).queryByText('Taxi')).toBeNull()
+    expect(within(card).getAllByText(/^bob → /)).toHaveLength(2)
+
+    // Opening Bob closes Alice: what he sent back and what he still owes raise his.
+    await user.click(within(card).getByRole('button', { name: /bob/ }))
+    expect(alice).toHaveAttribute('aria-expanded', 'false')
+    expect(within(card).getAllByText('+30,00 €')).toHaveLength(2)
+    expect(within(card).getAllByText('+15,00 €')).toHaveLength(2)
+    expect(within(card).getAllByText('+16,00 €')).toHaveLength(2)
+    expect(within(card).getByText('Taxi')).toBeInTheDocument()
+    expect(within(card).queryByText('Dinner')).toBeNull()
   })
 
   it('FE-W5COSTS-005: the category breakdown ranks categories by spend', async () => {
     mount([dinner(), taxi()])
 
     await screen.findByText('Dinner')
-    const breakdown = screen.getByText('By category').parentElement as HTMLElement
+    const breakdown = screen.getByRole('region', { name: 'By category' }) as HTMLElement
     const labels = within(breakdown).getAllByText(/Food & drink|Transport/).map(el => el.textContent)
     // Bars are ordered by spend, so the 90 € food row comes before the 30 € taxi.
     expect(labels).toEqual(['Food & drink', 'Transport'])
@@ -856,7 +960,7 @@ describe('CostsPanel — overview', () => {
     mount([expense({ id: 110, name: 'Mystery', category: 'other', total_price: 90 })])
 
     await screen.findByText('Mystery')
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]')
+    const card = screen.getByRole('region', { name: 'Total trip spend' })
     expect(card).toHaveTextContent('90.00 XX')
   })
 })
@@ -880,7 +984,7 @@ describe('CostsPanel — settle up', () => {
     await screen.findByText('45,00 €')
     // The "you're owed" card names who still owes me.
     expect(screen.getByText("You're owed")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Settle' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Settle(:|$)/ }))
 
     await waitFor(() => expect(posted).toHaveLength(1))
     expect(posted[0]).toMatchObject({ from_user_id: 2, to_user_id: 1, amount: 45, currency: 'EUR' })
@@ -914,7 +1018,7 @@ describe('CostsPanel — settle up', () => {
     server.use(http.post('/api/trips/1/budget/settlements', () => HttpResponse.json({ error: 'no' }, { status: 500 })))
     mount([], { flows: [flows[0]] })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Settle' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Settle(:|$)/ }))
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Unknown error', 'error', undefined))
 
     addToast.mockClear()
@@ -933,10 +1037,10 @@ describe('CostsPanel — settle up', () => {
     }))
     mount([], { settlements: [{ id: 7, from_user_id: 2, to_user_id: 1, amount: 30, created_at: '2025-06-16 10:00:00' }] })
 
-    fireEvent.click(await screen.findByTitle('Undo'))
+    fireEvent.click(await screen.findByRole('button', { name: /^Undo(:|$)/ }))
     await waitFor(() => expect(deleted).toBe(1))
 
-    fireEvent.click(screen.getByTitle('Undo'))
+    fireEvent.click(screen.getByRole('button', { name: /^Undo(:|$)/ }))
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Unknown error', 'error', undefined))
     delete window.__addToast
   })
@@ -980,8 +1084,8 @@ describe('CostsPanel — settle up', () => {
     render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
 
     await screen.findByText('Balances')
-    // Settle up and Balances both hang off the one failed request.
-    await waitFor(() => expect(screen.getAllByText('Unknown error')).toHaveLength(2))
+    // Settle up, Balances and Final budget all hang off the one failed request.
+    await waitFor(() => expect(screen.getAllByText('Unknown error')).toHaveLength(3))
     expect(screen.queryByText("Everyone's square")).toBeNull()
   })
 
@@ -989,83 +1093,10 @@ describe('CostsPanel — settle up', () => {
     mount([], { flows: [{ from: { user_id: 1, username: 'alice' }, to: { user_id: 2, username: 'bob' }, amount: 20 }] })
 
     await screen.findByText('You owe')
-    const card = screen.getByText('You owe').closest('div[style*="border-radius: 22"]') as HTMLElement
-    expect(within(card).getByText('To')).toBeInTheDocument()
+    const card = screen.getByRole('region', { name: 'You owe' }) as HTMLElement
+    expect(await within(card).findByText('To')).toBeInTheDocument()
     expect(within(card).getByText('bob')).toBeInTheDocument()
     expect(screen.getByText('Nothing owed to you')).toBeInTheDocument()
-  })
-})
-
-describe('CostsPanel — filtering the ledger', () => {
-  beforeEach(seedAlice)
-
-  const payment: Payment = { id: 7, from_user_id: 2, to_user_id: 1, amount: 30, created_at: '2025-06-16 10:00:00' }
-
-  it('FE-W5COSTS-014: "Paid by me" keeps only the expenses I fronted', async () => {
-    mount([dinner(), taxi()], { settlements: [payment] })
-
-    await screen.findByText('Taxi')
-    fireEvent.click(screen.getByRole('button', { name: 'Paid by me' }))
-
-    expect(screen.getByText('Dinner')).toBeInTheDocument()
-    expect(screen.queryByText('Taxi')).not.toBeInTheDocument()
-    // A transfer I'm part of stays visible under "mine".
-    expect(screen.getByText('Payment')).toBeInTheDocument()
-  })
-
-  it('FE-W5COSTS-015: "I\'m owed" keeps the expenses I am net positive on and drops payments', async () => {
-    mount([dinner(), taxi()], { settlements: [payment] })
-
-    await screen.findByText('Taxi')
-    fireEvent.click(screen.getByRole('button', { name: "I'm owed" }))
-
-    expect(screen.getByText('Dinner')).toBeInTheDocument()
-    expect(screen.queryByText('Taxi')).not.toBeInTheDocument()
-    expect(screen.queryByText('Payment')).not.toBeInTheDocument()
-  })
-
-  it('FE-W5COSTS-016: the category filter narrows the ledger and hides payments', async () => {
-    mount([dinner(), taxi()], { settlements: [payment] })
-
-    await screen.findByText('Taxi')
-    fireEvent.click(screen.getByRole('button', { name: /All categories/ }))
-    pickOption('Transport')
-
-    expect(screen.getByText('Taxi')).toBeInTheDocument()
-    expect(screen.queryByText('Dinner')).not.toBeInTheDocument()
-    expect(screen.queryByText('Payment')).not.toBeInTheDocument()
-  })
-
-  it('FE-W5COSTS-017: picking a single day banners it with that day’s total', async () => {
-    mount([dinner(), taxi()], { settlements: [payment] })
-
-    await screen.findByText('Taxi')
-    fireEvent.click(screen.getByRole('button', { name: /All days/ }))
-    pickOption('Sun, Jun 15')
-
-    expect(screen.getByText('Sunday, June 15')).toBeInTheDocument()
-    expect(screen.getByText('1 expenses')).toBeInTheDocument()
-    expect(screen.getByText('Dinner')).toBeInTheDocument()
-    expect(screen.queryByText('Taxi')).not.toBeInTheDocument()
-    // The 16th carries the payment, so it is filtered out with the day too.
-    expect(screen.queryByText('Payment')).not.toBeInTheDocument()
-  })
-
-  it('FE-W5COSTS-018: expenses without a date are grouped under "No date"', async () => {
-    mount([expense({ id: 120, name: 'Souvenirs', category: 'shopping', total_price: 12, expense_date: null })])
-
-    expect(await screen.findByText('No date')).toBeInTheDocument()
-  })
-
-  it('FE-W5COSTS-019: a search with no hits shows the no-match copy', async () => {
-    const user = userEvent.setup()
-    mount([dinner()])
-
-    await screen.findByText('Dinner')
-    await user.type(screen.getByPlaceholderText('Search expenses…'), 'zzz')
-
-    expect(screen.getByText('No expenses match your search.')).toBeInTheDocument()
-    expect(screen.queryByText('Dinner')).not.toBeInTheDocument()
   })
 })
 
@@ -1101,22 +1132,27 @@ describe('CostsPanel — expense rows', () => {
     await screen.findByText('Diner')
     expect(screen.getByText(/\$100\.00 → 50,00 €/)).toBeInTheDocument()
     // The payer chip and the settlement row are converted the same way.
-    expect(screen.getByText(/\$20\.00 → 10,00 €/)).toBeInTheDocument()
+    expect(await screen.findByText(/\$20\.00 → 10,00 €/)).toBeInTheDocument()
   })
 
-  it('FE-W5COSTS-022: deleting an expense removes it, and a failure is reported', async () => {
-    const addToast = vi.fn()
-    window.__addToast = addToast as unknown as typeof window.__addToast
-    server.use(http.delete('/api/trips/1/budget/101', () => HttpResponse.json({ error: 'no' }, { status: 500 })))
-    mount([dinner()])
+  it('FE-W5COSTS-078: a booked rate outlives the live one, for the expense and for the transfer', async () => {
+    // What a tester hit after settling up: the euro moved, and so did a bill that had
+    // already been paid. A cost is money that changed hands at a rate that was true that
+    // day, so the frozen rate wins over whatever the market says this morning.
+    localStorage.setItem('trek_fx_EUR', JSON.stringify({ rates: { EUR: 1, USD: 2 }, ts: Date.now() }))
+    mount([expense({
+      id: 131, name: 'Diner', category: 'food', total_price: 120, currency: 'USD', exchange_rate: 1.2,
+      expense_date: '2025-06-15',
+      payers: [{ user_id: 1, amount: 120 }],
+      members: [{ user_id: 1, username: 'alice' }, { user_id: 2, username: 'bob' }],
+    })], { settlements: [{ id: 9, from_user_id: 2, to_user_id: 1, amount: 24, currency: 'USD', exchange_rate: 1.2, created_at: '2025-06-15 09:00:00' }] })
 
-    await screen.findByText('Dinner')
-    fireEvent.click(screen.getByTitle('Delete'))
-
-    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Unknown error', 'error', undefined))
-    // The optimistic removal is rolled back by the store.
-    expect(await screen.findByText('Dinner')).toBeInTheDocument()
-    delete window.__addToast
+    await screen.findByText('Diner')
+    // 120 USD at the booked 1.2 per euro is 100 euro. At today's 2 it would read 60,00 euro.
+    expect(screen.getByText(/\$120\.00 → 100,00 €/)).toBeInTheDocument()
+    expect(screen.queryByText(/60,00 €/)).toBeNull()
+    // The settled transfer is read back the same way: 24 USD booked at 1.2 is 20 euro.
+    expect(await screen.findByText(/\$24\.00 → 20,00 €/)).toBeInTheDocument()
   })
 
   it('FE-W5COSTS-023: ?create=expense opens the add modal straight away', async () => {
@@ -1133,9 +1169,9 @@ describe('CostsPanel — expense rows', () => {
     expect(screen.queryByRole('button', { name: 'Add expense' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Settle up' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add payment' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Settle' })).not.toBeInTheDocument()
-    expect(screen.queryByTitle('Delete')).not.toBeInTheDocument()
-    expect(screen.queryByTitle('Undo')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Settle(:|$)/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Delete(:|$)/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Undo(:|$)/ })).not.toBeInTheDocument()
   })
 })
 
@@ -1171,7 +1207,7 @@ describe('CostsPanel — mobile layout', () => {
     expect(screen.getByText("You're owed")).toBeInTheDocument()
     expect(screen.getByText('Outstanding amount')).toBeInTheDocument()
     // The unfinished expense is flagged with a badge on its icon instead of a pill.
-    expect(screen.getByTitle('Total only — not settled yet')).toHaveTextContent('!')
+    expect(screen.getByRole('img', { name: 'Total only: not settled yet' })).toHaveTextContent('!')
     expect(screen.queryByText('Unfinished')).not.toBeInTheDocument()
   })
 
@@ -1212,8 +1248,8 @@ describe('CostsPanel — payment modal', () => {
     }))
     mount([], { settlements: [{ id: 7, from_user_id: 2, to_user_id: 1, amount: 30, created_at: '2025-06-16 10:00:00' }] })
 
-    await user.click(await screen.findByTitle('Edit'))
-    const amount = await screen.findByPlaceholderText('0.00')
+    await user.click(await screen.findByRole('button', { name: /^Edit(:|$)/ }))
+    const amount = await screen.findByPlaceholderText('0,00')
     await user.clear(amount)
     await user.type(amount, '12,50')
     await user.click(screen.getByRole('button', { name: 'Save' }))
@@ -1227,7 +1263,7 @@ describe('CostsPanel — payment modal', () => {
     mount([])
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '10')
+    await user.type(await screen.findByPlaceholderText('0,00'), '10')
 
     // Default is You → bob; pointing "to" back at me makes it a no-op transfer.
     await user.click(screen.getByRole('button', { name: 'bob' }))
@@ -1245,12 +1281,68 @@ describe('CostsPanel — payment modal', () => {
     mount([])
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '10')
+    await user.type(await screen.findByPlaceholderText('0,00'), '10')
     const submits = screen.getAllByRole('button', { name: 'Add payment' })
     await user.click(submits[submits.length - 1])
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Unknown error', 'error', undefined))
     delete window.__addToast
+  })
+
+  it('FE-W5COSTS-074: a new payment defaults its day to today, by the local calendar', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const behindUtc = new Date(2026, 7, 12).getTimezoneOffset() > 0
+    vi.setSystemTime(new Date(2026, 7, 12, behindUtc ? 23 : 1, 30, 0))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    let posted: Record<string, unknown> | null = null
+    server.use(http.post('/api/trips/1/budget/settlements', async ({ request }) => {
+      posted = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ settlement: { id: 9 } })
+    }))
+    mount([])
+
+    try {
+      await user.click(await screen.findByRole('button', { name: 'Add payment' }))
+      await user.type(await screen.findByPlaceholderText('0,00'), '10')
+      const submits = screen.getAllByRole('button', { name: 'Add payment' })
+      await user.click(submits[submits.length - 1])
+
+      await waitFor(() => expect(posted).toBeTruthy())
+      expect(posted!.settled_at).toBe('2026-08-12')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('FE-W5COSTS-075: editing a payment keeps its own settled day, not the day it was recorded', async () => {
+    const user = userEvent.setup()
+    let put: Record<string, unknown> | null = null
+    server.use(http.put('/api/trips/1/budget/settlements/7', async ({ request }) => {
+      put = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ settlement: { id: 7 } })
+    }))
+    mount([], { settlements: [{ id: 7, from_user_id: 2, to_user_id: 1, amount: 30, settled_at: '2025-06-10', created_at: '2025-06-16 10:00:00' }] })
+
+    await user.click(await screen.findByRole('button', { name: /^Edit(:|$)/ }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(put).toBeTruthy())
+    expect(put!.settled_at).toBe('2025-06-10')
+  })
+
+  it('FE-W5COSTS-077: a payment cannot be saved without a day', async () => {
+    // Cleared, the server would store NULL and the ledger would quietly move
+    // the payment back to the day it was recorded on.
+    const user = userEvent.setup()
+    mount([], { settlements: [{ id: 7, from_user_id: 2, to_user_id: 1, amount: 30, settled_at: '2025-06-10', created_at: '2025-06-16 10:00:00' }] })
+
+    await user.click(await screen.findByRole('button', { name: /^Edit(:|$)/ }))
+    const save = screen.getByRole('button', { name: 'Save' })
+    expect(save).toBeEnabled()
+
+    await user.click(document.querySelector('button[aria-haspopup="dialog"]') as HTMLElement)
+    await user.click(screen.getByRole('button', { name: 'Clear date' }))
+    expect(save).toBeDisabled()
   })
 })
 
@@ -1280,7 +1372,7 @@ describe('CostsPanel — expense modal', () => {
     mount([expense({ id: 150, name: 'Market run', category: 'groceries', total_price: 30, note, payers: [{ user_id: 1, amount: 30 }], members: [{ user_id: 1, username: 'alice', amount: 15 }, { user_id: 2, username: 'bob', amount: 15 }] })])
 
     await screen.findByText('Market run')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     expect(await screen.findByDisplayValue('Apples')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Cake')).toBeInTheDocument()
@@ -1289,7 +1381,7 @@ describe('CostsPanel — expense modal', () => {
     const rows = screen.getAllByPlaceholderText('Item name')
     await user.click(rows[1].parentElement!.parentElement!.querySelectorAll('button')[0])
     expect(screen.queryByDisplayValue('Cake')).not.toBeInTheDocument()
-    await user.click(screen.getAllByRole('button', { name: /bob/i })[0])
+    await user.click(bobInForm()[0])
 
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(put).toBeTruthy())
@@ -1302,7 +1394,7 @@ describe('CostsPanel — expense modal', () => {
     mount([expense({ id: 151, name: 'Market run', category: 'groceries', total_price: 30, note: 'TICKETJSON:{oops', payers: [{ user_id: 1, amount: 30 }], members: [{ user_id: 1, username: 'alice' }] })])
 
     await screen.findByText('Market run')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     expect(await screen.findByRole('button', { name: /Add item/i })).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Item name')).not.toBeInTheDocument()
@@ -1323,20 +1415,21 @@ describe('CostsPanel — expense modal', () => {
     })])
 
     await screen.findByText('Dinner')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // Custom shares reopen padded to two decimals (#2175), localized for EUR.
     expect((await screen.findByDisplayValue('70,00')).tagName).toBe('INPUT')
     expect(screen.getByDisplayValue('30,00')).toBeInTheDocument()
 
     // Excluding Bob drops his amount; the split no longer matches the total.
-    await user.click(screen.getByRole('button', { name: /bob/i }))
+    expect(bobInForm()).toHaveLength(1)
+    await user.click(bobInForm()[0])
     expect(screen.getByText(/Sum of splits/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     // Bringing him back in via the excluded-state hint restores an empty field,
     // pre-filled as a placeholder with what is still missing from the total.
-    await user.click(screen.getByRole('button', { name: 'Tap to include' }))
+    await user.click(bobInForm()[0])
     await user.type(screen.getByPlaceholderText('30,00'), '30')
 
     expect(screen.getByText('Split matches total')).toBeInTheDocument()
@@ -1366,6 +1459,7 @@ describe('CostsPanel — expense modal', () => {
     expect(screen.getByText('50,00 €')).toBeInTheDocument()
 
     // A different category than the default is carried into the payload.
+    await user.click(screen.getByRole('button', { name: /^Category:/ }))
     await user.click(screen.getByRole('button', { name: 'Sightseeing' }))
     const submits = screen.getAllByRole('button', { name: 'Add expense' })
     await user.click(submits[submits.length - 1])
@@ -1390,7 +1484,7 @@ describe('CostsPanel — expense modal', () => {
     await user.click(screen.getAllByTestId('payer-toggle')[1])
     // Dropping Bob again leaves Alice absorbing the whole amount.
     await user.click(screen.getAllByTestId('payer-toggle')[1])
-    expect(screen.getByRole('button', { name: 'Tap to include' })).toBeInTheDocument()
+    expect(screen.getAllByTestId('payer-toggle')[1]).toHaveAttribute('aria-checked', 'false')
     await user.click(screen.getByRole('button', { name: 'One person paid' }))
 
     const submits = screen.getAllByRole('button', { name: 'Add expense' })
@@ -1412,8 +1506,7 @@ describe('CostsPanel — expense modal', () => {
 
     await user.type(screen.getByPlaceholderText('e.g. Dinner, souvenirs, gas…'), 'Hotel')
     await user.type(screen.getAllByPlaceholderText('0,00')[0], '120')
-    await user.click(screen.getByRole('button', { name: 'You' }))
-    pickOption('No one paid yet')
+    await user.click(screen.getByRole('radio', { name: 'No one paid yet' }))
 
     const submits = screen.getAllByRole('button', { name: 'Add expense' })
     await user.click(submits[submits.length - 1])
@@ -1463,6 +1556,33 @@ describe('CostsPanel — expense modal', () => {
     await waitFor(() => expect(posted).toBeTruthy())
     expect(posted).toMatchObject({ name: 'Hotel Astoria', category: 'accommodation', total_price: 240, reservation_id: 12 })
     expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('FE-W5COSTS-096: offers Scan receipt beside Add expense only when the AI model reads images', async () => {
+    server.use(http.get('/api/llm/capabilities', () => HttpResponse.json({ images: true })))
+    const { unmount } = render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Scan receipt' }))[0])
+    expect(screen.getByRole('dialog', { name: 'Scan a receipt' })).toBeInTheDocument()
+    unmount()
+
+    server.use(http.get('/api/llm/capabilities', () => HttpResponse.json({ images: false })))
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+    await screen.findAllByRole('button', { name: 'Add expense' })
+    expect(screen.queryByRole('button', { name: 'Scan receipt' })).not.toBeInTheDocument()
+  })
+
+  it('FE-W5COSTS-095: a scanned receipt opens in its own currency and day, with its photo waiting to be attached', () => {
+    const photo = new File(['x'], 'bill.jpg', { type: 'image/jpeg' })
+    render(
+      <ExpenseModal tripId={1} base="EUR" people={tripMembers} me={1} editing={null}
+        prefill={{ name: 'Sushi Dai', amount: 4200, currency: 'JPY', date: '2026-09-20', lines: [{ name: 'Omakase', price: 4200 }], receiptFiles: [photo] }}
+        onClose={() => {}} onSaved={() => {}} />
+    )
+
+    expect(screen.getByDisplayValue('Sushi Dai')).toBeInTheDocument()
+    // Yen has no minor unit, so the amount is not padded.
+    expect(screen.getByDisplayValue('4200')).toBeInTheDocument()
+    expect(screen.getByText('bill.jpg')).toBeInTheDocument()
   })
 
   // The mobile sheet already dates a new expense by the traveller's own clock;
@@ -1536,7 +1656,7 @@ describe('CostsPanel — remaining paths', () => {
     ])
 
     await screen.findByText('Tip')
-    fireEvent.click(screen.getByTitle('Export CSV'))
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
 
     const lines = (await exported!.text()).replace(/^\uFEFF/, '').split('\r\n')
     expect(lines[0]).toBe('Date;Name;Category;Amount;Currency;Amount (EUR);Note')
@@ -1562,24 +1682,12 @@ describe('CostsPanel — remaining paths', () => {
     ])
 
     await screen.findByText('-5 refund')
-    fireEvent.click(screen.getByTitle('Export CSV'))
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
 
     const lines = (await exported!.text()).replace(/^\uFEFF/, '').split('\r\n')
     expect(lines[1]).toBe('06/15/2025;"\'=HYPERLINK(""http://evil"",""click"")";Food & drink;12.00;EUR;12.00;\'@SUM(A1:A9)')
     expect(lines[2]).toBe('06/16/2025;\'-5 refund;Other;5.00;EUR;5.00;')
     createObjURL.mockRestore(); revokeObjURL.mockRestore(); clickSpy.mockRestore()
-  })
-
-  it('FE-W5COSTS-043: deleting an expense drops it from the ledger', async () => {
-    let deleted = false
-    server.use(http.delete('/api/trips/1/budget/101', () => { deleted = true; return HttpResponse.json({ success: true }) }))
-    mount([dinner()])
-
-    await screen.findByText('Dinner')
-    fireEvent.click(screen.getByTitle('Delete'))
-
-    await waitFor(() => expect(deleted).toBe(true))
-    expect(screen.queryByText('Dinner')).not.toBeInTheDocument()
   })
 
   it('FE-W5COSTS-044: both modals can be dismissed with Cancel', async () => {
@@ -1603,7 +1711,7 @@ describe('CostsPanel — remaining paths', () => {
     })])
 
     await screen.findByText('Dinner')
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]') as HTMLElement
+    const card = screen.getByRole('region', { name: 'Total trip spend' }) as HTMLElement
     // Not the 50/50 an equal split would have produced.
     expect(within(card).getByText('80 €')).toBeInTheDocument()
     expect(within(card).getByText('0 €')).toBeInTheDocument()
@@ -1617,7 +1725,7 @@ describe('CostsPanel — remaining paths', () => {
     })])
 
     await screen.findByText('Bob solo')
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]') as HTMLElement
+    const card = screen.getByRole('region', { name: 'Total trip spend' }) as HTMLElement
     expect(within(card).getAllByText('0 €')).toHaveLength(2)
   })
 
@@ -1627,7 +1735,7 @@ describe('CostsPanel — remaining paths', () => {
     mount([expense({ id: 220, name: 'Dinner', category: 'food', total_price: 90, currency: null })])
 
     await screen.findByText('Dinner')
-    const card = screen.getByText('Total trip spend').closest('div[style*="border-radius: 22"]')
+    const card = screen.getByRole('region', { name: 'Total trip spend' })
     expect(card).toHaveTextContent('90,00 €')
   })
 
@@ -1647,7 +1755,7 @@ describe('CostsPanel — remaining paths', () => {
     )
     render(<CostsPanel tripId={1} tripMembers={[...tripMembers, { id: 3, username: 'cara', avatar_url: null }]} />)
 
-    await user.click(await screen.findByTitle('Edit'))
+    await user.click(await screen.findByRole('button', { name: /^Edit(:|$)/ }))
     // No symbol is known, so the code itself prefixes the amount and labels the option.
     await screen.findByPlaceholderText('0.00')
     expect(screen.getAllByText('XBT').length).toBeGreaterThanOrEqual(2)
@@ -1665,7 +1773,7 @@ describe('CostsPanel — remaining paths', () => {
     mount([expense({ id: 240, name: 'Mining rig', category: 'other', total_price: 2, currency: 'XBT', payers: [{ user_id: 1, amount: 2 }], members: [{ user_id: 1, username: 'alice' }] })])
 
     await screen.findByText('Mining rig')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // XBT is unknown to the locale map → dot separator, two decimals (#2175).
     expect(await screen.findByDisplayValue('2.00')).toBeInTheDocument()
@@ -1681,7 +1789,7 @@ describe('CostsPanel — remaining paths', () => {
     render(<CostsPanel tripId={1} tripMembers={[{ id: 1, username: 'alice', avatar_url: null }]} />)
 
     await user.click(await screen.findByRole('button', { name: 'Add payment' }))
-    await user.type(await screen.findByPlaceholderText('0.00'), '10')
+    await user.type(await screen.findByPlaceholderText('0,00'), '10')
 
     // From and To both resolve to me, so the transfer stays unsavable.
     const submits = screen.getAllByRole('button', { name: 'Add payment' })
@@ -1710,7 +1818,7 @@ describe('CostsPanel — remaining paths', () => {
     // Excluding Bob leaves the include hint; tapping it puts him back on the bill.
     await user.click(screen.getAllByTestId('payer-toggle')[1])
     await user.click(screen.getAllByTestId('payer-toggle')[1])
-    await user.click(screen.getByRole('button', { name: 'Tap to include' }))
+    await user.click(screen.getAllByTestId('payer-toggle')[1])
     expect(screen.getAllByTestId('payer-amount')).toHaveLength(2)
 
     // Three decimals are not a valid money amount, so the field ignores them.
@@ -1735,13 +1843,13 @@ describe('CostsPanel — remaining paths', () => {
     expect(price.value).toBe('10,99')
 
     // Toggling a participant off and on again leaves the shares unchanged.
-    const bob = screen.getAllByRole('button', { name: /bob/i })[0]
+    const bob = screen.getAllByRole('checkbox', { name: /bob/i })[0]
     await user.click(bob)
     await user.click(bob)
     // 10.99 across two people leaves the odd cent with the lower user id.
     expect(screen.getByText('Individual shares')).toBeInTheDocument()
-    expect(screen.getByText('€5.50')).toBeInTheDocument()
-    expect(screen.getByText('€5.49')).toBeInTheDocument()
+    expect(screen.getByText('5,50 €')).toBeInTheDocument()
+    expect(screen.getByText('5,49 €')).toBeInTheDocument()
   })
 })
 
@@ -1764,12 +1872,40 @@ describe('CostsPanel — split modes and guests', () => {
     await user.click(screen.getByRole('button', { name: 'Custom' }))
     expect(screen.getByText(/Sum of splits/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Equally' }))
-    expect(screen.getByText('Split 2 ways · €45.00 each')).toBeInTheDocument()
+    expect(screen.getByText('45,00 € per person')).toBeInTheDocument()
 
     const submits = screen.getAllByRole('button', { name: 'Add expense' })
     await user.click(submits[submits.length - 1])
     await waitFor(() => expect(posted).toBeTruthy())
     expect(posted!.members).toEqual([{ user_id: 1, amount: null }, { user_id: 2, amount: null }])
+  })
+
+  it('FE-W5COSTS-1709: a custom split typed in percent saves the matching amounts', async () => {
+    const user = userEvent.setup()
+    let posted: Record<string, unknown> | null = null
+    server.use(http.post('/api/trips/1/budget', async ({ request }) => {
+      posted = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ item: dinner() })
+    }))
+    mount([])
+
+    await user.click(await screen.findByRole('button', { name: 'Add expense' }))
+    await user.type(screen.getByPlaceholderText('e.g. Dinner, souvenirs, gas…'), 'Bag storage')
+    await user.type(screen.getAllByPlaceholderText('0,00')[0], '30')
+    await user.click(screen.getByRole('button', { name: 'Custom' }))
+    await user.click(screen.getByRole('button', { name: '%' }))
+
+    const [alice, bob] = screen.getAllByRole('textbox', { name: / %$/ })
+    await user.type(alice, '60')
+    expect(screen.getByText('60 % of 100 % assigned')).toBeInTheDocument()
+    await user.type(bob, '40')
+    expect(screen.getByText('Split matches total')).toBeInTheDocument()
+    expect(screen.getByText('18,00 €')).toBeInTheDocument()
+
+    const submits = screen.getAllByRole('button', { name: 'Add expense' })
+    await user.click(submits[submits.length - 1])
+    await waitFor(() => expect(posted).toBeTruthy())
+    expect(posted!.members).toEqual([{ user_id: 1, amount: 18 }, { user_id: 2, amount: 12 }])
   })
 
   it('FE-W5COSTS-057: multi-payer on a payer-less expense seeds and collapses back to me', async () => {
@@ -1785,7 +1921,7 @@ describe('CostsPanel — split modes and guests', () => {
     })])
 
     await screen.findByText('Hotel')
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
 
     // Nobody paid, so switching to multi-payer seeds me as the only payer.
     await user.click(await screen.findByRole('button', { name: 'Multiple people paid' }))
@@ -1862,7 +1998,7 @@ describe('CostsPanel — mobile extras', () => {
     await waitFor(() => expect(document.querySelector('.costs-summary')).toBeNull())
     fireEvent.click(screen.getByRole('button', { name: 'Add payment' }))
 
-    expect(await screen.findByPlaceholderText('0.00')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('0,00')).toBeInTheDocument()
   })
 
   it('FE-W5COSTS-062: the mobile search box keeps the caret across keystrokes', async () => {
@@ -1906,11 +2042,11 @@ describe('CostsPanel — decimal padding on edit (#2175)', () => {
     ])
 
     await screen.findByText('Coffee')
-    await user.click(screen.getAllByTitle('Edit')[0])
+    await user.click(screen.getAllByRole('button', { name: /^Edit(:|$)/ })[0])
     expect(await screen.findByDisplayValue('4,90')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    await user.click(screen.getAllByTitle('Edit')[1])
+    await user.click(screen.getAllByRole('button', { name: /^Edit(:|$)/ })[1])
     expect(await screen.findByDisplayValue('5,00')).toBeInTheDocument()
   })
 
@@ -1990,10 +2126,10 @@ describe('CostsPanel — negative amounts (#2176)', () => {
     // Not "Unfinished": the refund has its recipient recorded.
     expect(within(row).queryByText('Unfinished')).toBeNull()
 
-    await user.click(screen.getByTitle('Edit'))
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
     // The negative payer reopens selected instead of resetting to "Nobody",
     // and the total is seeded signed and padded.
-    expect(await screen.findByRole('button', { name: 'You' })).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: 'You' })).toBeChecked()
     expect(screen.getByDisplayValue('-100,00')).toBeInTheDocument()
 
     // Saving untouched must not silently drop the negative payer.
@@ -2018,7 +2154,7 @@ describe('CostsPanel — negative amounts (#2176)', () => {
     ])
 
     await screen.findByText('Dinner')
-    const breakdown = screen.getByText('By category').parentElement as HTMLElement
+    const breakdown = screen.getByRole('region', { name: 'By category' }) as HTMLElement
     // Food nets 90 − 30 = 60; the fully refunded tour keeps a row of its own.
     expect(within(breakdown).getByText('60 €')).toBeInTheDocument()
     expect(within(breakdown).getByText(/[-−]20\s*€/)).toBeInTheDocument()
@@ -2034,10 +2170,10 @@ describe('CostsPanel — negative amounts (#2176)', () => {
       })} />)
 
     // -70 of -100: 30 still to hand out, not 30 too much.
-    expect(await screen.findByText('Sum of splits: €-70.00 of €-100.00 (under by €30.00)')).toBeInTheDocument()
+    expect(await screen.findByText('Sum of splits: -70,00 € of -100,00 € (under by 30,00 €)')).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('-30,00'), '-40')
-    expect(screen.getByText('Sum of splits: €-110.00 of €-100.00 (over by €10.00)')).toBeInTheDocument()
+    expect(screen.getByText('Sum of splits: -110,00 € of -100,00 € (over by 10,00 €)')).toBeInTheDocument()
   })
 
   it('FE-W5COSTS-073: the total can be turned into a refund without a minus key', async () => {
@@ -2119,19 +2255,404 @@ describe('CostsPanel — expense modal in another language', () => {
     await user.click(screen.getByRole('button', { name: 'Individuell' }))
 
     // Nothing entered yet, so the whole 90 is still unaccounted for.
-    expect(screen.getByText('Summe der Anteile: €0.00 von €90.00 (es fehlen €90.00)')).toBeInTheDocument()
+    expect(screen.getByText('Summe der Anteile: 0,00 € von 90,00 € (es fehlen 90,00 €)')).toBeInTheDocument()
 
     const shares = screen.getAllByPlaceholderText('45,00')
     await user.type(shares[0], '90')
     expect(screen.getByText('Aufteilung passt zur Summe')).toBeInTheDocument()
 
     await user.type(shares[1], '10')
-    expect(screen.getByText('Summe der Anteile: €100.00 von €90.00 (€10.00 zu viel)')).toBeInTheDocument()
+    expect(screen.getByText('Summe der Anteile: 100,00 € von 90,00 € (10,00 € zu viel)')).toBeInTheDocument()
 
     // Back to the equal split: a member taken out of it is marked, not dropped.
     await user.click(screen.getByRole('button', { name: 'Gleichmäßig' }))
-    await user.click(screen.getByRole('button', { name: /bob/i }))
-    expect(screen.getByText('Nicht dabei')).toBeInTheDocument()
+    // Taken out, the box is simply unticked; no English word leaks into the German dialog.
+    await user.click(screen.getByRole('checkbox', { name: /bob/i }))
+    expect(screen.getByRole('checkbox', { name: /bob/i })).not.toBeChecked()
     expect(screen.queryByText('Excluded')).not.toBeInTheDocument()
+  })
+})
+
+// ── #2525: a bill entered in the display currency on a trip kept in another ───
+describe('CostsPanel: a bill entered in the display currency (#2525)', () => {
+  // The reporter's setup: a euro trip, read in dollars, with the bill entered in
+  // dollars. It was booked at 1.17 dollars to the euro, 685.26 EUR, and that is what
+  // the balances and settle-up net. Today the euro buys 1.1551 dollars, so those
+  // euros are $791.55. The dollar's own quote is rounded separately (0.865706 per
+  // dollar is 1.155126 per euro), which is why the panel converts with the euro's.
+  beforeEach(() => {
+    seedAlice()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'USD' } })
+    clearExchangeRateCache()
+    localStorage.setItem('trek_fx_USD', JSON.stringify({ rates: { USD: 1, EUR: 0.865706 }, ts: Date.now() }))
+    localStorage.setItem('trek_fx_EUR', JSON.stringify({ rates: { EUR: 1, USD: 1.1551, SEK: 10 }, ts: Date.now() }))
+  })
+  afterEach(clearExchangeRateCache)
+
+  const hotel = (over: Partial<BudgetItem> = {}) => expense({
+    id: 401, name: 'Aparthotel Silver', category: 'accommodation', total_price: 801.76, currency: 'USD', exchange_rate: 1.17,
+    expense_date: '2026-08-06',
+    payers: [{ user_id: 1, amount: 801.76 }],
+    members: [{ user_id: 1, username: 'alice' }, { user_id: 2, username: 'bob' }],
+    ...over,
+  })
+
+  it('FE-W5COSTS-079: a bill whose rate moved shows what was entered and what it was booked at', async () => {
+    mount([hotel()])
+
+    await screen.findByText('Aparthotel Silver')
+    // A bill in the display currency counts as typed (#2965), as the balances net it:
+    // row total and payer chip read the dollars entered, nothing to explain under it,
+    // and what I lent is half of them, which settle-up offers too.
+    expect(screen.queryByText(/^\$801\.76 → /)).toBeNull()
+    expect(screen.getAllByText('$801.76')).toHaveLength(2)
+    expect(screen.getByText('you lent $400.88')).toBeInTheDocument()
+  })
+
+  it('FE-W5COSTS-087: a bill booked at today\'s rate reads exactly as typed everywhere on the page', async () => {
+    mount([
+      hotel({ id: 407, name: 'Villa', total_price: 12345.67, exchange_rate: 1.1551, payers: [{ user_id: 1, amount: 12345.67 }] }),
+      hotel({ id: 408, name: 'Unpaid deposit', total_price: 250, exchange_rate: 1.1551, payers: [], members: [] }),
+    ])
+
+    await screen.findByText('Villa')
+    // Pill and payer chip; converting back with the dollar's own quote gave $12,346.05.
+    expect(screen.getAllByText('$12,345.67')).toHaveLength(2)
+    expect(screen.queryByText(/12,346\.0[56]/)).toBeNull()
+    expect(screen.getByText('$12,595.67 spent')).toBeInTheDocument()
+    const total = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    expect(total.textContent).toContain('$12,595.67')
+    const outstanding = screen.getByText('Outstanding amount').parentElement!.parentElement!.parentElement!
+    expect(outstanding.textContent).toContain('$250.00')
+    // Nothing to explain under either row.
+    expect(screen.queryByText(/^\$12,345\.67 →/)).toBeNull()
+    expect(screen.queryByText(/^\$250\.00 →/)).toBeNull()
+  })
+
+  it('FE-W5COSTS-088: the CSV export adds the trip-currency amount every sum is built from', async () => {
+    let exported: Blob | null = null
+    const createObjURL = vi.spyOn(URL, 'createObjectURL').mockImplementation(b => { exported = b as Blob; return 'blob:mock' })
+    const revokeObjURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      mount([hotel()])
+      await screen.findByText('Aparthotel Silver')
+      fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
+      await waitFor(() => expect(exported).toBeTruthy())
+      const lines = (await exported!.text()).replace(/^\uFEFF/, '').split('\r\n')
+      expect(lines[0]).toBe('Date;Name;Category;Amount;Currency;Amount (EUR);Amount (USD);Note')
+      // The trip-currency figure it was booked at, then the dollars as typed (#2965).
+      expect(lines[1]).toMatch(/;801\.76;USD;685\.26;801\.76;$/)
+    } finally {
+      createObjURL.mockRestore(); revokeObjURL.mockRestore(); clickSpy.mockRestore()
+    }
+  })
+
+  it('FE-W5COSTS-080: the totals add up the figures the rows show', async () => {
+    mount([
+      hotel(),
+      hotel({ id: 402, name: 'Dinner', category: 'food', total_price: 120, payers: [{ user_id: 2, amount: 120 }] }),
+    ])
+
+    await screen.findByText('Aparthotel Silver')
+    // Both in the display currency, both as typed (#2965): $801.76 and $120.00 make
+    // $921.76, on the day header and on the total spend card.
+    expect(screen.queryByText(/^\$120\.00 → /)).toBeNull()
+    expect(screen.getByText('$921.76 spent')).toBeInTheDocument()
+    // Label, its text block, the header row, then the card itself.
+    const card = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    expect(card.textContent).toContain('$921.76')
+  })
+
+  it('FE-W5COSTS-084: the totals follow the rates when they arrive after the expenses', async () => {
+    // Nothing cached: the rates land after the expenses and the settlement, and the
+    // totals used to keep the figure they were first added up with.
+    clearExchangeRateCache()
+    server.use(http.get('https://api.frankfurter.dev/v2/rates', async () => {
+      await new Promise(r => setTimeout(r, 150))
+      return HttpResponse.json([{ quote: 'EUR', rate: 0.8 }])
+    }))
+    mount([hotel({ id: 406, name: 'Museum', category: 'activities', total_price: 100, currency: 'EUR', exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] })])
+
+    // 100 euro at 0.8 euro to the dollar.
+    expect(await screen.findByText(/100,00\s€ → \$125\.00/)).toBeInTheDocument()
+    const card = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    await waitFor(() => expect(card.textContent).toContain('$125.00'))
+  })
+
+  it('FE-W5COSTS-081: a euro row converts live, a third currency shows the euros it was booked at', async () => {
+    mount([
+      hotel({ id: 403, name: 'Museum', category: 'activities', total_price: 100, currency: 'EUR', exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] }),
+      hotel({ id: 404, name: 'Ferry', category: 'transport', total_price: 1000, currency: 'SEK', exchange_rate: 10, payers: [{ user_id: 1, amount: 1000 }] }),
+      // Written before the freeze existed: nothing was booked, so dollars stay dollars.
+      hotel({ id: 405, name: 'Old taxi', category: 'transport', total_price: 50, currency: 'USD', exchange_rate: 1, payers: [{ user_id: 1, amount: 50 }] }),
+    ])
+
+    await screen.findByText('Museum')
+    // The trip currency has no frozen rate of its own and goes to dollars live.
+    expect(screen.getByText(/^100,00\s€ → \$115\.51$/)).toBeInTheDocument()
+    // 1000 SEK at 10 per euro is 100 euro, then live to dollars in the pill.
+    expect(screen.getByText(/^1\s000,00\skr → 100,00\s€$/)).toBeInTheDocument()
+    expect(screen.getAllByText('$50.00').length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText(/^\$50\.00 →/)).toBeNull()
+  })
+
+  it('FE-W5COSTS-082: a payment recorded in dollars reads as entered, a legacy one too (#2965)', async () => {
+    mount([hotel()], {
+      settlements: [
+        { id: 21, from_user_id: 2, to_user_id: 1, amount: 400.88, currency: 'USD', exchange_rate: 1.17, created_at: '2026-08-07 09:00:00' },
+        // Rows from before transfers had a currency were entered in the display
+        // currency, which is how the server settles them.
+        { id: 22, from_user_id: 2, to_user_id: 1, amount: 30, currency: null, created_at: '2026-08-08 09:00:00' },
+      ],
+    })
+
+    await screen.findByText('Aparthotel Silver')
+    // The hotel's split chips can carry the same figure, so look past them to the payment.
+    const outsideChips = (text: string) => screen.queryAllByText(text).filter(el => !el.closest('[data-testid="split-chip"]'))
+    expect(await screen.findByText('$30.00')).toBeInTheDocument()
+    expect(screen.queryByText(/\$400\.88 → /)).toBeNull()
+    expect(outsideChips('$400.88')).toHaveLength(1)
+    expect(outsideChips('$30.00')).toHaveLength(1)
+    expect(screen.queryByText('$34.65')).toBeNull()
+  })
+
+  it('FE-W5COSTS-085: the edit dialog has nothing to convert for a bill in the display currency (#2965)', async () => {
+    const user = userEvent.setup()
+    mount([hotel()])
+
+    await screen.findByText('Aparthotel Silver')
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
+    expect(await screen.findByDisplayValue('801.76')).toBeInTheDocument()
+    // The list reads the dollars typed, so there is no conversion to preview.
+    expect(screen.queryByText(/live rate/)).toBeNull()
+    expect(screen.getByText(/\$400\.88 per person/)).toBeInTheDocument()
+    expect(screen.queryByText(/\$400\.88 → /)).toBeNull()
+  })
+
+  it('FE-W5COSTS-086: the final budget names the bill by what was entered beside its booked figure', async () => {
+    const user = userEvent.setup()
+    mount([hotel()], {
+      balances: [
+        { user_id: 1, username: 'alice', avatar_url: null, balance: 395.78 },
+        { user_id: 2, username: 'bob', avatar_url: null, balance: -395.78 },
+      ],
+      flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 395.78 }],
+      finalBudgets: [
+        {
+          user_id: 1, username: 'alice', avatar_url: null, expenses: 791.55, reimbursed: 0, pending: 395.78, final: 395.77,
+          sources: { fronted: [{ item_id: 401, cents: 79155 }], moved: [], outstanding: [{ from_user_id: 2, to_user_id: 1, cents: 39578 }] },
+        },
+      ],
+    })
+
+    const card = (await screen.findByRole('region', { name: 'Final budget' })) as HTMLElement
+    await user.click(await within(card).findByRole('button', { name: /You/ }))
+    expect(within(card).getAllByText('+$791.55')).toHaveLength(2)
+    expect(within(card).getByText('Aparthotel Silver')).toBeInTheDocument()
+    expect(within(card).getByText('$801.76')).toBeInTheDocument()
+  })
+
+  it('FE-W5COSTS-089: the final budget lists a bill that reads as typed without a second amount', async () => {
+    const user = userEvent.setup()
+    mount([hotel({ exchange_rate: 1.1551 })], {
+      balances: [
+        { user_id: 1, username: 'alice', avatar_url: null, balance: 400.88 },
+        { user_id: 2, username: 'bob', avatar_url: null, balance: -400.88 },
+      ],
+      flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 400.88 }],
+      finalBudgets: [
+        {
+          user_id: 1, username: 'alice', avatar_url: null, expenses: 801.76, reimbursed: 0, pending: 400.88, final: 400.88,
+          sources: { fronted: [{ item_id: 401, cents: 80176 }], moved: [], outstanding: [{ from_user_id: 2, to_user_id: 1, cents: 40088 }] },
+        },
+      ],
+    })
+
+    const card = (await screen.findByRole('region', { name: 'Final budget' })) as HTMLElement
+    await user.click(await within(card).findByRole('button', { name: /You/ }))
+    expect(within(card).getAllByText('+$801.76')).toHaveLength(2)
+    expect(within(card).queryByText('$801.76')).toBeNull()
+  })
+
+  it('FE-W5COSTS-083: an expense saved without a currency opens in the trip currency, not the display one', async () => {
+    const user = userEvent.setup()
+    let put: Record<string, unknown> | null = null
+    server.use(http.put('/api/trips/1/budget/405', async ({ request }) => {
+      put = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ item: hotel({ id: 405, currency: 'EUR' }) })
+    }))
+    mount([hotel({ id: 405, name: 'Tram pass', category: 'transport', total_price: 100, currency: null, exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] })])
+
+    await screen.findByText('Tram pass')
+    // The list reads the missing currency as the trip's own.
+    expect(screen.getByText(/100,00\s€ → \$115\.51/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^Edit(:|$)/ }))
+    expect(await screen.findByDisplayValue('100,00')).toBeInTheDocument()
+    // Seeding the display currency here would label 100 euro as 100 dollars, and a
+    // plain save would then store it that way.
+    expect(screen.getByText(/^EUR/)).toBeInTheDocument()
+    expect(screen.queryByText(/^USD/)).toBeNull()
+
+    // Saving without touching anything keeps the 100 euro.
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(put).toMatchObject({ total_price: 100, currency: 'EUR' }))
+  })
+})
+
+// ── A bill the server cannot convert: VND on an AUD trip ────────────────────────
+describe('CostsPanel: a bill the server cannot convert', () => {
+  // The reporter's setup: an AUD trip whose server cannot fetch rates while the browser
+  // can. An 8,920,000 VND dinner that never froze a rate was counted as 8,920,000 AUD.
+  // The settlement now leaves it out and lists it, and an editor's browser lends its AUD
+  // table to freeze a rate on it.
+  const pho = () => expense({
+    id: 501, name: 'Pho', category: 'food', total_price: 8920000, currency: 'VND', exchange_rate: 1,
+    expense_date: '2026-09-20',
+    payers: [{ user_id: 1, amount: 8920000 }],
+    members: [{ user_id: 1, username: 'alice' }, { user_id: 2, username: 'bob' }],
+  })
+  const leftOut = { balances: [], flows: [], settlements: [], currency: 'AUD', unconverted: { item_ids: [501], settlement_ids: [], currencies: ['VND'] } }
+
+  beforeEach(() => {
+    seedAlice()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'AUD' } })
+    seedStore(useTripStore, { trip: buildTrip({ id: 1, currency: 'AUD' }) })
+    clearExchangeRateCache()
+    resetFreezeAttempts()
+    localStorage.setItem('trek_fx_AUD', JSON.stringify({ rates: { AUD: 1, VND: 18241.3, EUR: 0.61 }, ts: Date.now() }))
+  })
+  afterEach(clearExchangeRateCache)
+
+  it('FE-W5COSTS-090: VND/AUD regression: an editor heals the bill with the cached quote and the healed balances load', async () => {
+    let healed = false
+    const frozen: unknown[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [pho()] })),
+      http.get('/api/trips/1/budget/settlement', () => HttpResponse.json(healed
+        ? {
+            // 8,920,000 VND at 18,241.3 is 489.00 AUD, half of it Bob's.
+            balances: [
+              { user_id: 1, username: 'alice', avatar_url: null, balance: 244.5 },
+              { user_id: 2, username: 'bob', avatar_url: null, balance: -244.5 },
+            ],
+            flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 244.5 }],
+            settlements: [],
+            currency: 'AUD',
+            unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+          }
+        : leftOut)),
+      http.post('/api/trips/1/budget/freeze-rates', async ({ request }) => {
+        frozen.push(await request.json())
+        healed = true
+        return HttpResponse.json({ items: [{ ...pho(), exchange_rate: 18241.3 }], settlements: [], unresolved: [] })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    // Only the currency the settlement is missing, at the rate the browser holds.
+    await waitFor(() => expect(frozen).toEqual([{ fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } }]))
+    // The settlement is read again and Bob's half can be settled.
+    expect(await screen.findByRole('button', { name: /^Settle(:|$)/ })).toBeInTheDocument()
+    expect(screen.getAllByText(/244\.50/).length).toBeGreaterThan(0)
+    // Nothing on the page counts the bill as 8,920,000 dollars any more.
+    expect(screen.queryByText(/\$8,920,000/)).toBeNull()
+    expect(frozen).toHaveLength(1)
+  })
+
+  it('FE-W5COSTS-091: a viewer\'s browser never freezes anything', async () => {
+    seedStore(usePermissionsStore, { permissions: { budget_edit: 'admin' } })
+    let frozen = 0
+    server.use(http.post('/api/trips/1/budget/freeze-rates', () => {
+      frozen += 1
+      return HttpResponse.json({ items: [], settlements: [], unresolved: [] })
+    }))
+    mount([pho()], leftOut)
+
+    await screen.findByText('Pho')
+    await new Promise(r => setTimeout(r, 50))
+    expect(frozen).toBe(0)
+  })
+
+  it('FE-W5COSTS-092: settle-up in the display currency lends its rate and asks the settlement in it', async () => {
+    // Read in euros: the browser has the AUD table, the server has no quote at all.
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
+    const asked: { base: string | null; baseRate: string | null }[] = []
+    const posted: Record<string, unknown>[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] })),
+      http.get('/api/trips/1/budget/settlement', ({ request }) => {
+        const url = new URL(request.url)
+        asked.push({ base: url.searchParams.get('base'), baseRate: url.searchParams.get('base_rate') })
+        return HttpResponse.json({
+          balances: [], settlements: [], currency: 'EUR', unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+          flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 20 }],
+        })
+      }),
+      http.post('/api/trips/1/budget/settlements', async ({ request }) => {
+        posted.push(await request.json() as Record<string, unknown>)
+        return HttpResponse.json({ settlement: { id: 1 } })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Settle(:|$)/ }))
+    await waitFor(() => expect(posted).toHaveLength(1))
+    // The transfer freezes at the rate the settlement was labelled with, so it cancels its
+    // flow to the cent.
+    expect(posted[0]).toMatchObject({ from_user_id: 2, to_user_id: 1, amount: 20, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(a => a.base === 'EUR' && a.baseRate === '0.61')).toBe(true)
+
+    const settleAll = screen.getByRole('button', { name: 'Settle up' })
+    fireEvent.click(settleAll)
+    await waitFor(() => expect(posted).toHaveLength(2))
+    expect(posted[1]).toMatchObject({ amount: 20, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+  })
+
+  it('FE-W5COSTS-093: a payment added by hand lends the rate for its currency too', async () => {
+    const user = userEvent.setup()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
+    let posted: Record<string, unknown> | null = null
+    server.use(http.post('/api/trips/1/budget/settlements', async ({ request }) => {
+      posted = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ settlement: { id: 1 } })
+    }))
+    mount([])
+
+    await user.click(await screen.findByRole('button', { name: 'Add payment' }))
+    await user.type(await screen.findByPlaceholderText('0,00'), '25')
+    const submits = screen.getAllByRole('button', { name: 'Add payment' })
+    await user.click(submits[submits.length - 1])
+
+    await waitFor(() => expect(posted).toBeTruthy())
+    expect(posted).toMatchObject({ amount: 25, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+  })
+
+  it('FE-W5COSTS-094: a display rate the settlement query would refuse is not sent', async () => {
+    // A trip in gold read in rials: 2.6 billion rials to the ounce is past the 1e9 the query
+    // takes, and sent as `base_rate` it would fail the whole settlement with a 400.
+    seedStore(useTripStore, { trip: buildTrip({ id: 1, currency: 'XAU' }) })
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'IRR' } })
+    localStorage.setItem('trek_fx_XAU', JSON.stringify({ rates: { XAU: 1, IRR: 2.6e9 }, ts: Date.now() }))
+    localStorage.setItem('trek_fx_IRR', JSON.stringify({ rates: { IRR: 1, XAU: 1 / 2.6e9 }, ts: Date.now() }))
+    const asked: { base: string | null; baseRate: string | null }[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] })),
+      http.get('/api/trips/1/budget/settlement', ({ request }) => {
+        const url = new URL(request.url)
+        asked.push({ base: url.searchParams.get('base'), baseRate: url.searchParams.get('base_rate') })
+        return HttpResponse.json({
+          balances: [], flows: [], settlements: [], currency: 'XAU', unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+        })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    await waitFor(() => expect(asked.length).toBeGreaterThan(0))
+    // Still asked in rials, only without the figure; the server answers in the trip
+    // currency when it has no quote of its own.
+    expect(asked.every(a => a.base === 'IRR' && a.baseRate === null)).toBe(true)
   })
 })

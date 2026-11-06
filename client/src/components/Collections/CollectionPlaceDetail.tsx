@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -8,17 +8,14 @@ import type { CollectionPlace, CollectionStatus, CollectionLink, CollectionLabel
 import type { Category, TranslationFn } from '../../types'
 import MarkdownToolbar from '../Journey/MarkdownToolbar'
 import { NumericInput } from '../shared/NumericInput'
-import { mapsApi } from '../../api/client'
 import { entityGradient } from '../../utils/gradients'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import { NavigationMenu } from '../shared/NavigationMenu'
-import { getNavigationTargets, openNavigationTarget } from '../Planner/placeNavigation'
+import { navigationTargetLabel, getNavigationTargets, openNavigationTarget } from '../Planner/placeNavigation'
 import { STATUS_META, STATUS_ORDER, normalizeLinkUrl } from '../../pages/collections/collectionsModel'
-import { useToast } from '../shared/Toast'
 import { Tooltip } from '../shared/Tooltip'
 import PlaceRating from '../shared/StarRating'
-import { normalizeImageFile } from '../../utils/convertHeic'
-import { getApiErrorMessage } from '../../utils/apiError'
+import { useCollectionPlaceForm } from './useCollectionPlaceForm'
 
 function linkHost(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
@@ -71,105 +68,21 @@ function StatusSegment({ status, onSet, t }: { status: CollectionStatus; onSet: 
 export default function CollectionPlaceDetail({
   place, canEdit, canDelete, categories, labels, anchorRect, onClose, onSetStatus, onSave, onUploadImage, onCopyToTrip, onRemove, onRate, t,
 }: CollectionPlaceDetailProps): React.ReactElement {
-  const toast = useToast()
-  const [editing, setEditing] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
-  const [imgBusy, setImgBusy] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const navBtnRef = useRef<HTMLButtonElement>(null)
   const navigationTargets = getNavigationTargets(place)
-  const [name, setName] = useState(place.name)
-  const [categoryId, setCategoryId] = useState<number | null>(place.category_id ?? null)
-  const [description, setDescription] = useState(place.description ?? '')
-  const [links, setLinks] = useState<CollectionLink[]>(place.links ?? [])
-  const [labelIds, setLabelIds] = useState<number[]>(place.label_ids ?? [])
-  const [address, setAddress] = useState(place.address ?? '')
-  const [lat, setLat] = useState(place.lat != null ? String(place.lat) : '')
-  const [lng, setLng] = useState(place.lng != null ? String(place.lng) : '')
-  const [saving, setSaving] = useState(false)
-  // A higher-res photo pulled from the maps provider when the place has none of
-  // its own — the list avatar's little thumbnail is too low-res for the cover.
-  const [fetchedPhoto, setFetchedPhoto] = useState<string | null>(null)
   const descRef = useRef<HTMLTextAreaElement>(null)
+  const {
+    editing, setEditing, name, setName, categoryId, setCategoryId, description, setDescription, links, setLinks, setLink,
+    labelIds, toggleLabel, address, setAddress, lat, setLat, lng, setLng, saving, imgBusy, cover: banner, assignedLabels,
+    handleImagePick: handleCoverPick, handleImageRemove, cancelEdit: resetForm, save,
+  } = useCollectionPlaceForm({ place, labels, onSave, onUploadImage, t, normalizeLinkUrl, withCoordinates: true })
 
-  // Reset only when a DIFFERENT place is opened (keyed on id, not on every field).
-  useEffect(() => {
-    setEditing(false)
-    setName(place.name)
-    setCategoryId(place.category_id ?? null)
-    setDescription(place.description ?? '')
-    setLinks(place.links ?? [])
-    setLabelIds(place.label_ids ?? [])
-    setAddress(place.address ?? '')
-    setLat(place.lat != null ? String(place.lat) : '')
-    setLng(place.lng != null ? String(place.lng) : '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [place.id])
-
-  // Fetch a cover photo when the place doesn't carry its own image.
-  useEffect(() => {
-    setFetchedPhoto(null)
-    if (place.image_url) return
-    const photoId = place.google_place_id || place.osm_id || (place.lat != null && place.lng != null ? `${place.lat},${place.lng}` : null)
-    if (!photoId) return
-    let cancelled = false
-    mapsApi.placePhoto(photoId, place.lat ?? undefined, place.lng ?? undefined, place.name)
-      .then(res => { if (!cancelled && res?.photoUrl) setFetchedPhoto(res.photoUrl) })
-      .catch(() => {})
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [place.id])
-
-  const banner = place.image_url || fetchedPhoto
-
-  const handleCoverPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || !onUploadImage) return
-    setImgBusy(true)
-    try {
-      await onUploadImage(await normalizeImageFile(file))
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, t('places.imageUploadError')))
-    } finally {
-      setImgBusy(false)
-    }
-  }
-
-  const handleImageRemove = async () => {
-    setImgBusy(true)
-    try {
-      await onSave({ image_url: null })
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, t('places.imageUploadError')))
-    } finally {
-      setImgBusy(false)
-    }
-  }
-
-  const setLink = (i: number, patch: Partial<CollectionLink>) => setLinks(links.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
-  const toggleLabel = (id: number) => setLabelIds(labelIds.includes(id) ? labelIds.filter(x => x !== id) : [...labelIds, id])
-  const resetForm = () => { setEditing(false); setName(place.name); setCategoryId(place.category_id ?? null); setDescription(place.description ?? ''); setLinks(place.links ?? []); setLabelIds(place.label_ids ?? []); setAddress(place.address ?? ''); setLat(place.lat != null ? String(place.lat) : ''); setLng(place.lng != null ? String(place.lng) : '') }
   const coordPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const text = e.clipboardData.getData('text').trim()
     const match = text.match(/^(-?\d+(?:\.\d*)?)(?:\s*[,;]\s*|\s+)(-?\d+(?:\.\d*)?)$/)
     if (match) { e.preventDefault(); setLat(match[1]); setLng(match[2]) }
-  }
-  const assignedLabels = labels.filter(l => (place.label_ids ?? []).includes(l.id))
-
-  const save = async () => {
-    const cleanLinks = links.map(l => ({ label: l.label?.trim() || undefined, url: normalizeLinkUrl(l.url) })).filter(l => l.url)
-    const latNum = lat.trim() ? Number(lat) : Number.NaN
-    const lngNum = lng.trim() ? Number(lng) : Number.NaN
-    setSaving(true)
-    try {
-      await onSave({ name: name.trim() || place.name, description: description.trim() || null, links: cleanLinks, category_id: categoryId, label_ids: labelIds, address: address.trim() || null, lat: Number.isFinite(latNum) ? latNum : null, lng: Number.isFinite(lngNum) ? lngNum : null })
-      setEditing(false)
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, t('common.error')))
-    } finally {
-      setSaving(false)
-    }
   }
 
   const dockStyle = anchorRect ? { left: anchorRect.left, width: anchorRect.width, transform: 'none' as const } : undefined
@@ -180,39 +93,45 @@ export default function CollectionPlaceDetail({
       <div className="col-detail-cover" style={banner ? undefined : { backgroundImage: entityGradient(place.id) }}>
         {banner && <img src={banner} alt="" />}
         <div className="col-detail-cover-scrim" />
-        {place.category?.name && (
-          <span className="col-detail-cover-cat" style={{ ['--cat' as string]: place.category.color || '#6366f1' }}>
-            <CatIcon size={12} /> {place.category.name}
-          </span>
-        )}
-        <button type="button" className="col-detail-close" onClick={onClose} aria-label={t('common.close')}><X size={16} /></button>
-        {canEdit && onUploadImage && (
-          <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6, zIndex: 2 }}>
-            <Tooltip label={place.image_url ? t('places.changeImage') : t('places.uploadImage')} placement="bottom">
-              <button
-                type="button"
-                onClick={() => { if (!imgBusy) coverInputRef.current?.click() }}
-                aria-label={place.image_url ? t('places.changeImage') : t('places.uploadImage')}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, border: 'none', cursor: imgBusy ? 'default' : 'pointer', background: 'rgba(0,0,0,0.55)', color: '#fff', backdropFilter: 'blur(4px)' }}
-              >
-                {imgBusy ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
-              </button>
-            </Tooltip>
-            {place.image_url && !imgBusy && (
-              <Tooltip label={t('places.removeImage')} placement="bottom">
-                <button
-                  type="button"
-                  onClick={handleImageRemove}
-                  aria-label={t('places.removeImage')}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,0.55)', color: '#fff', backdropFilter: 'blur(4px)' }}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </Tooltip>
+        {/* Chip and cover controls share the top bar. The controls keep the end and
+            never shrink, so a long category name ellipsizes instead of sliding under
+            them, however many buttons there are and whatever size phones give them. */}
+        <div className="absolute start-[14px] end-[12px] top-[12px] z-[2] flex items-center gap-[8px]">
+          {place.category?.name && (
+            <span className="col-detail-cover-cat min-w-0" style={{ ['--cat' as string]: place.category.color || '#6366f1' }}>
+              <CatIcon size={12} className="flex-none" />
+              <span className="truncate">{place.category.name}</span>
+            </span>
+          )}
+          {/* The cover controls wear the close button's class, so they get its look,
+              hover and phone size. */}
+          <div className="ms-auto flex flex-none gap-[6px]">
+            {canEdit && onUploadImage && (
+              <>
+                <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,.heic,.heif" style={{ display: 'none' }} onChange={handleCoverPick} />
+                {place.image_url && !imgBusy && (
+                  <Tooltip label={t('places.removeImage')} placement="bottom">
+                    <button type="button" className="col-detail-close" onClick={handleImageRemove} aria-label={t('places.removeImage')}>
+                      <Trash2 size={16} />
+                    </button>
+                  </Tooltip>
+                )}
+                <Tooltip label={place.image_url ? t('places.changeImage') : t('places.uploadImage')} placement="bottom">
+                  <button
+                    type="button"
+                    className="col-detail-close"
+                    style={imgBusy ? { cursor: 'default' } : undefined}
+                    onClick={() => { if (!imgBusy) coverInputRef.current?.click() }}
+                    aria-label={place.image_url ? t('places.changeImage') : t('places.uploadImage')}
+                  >
+                    {imgBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                  </button>
+                </Tooltip>
+              </>
             )}
-            <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,.heic,.heif" style={{ display: 'none' }} onChange={handleCoverPick} />
+            <button type="button" className="col-detail-close" onClick={onClose} aria-label={t('common.close')}><X size={16} /></button>
           </div>
-        )}
+        </div>
         <div className="col-detail-head">
           {editing
             ? <input value={name} onChange={e => setName(e.target.value)} className="col-detail-name-input" autoFocus aria-label={t('collections.listName')} />
@@ -222,35 +141,12 @@ export default function CollectionPlaceDetail({
 
       <div className="col-detail-body">
         {/* Meta (view only) */}
-        {!editing && (place.address || navigationTargets.length > 0) && (
+        {!editing && place.address && (
           <div className="col-detail-meta">
             {place.address && <span className="col-detail-addr"><MapPin size={12} /> {place.address}</span>}
             {/* Same picker as inside a trip (#1455). A saved place is somewhere
                 you intend to go, and until now the only way to get directions
                 was to add it to a trip first. */}
-            {navigationTargets.length > 0 && (
-              <>
-                <button
-                  ref={navBtnRef}
-                  type="button"
-                  className="col-detail-nav"
-                  onClick={() => {
-                    if (navigationTargets.length === 1) openNavigationTarget(navigationTargets[0])
-                    else setNavOpen(o => !o)
-                  }}
-                >
-                  <Navigation size={12} />
-                  {navigationTargets.length === 1 ? navigationTargets[0].label : t('inspector.navigation')}
-                </button>
-                {navOpen && (
-                  <NavigationMenu
-                    targets={navigationTargets}
-                    anchor={navBtnRef.current}
-                    onClose={() => setNavOpen(false)}
-                  />
-                )}
-              </>
-            )}
           </div>
         )}
 
@@ -258,9 +154,22 @@ export default function CollectionPlaceDetail({
         <StatusSegment status={place.status} onSet={canEdit ? onSetStatus : () => {}} t={t} />
 
         {/* Collaborative rating (#1435) — every member votes; the average shows. */}
-        {onRate && (
-          <div style={{ padding: '2px 0' }}>
-            <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={onRate} />
+        {/* Rating and labels on one line, each on its own ground.
+            A bare line of stars read as another row of text, and the labels tried the
+            cover photo first — where a blue chip on a blue sky is simply not there.
+            Side by side they are two badges answering two questions about the place. */}
+        {(onRate || assignedLabels.length > 0) && (
+          <div className="col-detail-badges">
+            {onRate && (
+              <div className="col-detail-rating">
+                <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={onRate} />
+              </div>
+            )}
+            {!editing && assignedLabels.map(l => (
+              <span key={l.id} className="col-labelchip on static big" style={{ ['--label' as string]: l.color || 'var(--accent)' }}>
+                <span className="col-labelchip-dot" /> {l.name}
+              </span>
+            ))}
           </div>
         )}
 
@@ -334,15 +243,6 @@ export default function CollectionPlaceDetail({
           </div>
         ) : (
           <>
-            {assignedLabels.length > 0 && (
-              <div className="col-detail-labels">
-                {assignedLabels.map(l => (
-                  <span key={l.id} className="col-labelchip on static" style={{ ['--label' as string]: l.color || 'var(--accent)' }}>
-                    <span className="col-labelchip-dot" /> {l.name}
-                  </span>
-                ))}
-              </div>
-            )}
             {place.description && (
               <div className="col-detail-md collab-note-md">
                 <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{place.description}</Markdown>
@@ -371,6 +271,32 @@ export default function CollectionPlaceDetail({
           <>
             {canEdit && <button type="button" onClick={() => setEditing(true)} className="col-detail-btn"><Pencil size={14} /> {t('common.edit')}</button>}
             <button type="button" onClick={onCopyToTrip} className="col-detail-btn"><Copy size={14} /> {t('collections.copyToTrip')}</button>
+            {/* Beside the other two rather than up by the address: getting directions is
+                something you DO with the place, like editing it or copying it into a
+                trip, and the row of things you do belongs in one place. */}
+            {navigationTargets.length > 0 && (
+              <>
+                <button
+                  ref={navBtnRef}
+                  type="button"
+                  className="col-detail-btn"
+                  onClick={() => {
+                    if (navigationTargets.length === 1) openNavigationTarget(navigationTargets[0])
+                    else setNavOpen(o => !o)
+                  }}
+                >
+                  <Navigation size={14} />
+                  {navigationTargets.length === 1 ? navigationTargetLabel(navigationTargets[0], t) : t('inspector.navigation')}
+                </button>
+                {navOpen && (
+                  <NavigationMenu
+                    targets={navigationTargets}
+                    anchor={navBtnRef.current}
+                    onClose={() => setNavOpen(false)}
+                  />
+                )}
+              </>
+            )}
             <div className="col-detail-footer-spacer" />
             {canDelete && <button type="button" onClick={onRemove} className="col-detail-btn danger"><Trash2 size={14} /> {t('collections.removeFromList')}</button>}
           </>

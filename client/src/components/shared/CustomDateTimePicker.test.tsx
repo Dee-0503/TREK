@@ -104,14 +104,14 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    expect(screen.getByPlaceholderText('DD.MM.YYYY')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Enter date manually' })).toBeTruthy();
   });
 
   it('FE-COMP-DATEPICKER-012: text input accepts ISO format YYYY-MM-DD', async () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '2026-07-04' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('2026-07-04');
@@ -121,7 +121,7 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '17.07.2026' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('2026-07-17');
@@ -131,7 +131,7 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '31.02.2026' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '29.02.2024' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('2024-02-29');
@@ -151,9 +151,9 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.keyDown(input, { key: 'Escape' });
-    expect(screen.queryByPlaceholderText('DD.MM.YYYY')).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Enter date manually' })).toBeNull();
     expect(screen.getAllByRole('button').length).toBeGreaterThan(0);
   });
 
@@ -183,7 +183,7 @@ describe('CustomDatePicker', () => {
     const user = userEvent.setup();
     render(<CustomDatePicker value="" onChange={onChange} min="2026-03-10" max="2026-03-20" />);
     await user.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '2026-03-25' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).not.toHaveBeenCalled();
@@ -503,22 +503,22 @@ describe('CustomDatePicker branches', () => {
     openCalendar();
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
 
-    expect(screen.getByPlaceholderText('DD.MM.YYYY')).toHaveProperty('value', '');
+    expect(screen.getByRole('textbox', { name: 'Enter date manually' })).toHaveProperty('value', '');
   });
 
   it('FE-W5DP-010: submitting an empty manual entry does nothing', () => {
     render(<CustomDatePicker value="" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    fireEvent.blur(screen.getByPlaceholderText('DD.MM.YYYY'));
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Enter date manually' }));
 
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.queryByPlaceholderText('DD.MM.YYYY')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Enter date manually' })).not.toBeInTheDocument();
   });
 
   it('FE-W5DP-011: a manual entry without three number groups is ignored', () => {
     render(<CustomDatePicker value="" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '17.07' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -528,7 +528,7 @@ describe('CustomDatePicker branches', () => {
   it('FE-W5DP-012: a manual entry already in locale order is taken as typed', () => {
     render(<CustomDatePicker value="" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '07/17/2026' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -538,7 +538,7 @@ describe('CustomDatePicker branches', () => {
   it('FE-W5DP-013: a two-digit year is expanded into the 2000s', () => {
     render(<CustomDatePicker value="" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '07/17/26' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -548,7 +548,7 @@ describe('CustomDatePicker branches', () => {
   it('FE-W5DP-014: an impossible day/month combination is rejected', () => {
     render(<CustomDatePicker value="" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '13/45/2026' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -558,7 +558,7 @@ describe('CustomDatePicker branches', () => {
   it('FE-W5DP-015: a localised manual entry outside [min,max] is rejected', () => {
     render(<CustomDatePicker value="" onChange={onChange} min="2026-03-10" max="2026-03-20" />);
     fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
-    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
     fireEvent.change(input, { target: { value: '03/25/2026' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -577,9 +577,12 @@ describe('CustomDatePicker branches', () => {
       render(<CustomDatePicker value="2026-03-15" onChange={onChange} />);
       openCalendar();
       const dialog = screen.getByRole('dialog');
-      // vw < 360 centres the 268px popup; the popup flips above the trigger
+      // vw < 360 centres the 268px popup; the popup flips above the trigger,
+      // anchored from the trigger's own top edge via `bottom` (not a `top`
+      // computed by subtracting a guessed popup height — see FE-W5DP-024).
       expect(dialog.style.left).toBe('26px');
-      expect(dialog.style.top).toBe('336px');
+      expect(dialog.style.top).toBe('');
+      expect(dialog.style.bottom).toBe('72px');
     } finally {
       Element.prototype.getBoundingClientRect = originalRect;
       Object.defineProperty(window, 'innerWidth', { value: originalWidth, configurable: true });
@@ -602,6 +605,54 @@ describe('CustomDatePicker branches', () => {
     } finally {
       Element.prototype.getBoundingClientRect = originalRect;
       Object.defineProperty(window, 'visualViewport', { value: undefined, configurable: true });
+    }
+  });
+
+  it('FE-W5DP-024: a flipped popup stays flush against its trigger instead of a fixed guessed offset', () => {
+    // A settle-up-style form: the trigger sits low enough that the popup can't
+    // fit below it, but there is plenty of room above — a shorter gap than the
+    // worst-case guess would previously leave the popup floating over unrelated
+    // fields higher up the form instead of right above its own trigger.
+    const originalRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      return { left: 440, top: 529, right: 803, bottom: 566, width: 363, height: 37, x: 440, y: 529, toJSON: () => ({}) } as DOMRect;
+    };
+
+    try {
+      render(<CustomDatePicker value="2026-03-15" onChange={onChange} />);
+      openCalendar();
+      const dialog = screen.getByRole('dialog');
+      // jsdom's default innerHeight (768) leaves 768-566=202px below the
+      // trigger — short of the flip threshold — so it flips, anchored to the
+      // trigger's own top edge (768-529+4=243), not a `top` derived from
+      // subtracting a guessed popup height.
+      expect(dialog.style.top).toBe('');
+      expect(dialog.style.bottom).toBe('243px');
+    } finally {
+      Element.prototype.getBoundingClientRect = originalRect;
+    }
+  });
+
+  it('FE-W5DP-025: a popup with no room on either side keeps its top edge inside the viewport', () => {
+    // A phone in landscape: 375px tall with the trigger mid-screen. The 360px
+    // popup fits neither below nor above, and flipping regardless would put
+    // its top edge 200px off-screen with no way to scroll to the month header.
+    const originalRect = Element.prototype.getBoundingClientRect;
+    const originalHeight = window.innerHeight;
+    Element.prototype.getBoundingClientRect = function () {
+      return { left: 20, top: 150, right: 220, bottom: 190, width: 200, height: 40, x: 20, y: 150, toJSON: () => ({}) } as DOMRect;
+    };
+    Object.defineProperty(window, 'innerHeight', { value: 375, configurable: true });
+
+    try {
+      render(<CustomDatePicker value="2026-03-15" onChange={onChange} />);
+      openCalendar();
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.bottom).toBe('');
+      expect(dialog.style.top).toBe('8px');
+    } finally {
+      Element.prototype.getBoundingClientRect = originalRect;
+      Object.defineProperty(window, 'innerHeight', { value: originalHeight, configurable: true });
     }
   });
 
@@ -692,7 +743,7 @@ describe('CustomDatePicker branches', () => {
 
     fireEvent.click(keyboard);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('DD.MM.YYYY')).toHaveProperty('value', '03/15/2026');
+    expect(screen.getByRole('textbox', { name: 'Enter date manually' })).toHaveProperty('value', '03/15/2026');
   });
 });
 
@@ -734,5 +785,116 @@ describe('CustomDateTimePicker branches', () => {
     fireEvent.click(screen.getByText('✕'));
 
     expect(onChange).toHaveBeenCalledWith('2026-03-15');
+  });
+});
+
+// ─── Week start (#2029) ───────────────────────────────────────────────────────
+
+describe('CustomDatePicker week start (#2029)', () => {
+  const onChange = vi.fn();
+  const original = useSettingsStore.getState().settings;
+  afterEach(() => useSettingsStore.setState({ settings: original }));
+
+  /** The weekday header row and how many blanks precede the 1st, read off the open calendar. */
+  async function openMarch2026(weekStart?: 'monday' | 'sunday' | 'saturday') {
+    useSettingsStore.setState({ settings: { ...original, week_start: weekStart } });
+    const user = userEvent.setup();
+    render(<CustomDatePicker value="2026-03-15" onChange={onChange} />);
+    await user.click(screen.getAllByRole('button')[0]);
+    const day1 = screen.getAllByRole('button').find((b) => b.textContent?.trim() === '1')!;
+    const grid = day1.parentElement!;
+    return { header: grid.previousElementSibling!.textContent, blanks: Array.from(grid.children).indexOf(day1) };
+  }
+
+  it('FE-COMP-DATEPICKER-033: rows start on Monday when nothing is set', async () => {
+    // 1 March 2026 is a Sunday: the last column of a Monday-first row.
+    expect(await openMarch2026(undefined)).toEqual({ header: 'MTWTFSS', blanks: 6 });
+  });
+
+  it('FE-COMP-DATEPICKER-034: rows start on the day the user picked', async () => {
+    expect(await openMarch2026('sunday')).toEqual({ header: 'SMTWTFS', blanks: 0 });
+  });
+
+  it('FE-COMP-DATEPICKER-035: a Saturday start puts the Sunday 1st in the second column', async () => {
+    expect(await openMarch2026('saturday')).toEqual({ header: 'SSMTWTF', blanks: 1 });
+  });
+});
+
+// ─── Date format (#2971) ──────────────────────────────────────────────────────
+
+describe('CustomDatePicker date format (#2971)', () => {
+  const onChange = vi.fn();
+  const original = useSettingsStore.getState().settings;
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => useSettingsStore.setState({ settings: original }));
+
+  const seed = (dateFormat: 'auto' | 'YYYY-MM-DD' | 'DD.MM.YYYY') =>
+    useSettingsStore.setState({ settings: { ...original, date_format: dateFormat } });
+
+  function typeDate(value: string) {
+    fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  }
+
+  it('FE-COMP-DATEPICKER-036: the trigger writes the date in the chosen format', () => {
+    seed('YYYY-MM-DD');
+    render(<CustomDatePicker value="2026-11-03" onChange={onChange} />);
+    expect(screen.getAllByRole('button')[0].textContent).toContain('2026-11-03');
+  });
+
+  it('FE-COMP-DATEPICKER-037: compact mode writes the chosen format with the whole year', () => {
+    seed('DD.MM.YYYY');
+    render(<CustomDatePicker value="2026-11-03" onChange={onChange} compact />);
+    expect(screen.getByText('03.11.2026')).toBeInTheDocument();
+  });
+
+  it('FE-COMP-DATEPICKER-038: the manual entry is hinted and pre-filled in the chosen format', () => {
+    seed('YYYY-MM-DD');
+    render(<CustomDatePicker value="2026-11-03" onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
+    expect(input).toHaveProperty('placeholder', 'YYYY-MM-DD');
+    expect(input).toHaveProperty('value', '2026-11-03');
+  });
+
+  it('FE-COMP-DATEPICKER-039: a typed date is read in the order of the chosen format', () => {
+    seed('YYYY-MM-DD');
+    render(<CustomDatePicker value="" onChange={onChange} />);
+    typeDate('2026/11/04');
+    expect(onChange).toHaveBeenCalledWith('2026-11-04');
+  });
+
+  it('FE-COMP-DATEPICKER-040: day first under DD.MM.YYYY, even with an English interface', () => {
+    seed('DD.MM.YYYY');
+    render(<CustomDatePicker value="" onChange={onChange} />);
+    typeDate('04.11.2026');
+    expect(onChange).toHaveBeenCalledWith('2026-11-04');
+  });
+
+  it('FE-COMP-DATEPICKER-043: a four-digit year written first is read as year, month, day in any format', () => {
+    seed('DD.MM.YYYY');
+    render(<CustomDatePicker value="" onChange={onChange} />);
+    typeDate('2026/11/04');
+    expect(onChange).toHaveBeenCalledWith('2026-11-04');
+  });
+
+  it('FE-COMP-DATEPICKER-041: auto keeps the short month of the language on the trigger', () => {
+    seed('auto');
+    render(<CustomDatePicker value="2026-11-03" onChange={onChange} />);
+    expect(screen.getAllByRole('button')[0].textContent).toMatch(/Nov/);
+  });
+
+  it('FE-COMP-DATEPICKER-042: auto keeps the language for typing: month first in English', () => {
+    seed('auto');
+    render(<CustomDatePicker value="" onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /enter date manually/i }));
+    const input = screen.getByRole('textbox', { name: 'Enter date manually' });
+    expect(input).toHaveProperty('placeholder', 'MM/DD/YYYY');
+    fireEvent.change(input, { target: { value: '04.11.2026' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('2026-04-11');
   });
 });

@@ -1,10 +1,14 @@
 import { createPortal } from 'react-dom'
+import { useSharedImportStore } from '../../native/sharedFiles'
 import { useState, useRef, useEffect } from 'react'
 import { Upload, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { reservationsApi, healthApi } from '../../api/client'
+import { llmRepo } from '../../repo/llmRepo'
+import { LLM_PHOTO_EXTENSIONS } from '@trek/shared'
 import { useBackgroundTasksStore } from '../../store/backgroundTasksStore'
 import { saveImportFiles } from '../../db/offlineDb'
+import { isEffectivelyOffline } from '../../sync/networkMode'
 
 interface BookingImportModalProps {
   isOpen: boolean
@@ -32,10 +36,19 @@ export default function BookingImportModal({ isOpen, onClose, tripId, kind }: Bo
   const mouseDownTarget = useRef<EventTarget | null>(null)
 
   const [files, setFiles] = useState<File[]>([])
+  // A booking document shared to TREK lands here already chosen.
+  useEffect(() => {
+    if (!isOpen) return
+    const shared = useSharedImportStore.getState().file
+    if (shared) setFiles([useSharedImportStore.getState().take() ?? shared])
+  }, [isOpen])
   const [isDragOver, setIsDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [aiParsing, setAiParsing] = useState(false)
+  const [readsPhotos, setReadsPhotos] = useState(false)
+  // Only a model that reads images can do anything with a photo, so photos are offered only then.
+  const acceptedExts: readonly string[] = readsPhotos ? [...ACCEPTED_EXTS, ...LLM_PHOTO_EXTENSIONS] : ACCEPTED_EXTS
 
   const reset = () => {
     setFiles([])
@@ -53,13 +66,14 @@ export default function BookingImportModal({ isOpen, onClose, tripId, kind }: Bo
   useEffect(() => {
     if (!isOpen) return
     healthApi.features().then((f) => setAiParsing(!!f.aiParsing)).catch(() => setAiParsing(false))
+    llmRepo.readsPhotos().then(setReadsPhotos).catch(() => setReadsPhotos(false))
   }, [isOpen])
 
   const handleClose = () => { reset(); onClose() }
 
   const validateFile = (f: File): string | null => {
     const ext = ('.' + f.name.toLowerCase().split('.').pop()) as string
-    if (!ACCEPTED_EXTS.includes(ext)) return t('reservations.import.unsupportedFormat')
+    if (!acceptedExts.includes(ext)) return t('reservations.import.unsupportedFormat')
     if (f.size > MAX_FILE_BYTES) return t('reservations.import.fileTooLarge', { name: f.name })
     return null
   }
@@ -95,6 +109,8 @@ export default function BookingImportModal({ isOpen, onClose, tripId, kind }: Bo
   // Start the parse in the background and close — the widget takes it from here.
   const handleParse = async () => {
     if (files.length === 0 || loading) return
+    // Reading a booking runs on the server: offline there is nothing to send it to.
+    if (isEffectivelyOffline()) { setError(t('reservations.needsConnection')); return }
     setLoading(true)
     setError('')
     try {
@@ -143,12 +159,13 @@ export default function BookingImportModal({ isOpen, onClose, tripId, kind }: Bo
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           <div style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-faint)', marginBottom: 14, lineHeight: 1.45 }}>
             {t('reservations.import.acceptedFormats')}
+            {readsPhotos && <> {t('reservations.import.acceptedPhotos')}</>}
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPTED_EXTS.join(',')}
+            accept={acceptedExts.join(',')}
             multiple
             style={{ display: 'none' }}
             onChange={handleInputChange}

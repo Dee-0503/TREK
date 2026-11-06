@@ -1,15 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 /*
- * These cases are about the layouts written in autoLayout.ts, which are what an
- * entry falls back on when no hand-drawn template suits it. With the real
- * templates in place they would be testing whichever spread somebody last drew
- * in Studio — so the set is empty here on purpose.
+ * These cases are about the layouts written as code in the shared auto layout
+ * (shared/src/book/auto), which are what an entry falls back on when no
+ * hand-drawn template suits it. With the real templates in place they would be
+ * testing whichever spread somebody last drew in Studio, so the inputs pass an
+ * empty template set on purpose.
  */
-vi.mock('../../../src/components/Studio/bookTemplates.data', () => ({ SPREAD_TEMPLATES: [] }))
-import type { BookPageSetup, BookSpread, JourneyStats } from '@trek/shared'
-import { buildBook, emptyBook, type AutoEntry, type AutoInput } from '../../../src/components/Studio/autoLayout'
-import { bookPageSetupSchema } from '@trek/shared'
+import type { AutoEntry, AutoInput, BookPageSetup, BookSpread, JourneyStats } from '@trek/shared'
+import { bookPageSetupSchema, buildBook, emptyBook } from '@trek/shared'
 
 /**
  * The auto layout, once it knows what the journey adds up to (#1973).
@@ -62,6 +61,7 @@ function build(over: Partial<AutoInput> = {}) {
     entries: [entry()],
     page,
     stats: stats(),
+    templates: [],
     ...over,
   })
 }
@@ -83,10 +83,11 @@ describe('the summary spread', () => {
     expect(has(doc, 'stats')).toBe(true)
   })
 
-  it('comes straight after the cover, before the entries', () => {
+  it('comes straight after the cover and the first page, before the entries', () => {
     const doc = build()
     expect(doc.spreads[0].role).toBe('cover')
-    expect(kinds(doc.spreads[1])).toContain('map')
+    expect(doc.spreads[1].role).toBe('first')
+    expect(kinds(doc.spreads[2])).toContain('map')
   })
 
   it('carries the journey figures rather than placeholders', () => {
@@ -125,8 +126,8 @@ describe('the summary spread', () => {
         points: [], distance: 0, days: 0, steps: 0, photos: 0, places: 0, furthest: 0, countries: [],
       }),
     })
-    // Cover, the one entry, back cover — no summary, no country page.
-    expect(doc.spreads.map(sp => sp.role)).toEqual(['cover', 'inner', 'back'])
+    // Cover, first page, the one entry, last page, back cover — no summary, no country page.
+    expect(doc.spreads.map(sp => sp.role)).toEqual(['cover', 'first', 'inner', 'last', 'back'])
     expect(has(doc, 'map')).toBe(false)
     expect(has(doc, 'stats')).toBe(false)
   })
@@ -136,8 +137,8 @@ describe('the summary spread', () => {
     expect(has(doc, 'map')).toBe(false)
     expect(has(doc, 'stats')).toBe(false)
     expect(has(doc, 'countries')).toBe(false)
-    // And the book still builds: cover, the entry, back cover.
-    expect(doc.spreads).toHaveLength(3)
+    // And the book still builds: cover, first page, the entry, last page, back cover.
+    expect(doc.spreads).toHaveLength(5)
   })
 })
 
@@ -175,7 +176,7 @@ describe('the country page', () => {
   it('sits between the summary and the entries', () => {
     const doc = build({ stats: twoCountries })
     const order = doc.spreads.map(sp => kinds(sp).find(k => k === 'map' || k === 'countries') ?? sp.role)
-    expect(order.slice(0, 3)).toEqual(['cover', 'map', 'countries'])
+    expect(order.slice(0, 4)).toEqual(['cover', 'first', 'map', 'countries'])
   })
 })
 
@@ -267,9 +268,11 @@ describe('the entry spreads', () => {
 })
 
 describe('the document as a whole', () => {
-  it('stays within the schema cap on spreads', () => {
+  it('lays out a long journey whole, its last page and back cover after the entries', () => {
     const many = Array.from({ length: 200 }, (_, i) => entry({ id: i + 1 }))
-    expect(build({ entries: many }).spreads.length).toBeLessThanOrEqual(150)
+    const doc = build({ entries: many })
+    expect(doc.spreads.length).toBeGreaterThan(150)
+    expect(doc.spreads.slice(-2).map(sp => sp.role)).toEqual(['last', 'back'])
   })
 
   it('gives every spread and every element an id of its own', () => {
@@ -311,13 +314,38 @@ describe('an empty book', () => {
     entries: [entry()],
     page,
     stats: stats(),
+    templates: [],
   }
 
-  it('has a cover, a page and a back cover, and nothing on any of them', () => {
+  it('has a cover, a first page, a spread, a last page and a back cover, and nothing on any of them', () => {
     const doc = emptyBook(input)
-    expect(doc.spreads.map(s => s.role)).toEqual(['cover', 'inner', 'back'])
+    expect(doc.spreads.map(s => s.role)).toEqual(['cover', 'first', 'inner', 'last', 'back'])
     expect(doc.spreads.every(s => s.elements.length === 0)).toBe(true)
     expect(doc.spreads.every(s => s.background === null)).toBe(true)
+  })
+
+  /*
+   * A bound book opens onto page 1, the single right-hand page behind the
+   * cover (#2317). The default setup counts from 2, which was right while the
+   * book opened straight onto a spread; a book laid down with a first page
+   * counts from that page instead, whatever setup it was handed.
+   */
+  it('numbers its first page 1, whatever the setup said', () => {
+    expect(input.page.pageNumbers.startAt).toBe(2)
+    expect(emptyBook(input).page.pageNumbers.startAt).toBe(1)
+    expect(buildBook(input).page.pageNumbers.startAt).toBe(1)
+    // Nothing else of the setup moves.
+    expect(emptyBook(input).page.pageNumbers.position).toBe(input.page.pageNumbers.position)
+  })
+
+  it('lays the first and last pages down empty in a laid-out book too', () => {
+    const doc = buildBook(input)
+    const first = doc.spreads.find(s => s.role === 'first')!
+    const last = doc.spreads.find(s => s.role === 'last')!
+    expect(doc.spreads.indexOf(first)).toBe(1)
+    expect(doc.spreads.indexOf(last)).toBe(doc.spreads.length - 2)
+    expect(first.elements).toEqual([])
+    expect(last.elements).toEqual([])
   })
 
   it('carries the journey title and the page setup it was given', () => {

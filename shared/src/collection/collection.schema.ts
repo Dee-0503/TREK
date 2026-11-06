@@ -1,4 +1,12 @@
-import { placeCategorySchema, placeImageUrlSchema, placeRatingVoteSchema, placeWebsiteSchema } from '../place/place.schema';
+import { idSchema } from '../common/primitives.schema';
+import {
+  placeCategorySchema,
+  placeImageUrlSchema,
+  placeRatingVoteSchema,
+  placeWebsiteSchema,
+  placeProviderSchema,
+  validatePlaceIdentityPair,
+} from '../place/place.schema';
 import { tagSchema } from '../tag/tag.schema';
 
 import { z } from 'zod';
@@ -60,7 +68,7 @@ export const collectionPlaceSchema = z.object({
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
-  provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).nullable().optional(),
+  provider: placeProviderSchema.nullable().optional(),
   provider_place_id: z.string().nullable().optional(),
   website: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
@@ -142,32 +150,34 @@ export const collectionReorderRequestSchema = z.object({
 export type CollectionReorderRequest = z.infer<typeof collectionReorderRequestSchema>;
 
 /** Save a place into a list from a raw maps/manual payload (or carrying provenance). */
-export const collectionSavePlaceRequestSchema = z.object({
-  collection_id: z.number(),
-  source_place_id: z.number().nullable().optional(),
-  source_trip_id: z.number().nullable().optional(),
-  name: z.string().min(1),
-  description: z.string().nullable().optional(),
-  lat: z.number().nullable().optional(),
-  lng: z.number().nullable().optional(),
-  address: z.string().nullable().optional(),
-  category_id: z.number().nullable().optional(),
-  price: z.number().nullable().optional(),
-  currency: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
-  image_url: placeImageUrlSchema.nullable().optional(),
-  google_place_id: z.string().nullable().optional(),
-  google_ftid: z.string().nullable().optional(),
-  osm_id: z.string().nullable().optional(),
-  provider: z.enum(['google', 'amap', 'osm', 'openstreetmap']).nullable().optional(),
-  provider_place_id: z.string().nullable().optional(),
-  website: placeWebsiteSchema.nullable().optional(),
-  phone: z.string().nullable().optional(),
-  status: collectionStatusSchema.optional(),
-  links: collectionLinksSchema.optional(),
-  tag_ids: z.array(z.number()).optional(),
-  force: z.boolean().optional(), // "add anyway" over a dedup match
-});
+export const collectionSavePlaceRequestSchema = z
+  .object({
+    collection_id: z.number(),
+    source_place_id: z.number().nullable().optional(),
+    source_trip_id: z.number().nullable().optional(),
+    name: z.string().min(1),
+    description: z.string().nullable().optional(),
+    lat: z.number().nullable().optional(),
+    lng: z.number().nullable().optional(),
+    address: z.string().nullable().optional(),
+    category_id: z.number().nullable().optional(),
+    price: z.number().nullable().optional(),
+    currency: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+    image_url: placeImageUrlSchema.nullable().optional(),
+    google_place_id: z.string().nullable().optional(),
+    google_ftid: z.string().nullable().optional(),
+    osm_id: z.string().nullable().optional(),
+    provider: placeProviderSchema.nullable().optional(),
+    provider_place_id: z.string().trim().min(1).nullable().optional(),
+    website: placeWebsiteSchema.nullable().optional(),
+    phone: z.string().nullable().optional(),
+    status: collectionStatusSchema.optional(),
+    links: collectionLinksSchema.optional(),
+    tag_ids: z.array(z.number()).optional(),
+    force: z.boolean().optional(), // "add anyway" over a dedup match
+  })
+  .superRefine((value, ctx) => validatePlaceIdentityPair(value, ctx, false));
 export type CollectionSavePlaceRequest = z.infer<typeof collectionSavePlaceRequestSchema>;
 
 /** DEDICATED DTO for POST /places/from-trip — the server reads the place, so no place payload. */
@@ -188,30 +198,34 @@ export const collectionSaveFromTripManyRequestSchema = z.object({
 });
 export type CollectionSaveFromTripManyRequest = z.infer<typeof collectionSaveFromTripManyRequestSchema>;
 
-export const collectionPlaceUpdateRequestSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
-  // Editable coordinates so a place added by GPS can be corrected later (#1435).
-  lat: z.number().nullable().optional(),
-  lng: z.number().nullable().optional(),
-  // Free-text address, correctable after saving (#1870): the add dialog always
-  // offered it, the edit form did not. Deliberately uncapped, exactly like
-  // collectionSavePlaceRequestSchema.address, so save and update stay in step.
-  address: z.string().nullable().optional(),
-  // .removeDefault() strips the inner .default('idea') so an ABSENT status parses to
-  // undefined (left unchanged) instead of being injected as 'idea' (see #1437). The
-  // .catch('idea') guard against invalid values is preserved.
-  status: collectionStatusSchema.removeDefault().optional(),
-  category_id: z.number().nullable().optional(),
-  collection_id: z.number().optional(), // move to another list
-  links: collectionLinksSchema.optional(),
-  tag_ids: z.array(z.number()).optional(),
-  // Replace the place's per-collection label assignments (omit to leave unchanged).
-  label_ids: z.array(z.number()).optional(),
-  // Custom thumbnail (#1136): null clears it (falls back to the auto-fetched photo).
-  image_url: placeImageUrlSchema.nullable().optional(),
-});
+export const collectionPlaceUpdateRequestSchema = z
+  .object({
+    provider: placeProviderSchema.nullable().optional(),
+    provider_place_id: z.string().trim().min(1).nullable().optional(),
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+    // Editable coordinates so a place added by GPS can be corrected later (#1435).
+    lat: z.number().nullable().optional(),
+    lng: z.number().nullable().optional(),
+    // Free-text address, correctable after saving (#1870): the add dialog always
+    // offered it, the edit form did not. Deliberately uncapped, exactly like
+    // collectionSavePlaceRequestSchema.address, so save and update stay in step.
+    address: z.string().nullable().optional(),
+    // .removeDefault() strips the inner .default('idea') so an ABSENT status parses to
+    // undefined (left unchanged) instead of being injected as 'idea' (see #1437). The
+    // .catch('idea') guard against invalid values is preserved.
+    status: collectionStatusSchema.removeDefault().optional(),
+    category_id: z.number().nullable().optional(),
+    collection_id: z.number().optional(), // move to another list
+    links: collectionLinksSchema.optional(),
+    tag_ids: z.array(z.number()).optional(),
+    // Replace the place's per-collection label assignments (omit to leave unchanged).
+    label_ids: z.array(z.number()).optional(),
+    // Custom thumbnail (#1136): null clears it (falls back to the auto-fetched photo).
+    image_url: placeImageUrlSchema.nullable().optional(),
+  })
+  .superRefine((value, ctx) => validatePlaceIdentityPair(value, ctx, true));
 export type CollectionPlaceUpdateRequest = z.infer<typeof collectionPlaceUpdateRequestSchema>;
 
 export const collectionSetStatusRequestSchema = z.object({ status: collectionStatusSchema });
@@ -256,6 +270,21 @@ export const collectionCopyToTripRequestSchema = z.object({
   force: z.boolean().optional(),
 });
 export type CollectionCopyToTripRequest = z.infer<typeof collectionCopyToTripRequestSchema>;
+
+/** What a copy into a trip did: how many went in, the ones the trip had, and each new trip place by its source. */
+export const collectionCopyToTripResponseSchema = z.object({
+  copied: z.number(),
+  skipped: z.array(z.object({ id: z.number(), name: z.string() })),
+  created: z.array(z.object({ id: z.number(), source_id: z.number() })),
+});
+export type CollectionCopyToTripResponse = z.infer<typeof collectionCopyToTripResponseSchema>;
+
+/** Saved places and labels asked for by their ids, across every list the caller can see (get_collection_items). */
+export const collectionItemsRequestSchema = z.object({
+  placeIds: z.array(idSchema).max(50).optional(),
+  labelIds: z.array(idSchema).max(20).optional(),
+});
+export type CollectionItemsRequest = z.infer<typeof collectionItemsRequestSchema>;
 
 // Fusion invitations. user_id is NUMERIC ONLY — the UI always sends an id from availableUsers.
 export const collectionInviteRequestSchema = z.object({
@@ -336,6 +365,28 @@ export const collectionDetailResponseSchema = z.object({
 });
 export type CollectionDetailResponse = z.infer<typeof collectionDetailResponseSchema>;
 
+/**
+ * The asked-for places and labels with the lists they sit in: each list's
+ * size, colour, labels and people (names and roles, no addresses), and
+ * whether the caller may delete places from it (its owner or an admin). An id
+ * the caller cannot see is left out, never refused.
+ */
+const collectionItemsListSchema = collectionSchema
+  .pick({ id: true, name: true, color: true, place_count: true, is_owner: true, labels: true })
+  .extend({
+    can_delete: z.boolean(),
+    members: z.array(
+      collectionMemberSchema.pick({ user_id: true, username: true, status: true, role: true, is_owner: true }),
+    ),
+  });
+
+export const collectionItemsResponseSchema = z.object({
+  lists: z.array(collectionItemsListSchema),
+  places: z.array(collectionPlaceSchema),
+  labels: z.array(collectionLabelSchema),
+});
+export type CollectionItemsResponse = z.infer<typeof collectionItemsResponseSchema>;
+
 /** Dedup outcome envelope reused by save + copy (matches placeService dedup UX). */
 export const collectionSaveResultSchema = z.object({
   place: collectionPlaceSchema.optional(),
@@ -347,15 +398,19 @@ export type CollectionSaveResult = z.infer<typeof collectionSaveResultSchema>;
 /** Library-wide "is this place already saved anywhere I can see?" lookup (inspector indicator). */
 export const collectionMembershipSchema = z.object({
   saved: z.boolean(),
-  lists: z.array(z.object({
-    collection_id: z.number(),
-    name: z.string(),
-    place_id: z.number(),
-    /** Per-list status, so the picker can show and change it without a second round trip (#1469). */
-    status: collectionStatusSchema,
-    /** False for a list the viewer may read but not edit — its status pill stays read-only. */
-    can_edit: z.boolean().default(true),
-  })),
+  lists: z.array(
+    z.object({
+      collection_id: z.number(),
+      name: z.string(),
+      /** The list's colour, for its dot; older servers leave it out. */
+      color: z.string().nullable().optional(),
+      place_id: z.number(),
+      /** Per-list status, so the picker can show and change it without a second round trip (#1469). */
+      status: collectionStatusSchema,
+      /** False for a list the viewer may read but not edit — its status pill stays read-only. */
+      can_edit: z.boolean().default(true),
+    }),
+  ),
 });
 export type CollectionMembership = z.infer<typeof collectionMembershipSchema>;
 

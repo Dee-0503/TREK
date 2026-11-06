@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { getAppUrl, readEnv } from '../../app-config';
+import { getAppUrl } from '../../app-config';
+import { transitConfig } from '../app-config/tokens';
 import { buildUserAgent } from '../maps/maps.helpers';
+import { GoogleTransitProvider } from './google-transit.provider';
 import {
   deriveTransitStats,
   SCHEDULED_TRANSIT_MODES,
@@ -10,6 +11,9 @@ import {
   type TransitLegStop,
   type TransitPlace,
 } from './transit.helpers';
+import { Inject, Injectable } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
+import type { TransitProvider } from '@trek/shared';
 
 /**
  * Public transit routing (#1065) backed by Transitous (api.transitous.org), the
@@ -17,20 +21,32 @@ import {
  * TREK's no-paid-providers rule. Self-hosters can point TRANSIT_API_URL at their
  * own MOTIS instance instead.
  *
+ * Since #1699 an admin can point the two routes at Google instead, for the
+ * regions Transitous has no feed for. This class stays the entry point and the
+ * validator either way: the request is checked here, then dispatched, so both
+ * backends are held to the same coordinate/mode/transfer contract and answer in
+ * the same compact shape. Transitous remains the default. Empty plans try the
+ * other backend when available; Google fallback requires an admin-set key.
+ *
+ * Both responses name the backend that answered. Both fallbacks (no Google key,
+ * and the empty-plan retry) are silent by design, so without this an empty
+ * result is indistinguishable between "this provider has no data here" and
+ * "the provider you picked never ran" — which is
+ * exactly the guessing game a Paris search ran into when the Île-de-France feed
+ * ended before the trip date.
+ *
  * This service is a thin, validating proxy: the browser never talks to
  * Transitous directly (their usage policy wants an identifying User-Agent with
  * contact info, which we send once from the server), and responses are mapped
  * to a compact shape so the client isn't coupled to the MOTIS schema.
  *
- * Folded 1:1 from the legacy services/transitService.ts. The base URL, the
- * lazy User-Agent memo and the response cache stay module-scoped on purpose
- * (the permissions/exchange-rates precedent): the DI singleton and any future
- * non-Nest caller share one cache, and the base URL keeps its frozen-at-import
- * legacy timing.
+ * Folded 1:1 from the legacy services/transitService.ts. The lazy User-Agent
+ * memo and the response cache stay module-scoped on purpose (the
+ * permissions/exchange-rates precedent): the DI singleton and any future
+ * non-Nest caller share one cache. The base URL (TRANSIT_API_URL) is
+ * boot-stable and comes from the transitConfig token, frozen per built app.
  */
 
-// Frozen at import on purpose (legacy timing).
-const TRANSIT_API_BASE = readEnv().integrations.transitApiBase;
 let userAgent: string | null = null;
 
 function getUserAgent(): string {
@@ -80,8 +96,8 @@ function isCoord(v: string): boolean {
 // megabyte; anything bigger is a misbehaving provider, not data we want to map.
 const MAX_RESPONSE_BYTES = 5_000_000;
 
-async function upstream(path: string, params: URLSearchParams): Promise<unknown> {
-  const url = `${TRANSIT_API_BASE}${path}?${params}`;
+async function upstream(base: string, path: string, params: URLSearchParams): Promise<unknown> {
+  const url = `${base}${path}?${params}`;
   const res = await fetch(url, {
     headers: { 'User-Agent': getUserAgent(), Accept: 'application/json' },
     signal: AbortSignal.timeout(8000),
@@ -139,14 +155,45 @@ function mapStop(p: MotisPlaceRaw | undefined, kind: 'departure' | 'arrival'): T
 
 @Injectable()
 export class TransitService {
-  /** Station/place search for the from/to pickers. `near` biases results. */
-  async geocode(query: string, language?: string, near?: string): Promise<{ results: TransitPlace[] }> {
+  constructor(
+    private readonly google: GoogleTransitProvider,
+    @Inject(transitConfig.KEY) private readonly transitEnv: ConfigType<typeof transitConfig>,
+  ) {}
+
+  /** Configured primary for this user; an empty plan may be answered by the other provider. */
+  async activeProvider(userId = 0): Promise<TransitProvider> {
+    return (await this.google.isActive(userId)) ? 'google' : 'transitous';
+  }
+
+  /**
+   * Station/place search for the from/to pickers. `near` biases results.
+   *
+   * `userId` resolves the Google key (operator env → instance → own row) and is
+   * only read when Google is the active backend; the Transitous path is keyless
+   * and identical for every caller.
+   */
+  async geocode(
+    query: string,
+    language?: string,
+    near?: string,
+    userId = 0,
+  ): Promise<{ results: TransitPlace[]; provider: TransitProvider }> {
     const text = (query || '').trim();
-    if (text.length < 2) return { results: [] };
+    // Answered before either backend is consulted, so it reports the one that
+    // WOULD have been asked rather than claiming nobody was.
+    const provider = await this.activeProvider(userId);
+    if (text.length < 2) return { results: [], provider };
     if (text.length > 200) {
       const e = new Error('Query too long') as Error & { status: number };
       e.status = 400;
       throw e;
+    }
+
+    if (provider === 'google') {
+      return {
+        ...(await this.google.geocode(text, language, near && isCoord(near) ? near : undefined, userId)),
+        provider,
+      };
     }
 
     const params = new URLSearchParams({ text });
@@ -155,9 +202,9 @@ export class TransitService {
 
     const key = `geo:${params.toString()}`;
     const cached = cacheGet(key);
-    if (cached) return cached as { results: TransitPlace[] };
+    if (cached) return { ...(cached as { results: TransitPlace[] }), provider };
 
-    const raw = (await upstream('/api/v1/geocode', params)) as Array<{
+    const raw = (await upstream(this.transitEnv.apiBase, '/api/v1/geocode', params)) as Array<{
       name?: string;
       lat?: number;
       lon?: number;
@@ -173,11 +220,21 @@ export class TransitService {
 
     const data = { results };
     cacheSet(key, data);
-    return data;
+    return { ...data, provider };
   }
 
-  /** Route search between two coordinates. Returns compact itineraries for the picker. */
-  async plan(q: PlanQuery): Promise<{ itineraries: TransitItinerary[] }> {
+  /**
+   * Route search between two coordinates. Returns compact itineraries for the picker.
+   *
+   * @txIndependent the only writes are Google's daily call counter, one after each
+   * upstream request; each count stands on its own and cannot share a transaction
+   * with the HTTP call it records.
+   */
+  async plan(
+    q: PlanQuery,
+    language?: string,
+    userId = 0,
+  ): Promise<{ itineraries: TransitItinerary[]; provider: TransitProvider }> {
     const bad = (msg: string) => {
       const e = new Error(msg) as Error & { status: number };
       e.status = 400;
@@ -212,11 +269,40 @@ export class TransitService {
     // "direct" connection is what the existing OSRM footpath routing is for.
     params.set('directModes', 'WALK');
 
+    // After validation on purpose: whichever backend answers, the caller is held
+    // to the same coordinate/mode/transfer contract and gets the same 400s.
+    const googlePrimary = (await this.activeProvider(userId)) === 'google';
+    const primary = googlePrimary
+      ? { ...(await this.google.plan(q, language, userId)), provider: 'google' as const }
+      : await this.planTransitous(params);
+    if (primary.itineraries.length > 0) return primary;
+
+    // An empty successful response alone triggers fallback. Primary errors keep
+    // propagating; a secondary outage must not replace a valid empty response.
+    try {
+      if (googlePrimary) {
+        const secondary = await this.planTransitous(params);
+        if (secondary.itineraries.length > 0) return secondary;
+      } else if (await this.google.isAvailableForFallback()) {
+        // Resolve again without a user id so a changed instance key can never
+        // cause the fallback to bill the caller's personal key.
+        const secondary = await this.google.plan(q, language, 0);
+        if (secondary.itineraries.length > 0) return { ...secondary, provider: 'google' };
+      }
+    } catch {
+      // Keep the primary's empty result and its provider attribution.
+    }
+    return primary;
+  }
+
+  private async planTransitous(
+    params: URLSearchParams,
+  ): Promise<{ itineraries: TransitItinerary[]; provider: TransitProvider }> {
     const key = `plan:${params.toString()}`;
     const cached = cacheGet(key);
-    if (cached) return cached as { itineraries: TransitItinerary[] };
+    if (cached) return { ...(cached as { itineraries: TransitItinerary[] }), provider: 'transitous' };
 
-    const raw = (await upstream('/api/v6/plan', params)) as {
+    const raw = (await upstream(this.transitEnv.apiBase, '/api/v6/plan', params)) as {
       itineraries?: Array<{
         duration?: number;
         startTime?: string;
@@ -276,6 +362,6 @@ export class TransitService {
 
     const data = { itineraries };
     cacheSet(key, data);
-    return data;
+    return { ...data, provider: 'transitous' };
   }
 }

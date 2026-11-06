@@ -1,6 +1,6 @@
 import type { BookDocument } from '@trek/shared'
 import { SpreadView } from './SpreadView'
-import { MARK_LENGTH, MARK_WEIGHT, sheetBox, sheetsFor, type Sheet, type SheetMode } from './bookSheets'
+import { MARK_LENGTH, MARK_WEIGHT, sheetBox, sheetsFor, type Sheet, type SheetMode, foliosOf } from './bookSheets'
 
 /**
  * The book laid out for a press.
@@ -91,7 +91,7 @@ function SheetView({
           height: `${sheet.height + box.bleed * 2}mm`,
           // The spread's own paper colour, carried out into the bleed. Without
           // it a coloured page would be cut with a white edge on three sides.
-          background: sheet.spread.background ?? '#ffffff', // theme-lint-disable — paper, not app chrome
+          background: (sheet.spread.backgroundPaint ? null : sheet.spread.background) ?? '#ffffff', // theme-lint-disable: paper, not app chrome
           overflow: 'hidden',
         }}
       >
@@ -107,7 +107,7 @@ function SheetView({
           <SpreadView
             spread={sheet.spread}
             page={doc.page}
-            spreadIndex={sheet.spreadIndex}
+            folios={foliosOf(doc.spreads, sheet.spreadIndex, doc.page.pageNumbers.startAt)}
             big
             print
           />

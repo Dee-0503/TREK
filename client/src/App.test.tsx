@@ -436,6 +436,28 @@ describe('App — on-mount effects', () => {
     await waitFor(() => expect(setManaged).toHaveBeenCalledWith(false))
   })
 
+  it('FE-COMP-APP-018c: app-config is asked again after a failed answer, so managed is not lost', async () => {
+    // A page opened while the server restarts got a 502 here and kept every
+    // default for the session, which brought back the operator's settings.
+    let calls = 0
+    server.use(
+      http.get('/api/auth/app-config', () => {
+        calls += 1
+        return calls === 1 ? new HttpResponse(null, { status: 502 }) : HttpResponse.json({ managed: true })
+      })
+    )
+    const setManaged = vi.fn()
+    useAuthStore.setState({
+      isLoading: false,
+      isAuthenticated: false,
+      loadUser: vi.fn().mockResolvedValue(undefined),
+      setManaged,
+    })
+    renderApp('/')
+    await waitFor(() => expect(setManaged).toHaveBeenCalledWith(true), { timeout: 4000 })
+    expect(calls).toBe(2)
+  })
+
   it('FE-COMP-APP-019: loadSettings is called once the user is authenticated', async () => {
     const loadSettings = vi.fn().mockResolvedValue(undefined)
     seedAuth({ isAuthenticated: true, user: buildUser() })
@@ -580,24 +602,44 @@ describe('Version cache-busting', () => {
     expect(reload).not.toHaveBeenCalled()
   })
 
-  it('FE-COMP-APP-027: the version marker is written even if the update path throws (#2228)', async () => {
-    // The marker used to be written after the purge and outside its try, so a
-    // throwing step left it unwritten and the whole destructive path repeated on
-    // every launch, for good.
+  it('FE-COMP-APP-027: an update path that throws is retried on the next launch, harmlessly (#2228)', async () => {
+    // A handover that never happened must not be recorded as done, or the
+    // device stays on the old build for good. The retry this buys has to be
+    // harmless: the purge that once repeated on every launch is gone, and a
+    // failure neither deletes anything nor reloads into the old worker's shell.
     localStorage.setItem('trek_app_version', '2.9.9')
+    const reload = vi.fn()
+    Object.defineProperty(window, 'location', { writable: true, value: { ...window.location, reload } })
+    const cachesDelete = vi.fn().mockResolvedValue(true)
+    const unregister = vi.fn().mockResolvedValue(true)
+    vi.stubGlobal('caches', { keys: vi.fn().mockResolvedValue(['workbox-precache-v2', 'map-tiles']), delete: cachesDelete })
+    const getRegistration = vi.fn().mockRejectedValue(new Error('no worker'))
     Object.defineProperty(navigator, 'serviceWorker', {
       configurable: true,
-      value: { getRegistration: vi.fn().mockRejectedValue(new Error('no worker')), addEventListener: vi.fn() },
+      value: { getRegistration, getRegistrations: vi.fn().mockResolvedValue([{ unregister }]), addEventListener: vi.fn() },
     })
 
     server.use(
       http.get('/api/auth/app-config', () =>
-        HttpResponse.json({ version: '2.9.10' })
+        HttpResponse.json({ version: '2.9.10', places_provider: 'google' })
       )
     )
     seedAuth()
+    const first = renderApp('/')
+    await waitFor(() => expect(getRegistration).toHaveBeenCalledTimes(1))
+    await act(async () => { await Promise.resolve() })
+    first.unmount()
+    expect(localStorage.getItem('trek_app_version')).toBe('2.9.9')
+
     renderApp('/')
-    await waitFor(() => expect(localStorage.getItem('trek_app_version')).toBe('2.9.10'))
+    await waitFor(() => expect(getRegistration).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+    expect(localStorage.getItem('trek_app_version')).toBe('2.9.9')
+    expect(reload).not.toHaveBeenCalled()
+    expect(cachesDelete).not.toHaveBeenCalled()
+    expect(unregister).not.toHaveBeenCalled()
+    // Without a reload the session carries on, so the rest of the config applies.
+    expect(useAuthStore.getState().placesProvider).toBe('google')
   })
 })
 

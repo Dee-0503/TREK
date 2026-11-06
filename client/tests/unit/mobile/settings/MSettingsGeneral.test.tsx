@@ -190,4 +190,65 @@ describe('MSettingsGeneral', () => {
 
     expect(updateSetting).toHaveBeenCalledWith('start_trip_tab', 'finanzplan');
   });
+
+  // #2456: the account-wide default behind every trip's booking routes. Desktop has it
+  // under Settings -> Display; a phone had no way to reach it, so a booking route on the
+  // phone map only ever came from switching each booking on by hand.
+  it('FE-MOB-SET-015: the travel card carries the always-show-booking-routes default, off until set', async () => {
+    const user = userEvent.setup();
+    const updateSetting = vi.fn().mockResolvedValue(undefined);
+    seedStore(useSettingsStore, { settings: buildSettings({ language: 'en' }), updateSetting });
+    render(<MSettingsGeneral />);
+
+    const toggle = screen.getByRole('switch', { name: 'Always show booking routes' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+    expect(updateSetting).toHaveBeenCalledWith('map_always_show_routes', true);
+  });
+
+  it('FE-MOB-SET-016: the always-show-booking-routes toggle reflects a stored true and switches it off', async () => {
+    const user = userEvent.setup();
+    const updateSetting = vi.fn().mockResolvedValue(undefined);
+    seedStore(useSettingsStore, { settings: buildSettings({ language: 'en', map_always_show_routes: true }), updateSetting });
+    render(<MSettingsGeneral />);
+
+    const toggle = screen.getByRole('switch', { name: 'Always show booking routes' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await user.click(toggle);
+    expect(updateSetting).toHaveBeenCalledWith('map_always_show_routes', false);
+  });
+});
+
+describe('MSettingsGeneral week start (#2029)', () => {
+  it('FE-MOB-SET-017: the week-start segments show Monday when unset and save the day tapped', async () => {
+    const user = userEvent.setup();
+    const updateSetting = vi.fn().mockResolvedValue(undefined);
+    seedStore(useSettingsStore, { settings: buildSettings({ language: 'en', week_start: undefined }), updateSetting });
+    render(<MSettingsGeneral />);
+
+    expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Saturday' }));
+    expect(updateSetting).toHaveBeenCalledWith('week_start', 'saturday');
+  });
+});
+
+describe('MSettingsGeneral date format (#2971)', () => {
+  it('FE-MOB-SET-018: the date-format row shows the language format when unset and the sheet saves a pick', async () => {
+    const user = userEvent.setup();
+    const updateSetting = vi.fn().mockResolvedValue(undefined);
+    seedStore(useSettingsStore, { settings: buildSettings({ language: 'en', date_format: undefined }), updateSetting });
+    render(<MSettingsGeneral />);
+
+    // The choices are labelled by how they write 31 December; auto adds the language's own way.
+    await user.click(screen.getByRole('button', { name: /\(12\/31\/2026\)/ }));
+    await user.click(await screen.findByRole('button', { name: '31.12.2026' }));
+    expect(updateSetting).toHaveBeenCalledWith('date_format', 'DD.MM.YYYY');
+  });
+
+  it('FE-MOB-SET-019: a stored format is shown on its row', () => {
+    seedStore(useSettingsStore, { settings: buildSettings({ language: 'en', date_format: 'YYYY/MM/DD' }) });
+    render(<MSettingsGeneral />);
+
+    expect(screen.getByRole('button', { name: '2026/12/31' })).toBeInTheDocument();
+  });
 });

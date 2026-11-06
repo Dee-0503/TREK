@@ -1,6 +1,9 @@
+import { vacaySetColorRequestSchema, vacayUpdatePlanRequestSchema } from '@trek/shared';
 import { http, HttpResponse } from 'msw';
+import { contractHandler } from '../contract';
 
 export const vacayHandlers = [
+  http.get('/api/school-holiday-catalog', () => HttpResponse.json({ countries: [], regions: [] })),
   http.get('/api/addons/vacay/plan', () => {
     return HttpResponse.json({
       plan: {
@@ -20,7 +23,8 @@ export const vacayHandlers = [
     });
   }),
 
-  http.put('/api/addons/vacay/plan', () => {
+  // Only the request has a schema: the plan answer is open in @trek/shared.
+  contractHandler('put', '/api/addons/vacay/plan', { request: vacayUpdatePlanRequestSchema }, () => {
     return HttpResponse.json({
       plan: {
         id: 1,
@@ -109,9 +113,9 @@ export const vacayHandlers = [
     });
   }),
 
-  http.put('/api/addons/vacay/color', () => {
-    return HttpResponse.json({ success: true });
-  }),
+  contractHandler('put', '/api/addons/vacay/color', { request: vacaySetColorRequestSchema }, () =>
+    HttpResponse.json({ success: true })
+  ),
 
   http.post('/api/addons/vacay/invite', () => {
     return HttpResponse.json({ success: true });

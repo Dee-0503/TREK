@@ -1,16 +1,21 @@
 import React from 'react'
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen } from '../../../tests/helpers/render'
 import { act, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { resetAllStores } from '../../../tests/helpers/store'
 import { buildPlace, buildReservation } from '../../../tests/helpers/factories'
-import { MAP_MAX_ZOOM } from '../../constants/mapDefaults'
+import { AMAP_ROAD, AMAP_SATELLITE, MAP_MAX_ZOOM, OPENTOPOMAP_TILE_URL } from '../../constants/mapDefaults'
 import { useAuthStore } from '../../store/authStore'
+import { useSettingsStore } from '../../store/settingsStore'
 import { CATEGORY_ICON_MAP } from '../shared/categoryIcons'
 import * as photoService from '../../services/photoService'
+import { Coffee, MapPin, Mountain, Signpost, type LucideIcon } from 'lucide-react'
+import { renderIconMarkup } from '../../utils/iconMarkup'
 
 const mapMock = vi.hoisted(() => ({
+  getContainer: vi.fn(() => document.createElement('div')),
+  getCenter: vi.fn(() => ({ lat: 0, lng: 0 })),
   panTo: vi.fn(),
   setView: vi.fn(),
   fitBounds: vi.fn(),
@@ -18,7 +23,13 @@ const mapMock = vi.hoisted(() => ({
   on: vi.fn(),
   off: vi.fn(),
   panBy: vi.fn(),
-  latLngToContainerPoint: vi.fn(() => ({ x: 0, y: 0, distanceTo: () => 1000 })),
+  // A flat projection, 1000 px per degree: far enough apart that every
+  // booking line clears its declutter floor, which is measured along the
+  // projected line (#2275) rather than read off a canned distanceTo.
+  latLngToContainerPoint: vi.fn(([lat, lng]: [number, number]) => ({
+    x: lng * 1000, y: lat * 1000,
+    distanceTo(other: { x: number; y: number }) { return Math.hypot(lng * 1000 - other.x, lat * 1000 - other.y) },
+  })),
   // Panes: jsdom has none, so keep them in a map the pane tests can read back.
   panes: new Map<string, HTMLElement>(),
   getPane: vi.fn(function (this: void, name: string) { return mapMock.panes.get(name) }),
@@ -49,15 +60,54 @@ vi.mock('../../hooks/useGeolocation', () => ({
 // after the map already rendered.
 const thumbCallbacks = vi.hoisted(() => new Map<string, (thumb: string) => void>())
 
+// The cluster group and the Leaflet markers MapView reaches for when a selection lands
+// on a stop that shares its coordinates and so has no pin of its own. `stacked` decides
+// whether the group answers with a bubble or with the marker itself.
+const clusterMock = vi.hoisted(() => {
+  const spiderfy = vi.fn()
+  return {
+    spiderfy,
+    stacked: false,
+    asked: [] as unknown[],
+    markers: new Map<Element, object>(),
+    /**
+     * One marker double per pin, not per coordinate. Stops that share a coordinate are
+     * the whole point here, and a registry keyed by place id only proves anything when
+     * the two markers on that coordinate can be told apart.
+     */
+    stub(node: Element) {
+      const existing = clusterMock.markers.get(node)
+      if (existing) return existing
+      const fresh = { pin: node }
+      clusterMock.markers.set(node, fresh)
+      return fresh
+    },
+    group: {
+      getVisibleParent(marker: unknown) {
+        clusterMock.asked.push(marker)
+        return clusterMock.stacked ? { spiderfy, getChildCount: () => 2 } : marker
+      },
+    },
+  }
+})
+
 vi.mock('react-leaflet', () => ({
   // center/zoom are surfaced so tests can assert the camera the map is built
   // with; maxZoom because a cluster refuses to attach to a map without one.
-  MapContainer: ({ children, center, zoom, maxZoom }: any) => (
-    <div data-testid="map-container" data-center={JSON.stringify(center)} data-zoom={zoom} data-maxzoom={maxZoom}>{children}</div>
+  MapContainer: ({ children, center, zoom, maxZoom, crs }: any) => (
+    <div data-testid="map-container" data-center={JSON.stringify(center)} data-zoom={zoom} data-maxzoom={maxZoom} data-crs={crs?.code ?? 'EPSG:3857'}>{children}</div>
   ),
-  TileLayer: () => <div data-testid="tile-layer" />,
-  Marker: ({ children, eventHandlers, position, icon, zIndexOffset }: any) => (
+  TileLayer: ({ url }: any) => <div data-testid="tile-layer" data-url={url} />,
+  Marker: ({ children, eventHandlers, position, icon, zIndexOffset, ref }: any) => (
     <div
+      ref={node => {
+        if (node && zIndexOffset === 500) eventHandlers?.add?.({ target: { getElement: () => node } })
+        // Stands in for the L.Marker react-leaflet hands back, so MapView's registry has
+        // something to look a selected stop up by. Only the markers the cluster group
+        // holds get one: a place pin is all this double stands in for, and the route-via
+        // markers outside the group expect a Leaflet marker of their own.
+        ref?.(node?.closest('[data-testid="cluster-group"]') ? clusterMock.stub(node) : null)
+      }}
       data-testid="marker"
       data-lat={position[0]}
       data-lng={position[1]}
@@ -100,7 +150,14 @@ vi.mock('react-leaflet', () => ({
       onClick={() => eventHandlers?.click?.()}
     />
   ),
-  CircleMarker: () => <div data-testid="circle-marker" />,
+  CircleMarker: ({ center, interactive, pathOptions }: any) => (
+    <div
+      data-testid={pathOptions?.className === 'tour-profile-focus-marker' ? 'profile-focus-marker' : 'circle-marker'}
+      data-center={JSON.stringify(center)}
+      data-interactive={String(interactive)}
+      data-path-options={JSON.stringify(pathOptions ?? null)}
+    />
+  ),
   Circle: () => <div data-testid="circle" />,
   Tooltip: ({ children }: any) => <>{children}</>,
   useMap: () => mapMock,
@@ -110,8 +167,8 @@ vi.mock('react-leaflet', () => ({
 vi.mock('react-leaflet-cluster', () => ({
   // The real cluster group calls iconCreateFunction itself; the probe button
   // lets a test invoke it with a chosen child count.
-  default: ({ children, iconCreateFunction }: any) => (
-    <div data-testid="cluster-group">
+  default: ({ children, iconCreateFunction, ref }: any) => (
+    <div data-testid="cluster-group" ref={node => { ref?.(node ? clusterMock.group : null) }}>
       <button
         data-testid="cluster-icon-probe"
         onClick={(e: any) => {
@@ -147,7 +204,12 @@ vi.mock('../../services/photoService', () => ({
   getAllThumbs: vi.fn(() => ({})),
 }))
 
+vi.mock('./gcj02Crs', () => ({
+  crsForBasemap: (gcj02: boolean) => gcj02 ? { code: 'TREK:GCJ02' } : undefined,
+}))
+
 import { MapView } from './MapView'
+import type { RouteVia } from '../../types'
 
 // Helper: build a place with the extra fields MapView uses (category_name/color/icon)
 // that exist on joined DB rows but are not in the base Place TypeScript type.
@@ -166,6 +228,9 @@ const ORIGINAL_WIDTH = window.innerWidth
 afterEach(() => {
   vi.clearAllMocks()
   resetAllStores()
+  clusterMock.markers.clear()
+  clusterMock.asked.length = 0
+  clusterMock.stacked = false
   mapMock.panes.clear()
   thumbCallbacks.clear()
   geoMock.position = null
@@ -178,6 +243,58 @@ describe('MapView', () => {
   it('FE-COMP-MAPVIEW-001: renders map container', () => {
     render(<MapView />)
     expect(screen.getByTestId('map-container')).toBeTruthy()
+  })
+
+  it('uses the CRS of the Tours-visible layer and preserves the viewport across datum switches', () => {
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, map_base_layer: 'default' } })
+    const beijing = buildMapPlace({ id: 201, name: 'Beijing', lat: 39.9042, lng: 116.4074 })
+    const onViewBaseLayerChange = vi.fn()
+    const route = [[[39.9042, 116.4074], [39.9052, 116.4084]]] as [number, number][][]
+    const plannerWaypoints = [{ id: 'start', lat: 39.9042, lng: 116.4074, role: 'start' as const }]
+    const routeProfileFocus = { distanceMeters: 100, elevationMeters: 0, lat: 39.9047, lng: 116.4079, sampleIndex: 0 }
+    const props = (viewBaseLayer: 'default' | 'topo' | 'hiking' | 'satellite') => ({
+      places: [beijing], center: [39.9042, 116.4074] as [number, number], zoom: 15,
+      route, plannerWaypoints, routeProfileFocus, tileUrl: AMAP_ROAD, viewBaseLayer, onViewBaseLayerChange,
+    })
+    const { rerender } = render(<MapView {...props('default')} />)
+    const defaultMap = screen.getByTestId('map-container')
+    expect(defaultMap).toHaveAttribute('data-crs', 'TREK:GCJ02')
+    expect(screen.getAllByTestId('marker').some(marker => marker.getAttribute('data-lat') === '39.9042'
+      && marker.getAttribute('data-lng') === '116.4074')).toBe(true)
+    expect(screen.getByTestId('tile-layer')).toHaveAttribute('data-url', AMAP_ROAD)
+
+    const movedCenter = { lat: 39.91, lng: 116.41 }
+    mapMock.getCenter.mockReturnValue(movedCenter)
+    mapMock.getZoom.mockReturnValue(13)
+    const saveCamera = mapMock.on.mock.calls.find(([event]) => event === 'moveend zoomend')?.[1] as (() => void) | undefined
+    act(() => saveCamera?.())
+
+    rerender(<MapView {...props('topo')} />)
+    const topoMap = screen.getByTestId('map-container')
+    expect(topoMap).not.toBe(defaultMap)
+    expect(topoMap).toHaveAttribute('data-crs', 'EPSG:3857')
+    expect(topoMap).toHaveAttribute('data-center', JSON.stringify([movedCenter.lat, movedCenter.lng]))
+    expect(topoMap).toHaveAttribute('data-zoom', '13')
+    expect(screen.getByTestId('tile-layer')).toHaveAttribute('data-url', OPENTOPOMAP_TILE_URL)
+    expect(screen.getAllByTestId('polyline').every(polyline => polyline.getAttribute('data-points') === JSON.stringify(route[0]))).toBe(true)
+    expect(screen.getByTestId('profile-focus-marker')).toHaveAttribute('data-center', JSON.stringify([routeProfileFocus.lat, routeProfileFocus.lng]))
+
+    // MAP-01: OpenHikingMap is drawn in WGS-84 like topo, from its own template.
+    rerender(<MapView {...props('hiking')} />)
+    expect(screen.getByTestId('map-container')).toHaveAttribute('data-crs', 'EPSG:3857')
+    expect(screen.getByTestId('tile-layer')).toHaveAttribute('data-url', 'https://tile.openmaps.fr/openhikingmap/{z}/{x}/{y}.png')
+
+    rerender(<MapView {...props('satellite')} />)
+    const satelliteMap = screen.getByTestId('map-container')
+    expect(satelliteMap).not.toBe(topoMap)
+    expect(satelliteMap).toHaveAttribute('data-crs', 'TREK:GCJ02')
+    expect(screen.getByTestId('tile-layer')).toHaveAttribute('data-url', AMAP_SATELLITE)
+
+    rerender(<MapView {...props('default')} />)
+    expect(screen.getByTestId('map-container')).toHaveAttribute('data-crs', 'TREK:GCJ02')
+    expect(screen.getByTestId('tile-layer')).toHaveAttribute('data-url', AMAP_ROAD)
+    expect(useSettingsStore.getState().settings.map_base_layer).toBe('default')
+    expect(onViewBaseLayerChange).not.toHaveBeenCalled()
   })
 
   it('FE-COMP-MAPVIEW-002: renders one marker per place', () => {
@@ -221,6 +338,24 @@ describe('MapView', () => {
     expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
   })
 
+  it('FE-COMP-MAPVIEW-006b: a caller-coloured route takes its own core and casing', () => {
+    render(<MapView route={[[[48.0, 2.0], [49.0, 3.0]]]} routeColors={[{ line: '#ff9f0a', casing: '#c2740a' }]} />)
+
+    const [casing, core] = screen.getAllByTestId('polyline')
+      .map(el => JSON.parse(el.getAttribute('data-path-options') as string))
+    expect(casing.color).toBe('#c2740a')
+    expect(core.color).toBe('#ff9f0a')
+  })
+
+  it('FE-COMP-MAPVIEW-006c: a line with no colour of its own keeps the route blue', () => {
+    render(<MapView route={[[[48.0, 2.0], [49.0, 3.0]]]} routeColors={[undefined]} />)
+
+    const [casing, core] = screen.getAllByTestId('polyline')
+      .map(el => JSON.parse(el.getAttribute('data-path-options') as string))
+    expect(casing.color).toBe('#0a5cc2')
+    expect(core.color).toBe('#0a84ff')
+  })
+
   it('FE-COMP-MAPVIEW-007: does not render polyline when route is null', () => {
     render(<MapView route={null} />)
     expect(screen.queryByTestId('polyline')).toBeNull()
@@ -242,9 +377,9 @@ describe('MapView', () => {
     expect(screen.getAllByTestId('polyline').length).toBe(3)
   })
 
-  it('FE-COMP-MAPVIEW-010: MarkerClusterGroup is rendered', () => {
+  it.each([false, true])('FE-COMP-MAPVIEW-010: place clustering stays enabled with roadtrip=%s', (roadtrip) => {
     const places = [buildMapPlace({ lat: 48.8584, lng: 2.2945 })]
-    render(<MapView places={places} />)
+    render(<MapView places={places} clusterLoosely={roadtrip} />)
     expect(screen.getByTestId('cluster-group')).toBeTruthy()
   })
 
@@ -278,6 +413,192 @@ describe('MapView', () => {
     ]
     render(<MapView places={places} />)
     expect(screen.queryByTestId('polyline')).toBeNull()
+  })
+
+  it('moves a passive semantic profile focus marker without changing the map camera', () => {
+    const focus = { distanceMeters: 120, elevationMeters: 340, lat: 48.123, lng: 11.456, sampleIndex: 3 }
+    const focusPoints: [number, number][] = [[48.1, 11.4], [48.2, 11.5]]
+    const route: [number, number][][] = [[[48.1, 11.4], [48.2, 11.5]]]
+    mapMock.fitBounds.mockClear()
+    mapMock.panTo.mockClear()
+    mapMock.setView.mockClear()
+    const { rerender } = render(<MapView places={[]} route={route} fitKey={7} focusPoints={focusPoints} routeProfileFocus={focus} />)
+    const mapContainer = screen.getByTestId('map-container')
+    mapMock.fitBounds.mockClear()
+    expect(screen.getByTestId('profile-focus-marker')).toHaveAttribute('data-center', '[48.123,11.456]')
+    expect(screen.getByTestId('profile-focus-marker')).toHaveAttribute('data-interactive', 'false')
+    expect(JSON.parse(screen.getByTestId('profile-focus-marker').getAttribute('data-path-options')!)).toMatchObject({
+      color: 'var(--bg-card)', fillColor: 'var(--text-muted)',
+    })
+
+    const movedFocus = { ...focus, lat: 48.16, lng: 11.47 }
+    rerender(<MapView places={[]} route={route} fitKey={7} focusPoints={focusPoints} routeProfileFocus={movedFocus} />)
+    expect(screen.getByTestId('profile-focus-marker')).toHaveAttribute('data-center', '[48.16,11.47]')
+    expect(screen.getByTestId('map-container')).toBe(mapContainer)
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+    expect(mapMock.panTo).not.toHaveBeenCalled()
+    expect(mapMock.setView).not.toHaveBeenCalled()
+
+    rerender(<MapView places={[]} route={route} fitKey={7} focusPoints={focusPoints} routeProfileFocus={null} />)
+    expect(screen.queryByTestId('profile-focus-marker')).toBeNull()
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+
+    rerender(<MapView places={[]} fitKey={8} focusPoints={[[48, 11], [48.3, 11.8]]} />)
+    expect(mapMock.fitBounds).toHaveBeenCalled()
+  })
+
+  it('honors a location-search camera intent and preserves it through later route updates', () => {
+    const searchPoint: [number, number] = [35.0116, 135.7681];
+    const { rerender } = render(
+      <MapView
+        places={[]}
+        route={null}
+        followSelection={false}
+        focusKey="tour:0:search:1"
+        focusPoints={[searchPoint]}
+      />
+    );
+    expect(mapMock.fitBounds).toHaveBeenCalledOnce();
+    expect(mapMock.fitBounds).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ maxZoom: 16 }));
+    const mapContainer = screen.getByTestId('map-container');
+    mapMock.fitBounds.mockClear();
+
+    rerender(
+      <MapView
+        places={[]}
+        route={[[searchPoint, [35.02, 135.77]]]}
+        followSelection={false}
+        focusKey="tour:0:search:1"
+        focusPoints={[searchPoint, [35.02, 135.77]]}
+      />
+    );
+    expect(mapMock.fitBounds).not.toHaveBeenCalled();
+    expect(screen.getByTestId('map-container')).toBe(mapContainer);
+
+    rerender(
+      <MapView
+        places={[]}
+        followSelection={false}
+        focusKey="tour:1"
+        focusPoints={[
+          [46.8, 9.5],
+          [47.1, 10.1],
+        ]}
+      />
+    );
+    expect(mapMock.fitBounds).toHaveBeenCalledOnce();
+  });
+
+  it('frames Tour focus once, ignores waypoint and route updates, then honors a new focus intent', () => {
+    const route: [number, number][][] = [[[48, 11], [48.2, 11.3]]]
+    const { rerender } = render(
+      <MapView places={[]} route={null} followSelection={false} focusKey={1} focusPoints={[]} />,
+    )
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+
+    rerender(<MapView places={[]} route={route} followSelection={false} focusKey={1} focusPoints={[[48, 11], [48.2, 11.3]]} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledOnce()
+    mapMock.fitBounds.mockClear()
+
+    rerender(
+      <MapView
+        places={[]}
+        route={[[[48, 11], [48.2, 11.3], [48.4, 11.6]]]}
+        followSelection={false}
+        focusKey={1}
+        focusPoints={[[48, 11], [48.2, 11.3], [48.4, 11.6]]}
+      />,
+    )
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+
+    const mapContainer = screen.getByTestId('map-container')
+    const retainedCenter = { lat: 35.2, lng: 135.8 }
+    mapMock.getCenter.mockReturnValue(retainedCenter)
+    mapMock.getZoom.mockReturnValue(12)
+    mapMock.setView([retainedCenter.lat, retainedCenter.lng], 12)
+    mapMock.fitBounds.mockClear()
+    mapMock.setView.mockClear()
+    mapMock.panTo.mockClear()
+
+    rerender(<MapView places={[]} followSelection={false} focusKey={2} focusPoints={[]} />)
+    expect(screen.getByTestId('map-container')).toBe(mapContainer)
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+    expect(mapMock.setView).not.toHaveBeenCalled()
+    expect(mapMock.panTo).not.toHaveBeenCalled()
+    expect(mapMock.getCenter()).toEqual(retainedCenter)
+    expect(mapMock.getZoom()).toBe(12)
+
+    rerender(
+      <MapView places={[]} followSelection={false} focusKey={2} focusPoints={[[48, 11], [48.5, 11.8]]} />,
+    )
+    expect(mapMock.fitBounds).toHaveBeenCalledOnce()
+  })
+
+  it('FE-COMP-MAPVIEW-089: a frame handed over while the map is built lands at once, a later one flies', () => {
+    // The map opens on a guess framed for the browser window. A map in a smaller box, the
+    // collection's beside its list, hands its own frame over at once, and must open there
+    // rather than show the guess and then fly to the frame.
+    const cafes: [number, number][] = [[48.21, 16.37], [38.71, -9.14], [55.7, 12.55]]
+    const { rerender } = render(<MapView places={[]} focusKey="list:17" focusPoints={cafes} />)
+    expect(mapMock.fitBounds.mock.calls).toEqual([[expect.anything(), expect.objectContaining({ animate: false, maxZoom: 16 })]])
+    mapMock.fitBounds.mockClear()
+
+    // Another list on the same map is a change the user asked for, and it flies as before.
+    const viewpoints: [number, number][] = [[60.12, 6.74], [44.15, 9.65], [47.56, 13.65]]
+    rerender(<MapView places={[]} focusKey="list:20" focusPoints={viewpoints} />)
+    expect(mapMock.fitBounds.mock.calls).toEqual([[expect.anything(), expect.objectContaining({ animate: true, maxZoom: 16 })]])
+  })
+
+  it('keeps selection fit and the pending route-arrival refit for semantic changes', () => {
+    const selectedPlace = buildMapPlace({ id: 901, lat: 48, lng: 11 })
+    const route: [number, number][][] = [[[48, 11], [48.2, 11.3]]]
+    const { rerender } = render(<MapView places={[]} route={null} fitKey={0} />)
+    mapMock.fitBounds.mockClear()
+
+    rerender(<MapView places={[selectedPlace]} route={null} fitKey={1} />)
+    expect(mapMock.fitBounds).toHaveBeenCalled()
+    mapMock.fitBounds.mockClear()
+
+    rerender(<MapView places={[selectedPlace]} route={route} fitKey={2} />)
+    expect(mapMock.fitBounds).toHaveBeenCalled()
+  })
+
+  it.each([
+    ['two-point', [[48, 2], [49, 3]]],
+    ['elevation', [[48, 2, 12.5], [49, 3, 22.75]]],
+    ['long track', Array.from({ length: 1200 }, (_, index) => [48 + index / 100000, 2 + index / 100000])],
+    ['loop', [[48, 2], [48.1, 2.1], [48, 2]]],
+    ['point-to-point Tour', [[48, 2], [48.5, 2.5], [49, 3]]],
+  ])('renders valid %s geometry unchanged', (_label, geometry) => {
+    render(<MapView places={[buildMapPlace({ route_geometry: JSON.stringify(geometry) })]} />)
+    const lines = screen.getAllByTestId('polyline')
+    expect(lines).toHaveLength(3)
+    const expected = geometry.map(([lat, lng]) => [lat, lng])
+    expect(JSON.parse(lines[1].getAttribute('data-points') || '[]')).toEqual(expected)
+  })
+
+  it.each([
+    ['malformed JSON', 'not json'],
+    ['non-array JSON', '{"coordinates":[]}'],
+    ['one point', '[[48,2]]'],
+    ['missing coordinate dimension', '[[48],[49,3]]'],
+    ['string coordinates', '[[48,"2"],[49,3]]'],
+    ['NaN token', '[[48,2],[NaN,3]]'],
+    ['Infinity token', '[[48,2],[49,Infinity]]'],
+    ['out-of-range latitude', '[[48,2],[91,3]]'],
+    ['out-of-range longitude', '[[48,2],[49,181]]'],
+    ['all-invalid coordinates', '[[91,2],[49,181]]'],
+  ])('skips %s geometry without passing invalid points to Leaflet', (_label, geometry) => {
+    expect(() => render(<MapView places={[buildMapPlace({ route_geometry: geometry })]} />)).not.toThrow()
+    expect(screen.queryByTestId('polyline')).toBeNull()
+  })
+
+  it('filters invalid points while preserving the original order of a renderable track', () => {
+    const geometry = '[[48,2],null,[91,4],[48.5,2.5],[49,3]]'
+    render(<MapView places={[buildMapPlace({ route_geometry: geometry })]} />)
+    const lines = screen.getAllByTestId('polyline')
+    expect(lines).toHaveLength(3)
+    expect(JSON.parse(lines[1].getAttribute('data-points') || '[]')).toEqual([[48, 2], [48.5, 2.5], [49, 3]])
   })
 
   // ── Track colours (#776) ──────────────────────────────────────────────────
@@ -532,6 +853,32 @@ describe('MapView', () => {
     expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
   })
 
+  it('FE-COMP-MAPVIEW-082: a booking switched on for another day keeps drawing unless the map is held to the day', () => {
+    // The desktop passes no scope, so a booking switched on stays drawn on every day.
+    // Only a caller that asks for it drops the booking from a day it does not run on.
+    const days = [{ id: 10, trip_id: 1, day_number: 1 }, { id: 11, trip_id: 1, day_number: 2 }]
+    const reservation = buildReservation({
+      id: 44,
+      type: 'flight',
+      day_id: 10,
+      end_day_id: 10,
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: 'AAA', lat: 1, lng: 2, timezone: null, local_time: null, local_date: null },
+        { role: 'to', sequence: 1, name: 'B', code: 'BBB', lat: 3, lng: 4, timezone: null, local_time: null, local_date: null },
+      ],
+    })
+    const reservations = [reservation]
+    const ids = [44]
+    const { rerender } = render(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} />)
+    expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
+
+    rerender(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} scopeConnectionsToDay />)
+    expect(screen.queryByTestId('polyline')).not.toBeInTheDocument()
+
+    rerender(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={10} scopeConnectionsToDay />)
+    expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
+  })
+
   it('FE-COMP-MAPVIEW-073: a category icon that throws leaves the marker circle intact', () => {
     // Icon components come from a lookup table a plugin can extend; one that
     // throws must not take the whole map down, only its own glyph.
@@ -626,6 +973,23 @@ describe('MapView explore POIs', () => {
     expect(onPoiClick).toHaveBeenCalledWith(poi)
   })
 
+  it('keeps native POI clicks working after a pan and uses the latest callback', () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const poi = buildPoi({ osm_id: 'node/7' })
+    const { rerender } = render(<MapView pois={[poi]} onPoiClick={first} onPoiDropOnRoute={() => {}} />)
+    const marker = markersWithZ('500')[0]
+    expect(marker).toHaveAttribute('draggable', 'true')
+    fireEvent.mouseDown(marker)
+    fireEvent.mouseUp(marker)
+    fireEvent.click(marker)
+    expect(first).toHaveBeenCalledTimes(1)
+    rerender(<MapView pois={[poi]} onPoiClick={latest} onPoiDropOnRoute={() => {}} />)
+    fireEvent.click(markersWithZ('500')[0])
+    expect(latest).toHaveBeenCalledExactlyOnceWith(poi)
+    expect(first).toHaveBeenCalledTimes(1)
+  })
+
   it('FE-COMP-MAPVIEW-035: an unknown POI category falls back to grey and draws no glyph', () => {
     render(<MapView pois={[buildPoi({ osm_id: 'node/8', category: 'not-a-category' })]} />)
     const html = iconHtmlOf(markersWithZ('500')[0])
@@ -643,10 +1007,90 @@ describe('MapView explore POIs', () => {
     expect(markersWithZ('500')).toHaveLength(2)
     expect(poiIcons).toHaveLength(1)
   })
+
+  const pinGlyph = (Icon: LucideIcon) => React.createElement(Icon, { size: 13, color: 'white', strokeWidth: 2.5 })
+  const poiPinHtmls = async () => (await leafletMock()).divIcon.mock.calls
+    .filter(c => JSON.stringify((c[0] as { iconSize: number[] }).iconSize) === '[26,26]')
+    .map(c => (c[0] as { html: string }).html)
+
+  it('FE-COMP-MAPVIEW-084: a core POI pin is the disc it always was', () => {
+    render(<MapView pois={[buildPoi({ osm_id: 'node/20' })]} />)
+    expect(iconHtmlOf(markersWithZ('500')[0])).toBe(
+      '<div style="position:relative;width:26px;height:26px;border-radius:50%;background:#B45309;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;">'
+      + `${renderIconMarkup(pinGlyph(Coffee))}</div>`,
+    )
+  })
+
+  it('FE-COMP-MAPVIEW-085: a plugin POI pin takes the colour and icon its POI carries, checked first', () => {
+    render(<MapView pois={[
+      buildPoi({ osm_id: 'plugin:trail-finder:1', category: 'plugin:trail-finder/pins-085', color: '#2f855a', icon: 'Signpost' }),
+      buildPoi({ osm_id: 'plugin:trail-finder:2', category: 'plugin:trail-finder/bad-085', color: 'red;background:url(https://evil.example/x)', icon: '<img src=x onerror=alert(1)>' }),
+    ]} />)
+    const [good, bad] = markersWithZ('500').map(iconHtmlOf)
+    expect(good).toContain('background:#2f855a;')
+    expect(good).toContain(renderIconMarkup(pinGlyph(Signpost)))
+    expect(bad).toContain('background:#6b7280;')
+    expect(bad).toContain(renderIconMarkup(pinGlyph(MapPin)))
+    expect(bad).not.toContain('evil.example')
+    expect(bad).not.toContain('<img')
+  })
+
+  it('FE-COMP-MAPVIEW-086: two plugin looks never share a cached pin, one look is built once', async () => {
+    const trail = { category: 'plugin:trail-finder/trails-086', color: '#2f855a', icon: 'Signpost' }
+    const { rerender } = render(<MapView pois={[
+      buildPoi({ osm_id: 'plugin:trail-finder:a', ...trail }),
+      buildPoi({ osm_id: 'plugin:trail-finder:b', ...trail, lat: 48.3 }),
+      buildPoi({ osm_id: 'plugin:water:c', category: 'plugin:water/wells-086', color: '#3182ce', icon: 'Mountain' }),
+    ]} />)
+    expect(await poiPinHtmls()).toHaveLength(2)
+    const [first, second, well] = markersWithZ('500').map(iconHtmlOf)
+    expect(second).toBe(first)
+    expect(first).toContain('#2f855a')
+    expect(well).toContain('#3182ce')
+    expect(well).toContain(renderIconMarkup(pinGlyph(Mountain)))
+    // The plugin changed its colour in an update: the same category gets a new pin.
+    rerender(<MapView pois={[buildPoi({ osm_id: 'plugin:trail-finder:a', ...trail, color: '#c53030' })]} />)
+    expect(iconHtmlOf(markersWithZ('500')[0])).toContain('background:#c53030;')
+  })
+
+  it('FE-COMP-MAPVIEW-087: a plugin POI tooltip lists its detail rows as text, a core one stays the bare name', () => {
+    render(<MapView pois={[
+      buildPoi({ osm_id: 'node/30', name: 'Café Central' }),
+      buildPoi({
+        osm_id: 'plugin:trail-finder:3', category: 'plugin:trail-finder/pins-087', color: '#2f855a', icon: 'Signpost',
+        name: '<img src=x onerror=alert(1)>',
+        details: [{ label: 'Length', value: '12.4 km' }, { label: '<b onclick=alert(2)>Fee</b>', value: '"><svg onload=alert(3)>' }],
+      }),
+    ]} />)
+    const [core, plugin] = markersWithZ('500')
+    expect(core.querySelector('[data-testid="poi-details"]')).toBeNull()
+    const details = plugin.querySelector('[data-testid="poi-details"]')!
+    expect([...details.querySelectorAll('span')].map(el => el.textContent)).toEqual([
+      'Length', '12.4 km', '<b onclick=alert(2)>Fee</b>', '"><svg onload=alert(3)>',
+    ])
+    expect(plugin.textContent).toContain('<img src=x onerror=alert(1)>')
+    expect(plugin.querySelectorAll('img, b, svg')).toHaveLength(0)
+    // Sized by its content up to the cap, since the 0px tooltip pane gives it nothing to fill.
+    expect([...(details.parentElement as HTMLElement).classList]).toEqual(expect.arrayContaining(['w-max', 'max-w-56']))
+  })
+
+  it('FE-COMP-MAPVIEW-088: a long tooltip label wraps inside a capped column and leaves its value the wider share', () => {
+    render(<MapView pois={[buildPoi({
+      osm_id: 'plugin:trail-finder:4', category: 'plugin:trail-finder/pins-088', color: '#2f855a', icon: 'Signpost',
+      details: [{ label: 'Wheelchair accessible toilet, ground fl', value: 'Step-free via the side door on the left' }],
+    })]} />)
+    const details = markersWithZ('500')[0].querySelector('[data-testid="poi-details"]')!
+    expect(details.classList).toContain('grid-cols-[fit-content(45%)_1fr]')
+    const [label, value] = [...details.querySelectorAll('span')]
+    expect(label.classList).toContain('[overflow-wrap:anywhere]')
+    expect(value.classList).toContain('[overflow-wrap:anywhere]')
+  })
 })
 
 describe('MapView plugin route vias', () => {
-  const via = (overrides: Record<string, any> = {}) => ({ lat: 48.5, lng: 2.5, tone: 'default', ...overrides })
+  // Cast, not typed: one case hands in a tone outside RouteVia's union on purpose.
+  const via = (overrides: Partial<Record<keyof RouteVia, unknown>> = {}) =>
+    ({ lat: 48.5, lng: 2.5, tone: 'default', ...overrides }) as RouteVia
 
   it('FE-COMP-MAPVIEW-037: draws a tone dot for each via point', () => {
     render(<MapView routeVias={[via({ tone: 'success' }), via({ tone: 'danger', lat: 48.7 })]} />)
@@ -674,6 +1118,27 @@ describe('MapView plugin route vias', () => {
     expect(markersWithZ('800')[0].textContent).toContain('Supercharger · 1 h 30 min')
   })
 
+  it('hides night badges at wide zoom and shows the full description when zoomed in', () => {
+    mapMock.getZoom.mockReturnValue(5)
+    const label = 'Tagesende von Tag 1 um 18:00 Uhr'
+    render(<MapView routeVias={[via({ label, hoverCard: true, nightPause: { day: 1, atPlace: true } })]} />)
+    expect(markersWithZ('800')).toHaveLength(0)
+    mapMock.getZoom.mockReturnValue(6)
+    act(() => { mapMock.on.mock.calls.find(([events]) => events === 'moveend zoomend')![1]() })
+    const badge = markersWithZ('800')[0]
+    expect(iconHtmlOf(badge)).toContain('data-night-pause="place"')
+    fireEvent.click(screen.getByTestId('marker-hover-trigger'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(label)
+    mapMock.getZoom.mockReturnValue(5)
+    act(() => {
+      mapMock.on.mock.calls.find(([events]) => events === 'movestart zoomstart')![1]()
+      mapMock.on.mock.calls.find(([events]) => events === 'moveend zoomend')![1]()
+    })
+    expect(markersWithZ('800')).toHaveLength(0)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    mapMock.getZoom.mockReturnValue(10)
+  })
+
   it('FE-COMP-MAPVIEW-041: a dwell under an hour is shown in minutes alone', () => {
     render(<MapView routeVias={[via({ dwellSeconds: 1500 })]} />)
     expect(markersWithZ('800')[0].textContent).toContain('25 min')
@@ -691,10 +1156,11 @@ describe('MapView plugin route vias', () => {
 })
 
 describe('MapView map event wiring', () => {
-  it('FE-COMP-MAPVIEW-043: reports the viewport bbox once the map is ready and again on every move', () => {
+  it('FE-COMP-MAPVIEW-043: reports the viewport bbox and its zoom once the map is ready and again on every move', () => {
     const onViewportChange = vi.fn()
+    mapMock.getZoom.mockReturnValue(10)
     render(<MapView onViewportChange={onViewportChange} />)
-    expect(onViewportChange).toHaveBeenCalledWith({ south: 47, west: 1, north: 49, east: 3 })
+    expect(onViewportChange).toHaveBeenCalledWith({ south: 47, west: 1, north: 49, east: 3 }, 10)
 
     const moveend = handlerFor('moveend')
     const zoomend = handlerFor('zoomend')
@@ -719,9 +1185,14 @@ describe('MapView map event wiring', () => {
   it('FE-COMP-MAPVIEW-046: a map-click handler is attached and detached again', () => {
     const onMapClick = vi.fn()
     const { unmount } = render(<MapView onMapClick={onMapClick} />)
-    expect(mapMock.on).toHaveBeenCalledWith('click', onMapClick)
+    const bound = mapMock.on.mock.calls.find(c => c[0] === 'click')?.[1]
+    expect(bound).toEqual(expect.any(Function))
+    // A click on the real world reaches the caller as the very event the map fired.
+    const event = { latlng: { lat: 48, lng: 2 } }
+    bound(event)
+    expect(onMapClick).toHaveBeenCalledWith(event)
     unmount()
-    expect(mapMock.off).toHaveBeenCalledWith('click', onMapClick)
+    expect(mapMock.off).toHaveBeenCalledWith('click', bound)
   })
 
   it('FE-COMP-MAPVIEW-047: without a click handler nothing is bound', () => {
@@ -732,9 +1203,13 @@ describe('MapView map event wiring', () => {
   it('FE-COMP-MAPVIEW-048: a context-menu handler is attached and detached again', () => {
     const onMapContextMenu = vi.fn()
     const { unmount } = render(<MapView onMapContextMenu={onMapContextMenu} />)
-    expect(mapMock.on).toHaveBeenCalledWith('contextmenu', onMapContextMenu)
+    const bound = mapMock.on.mock.calls.find(c => c[0] === 'contextmenu')?.[1]
+    expect(bound).toEqual(expect.any(Function))
+    const event = { latlng: { lat: 48, lng: 2 } }
+    bound(event)
+    expect(onMapContextMenu).toHaveBeenCalledWith(event)
     unmount()
-    expect(mapMock.off).toHaveBeenCalledWith('contextmenu', onMapContextMenu)
+    expect(mapMock.off).toHaveBeenCalledWith('contextmenu', bound)
   })
 
   it('FE-COMP-MAPVIEW-049: changing the center prop moves the camera there', () => {
@@ -808,11 +1283,63 @@ describe('MapView selection panning (#921)', () => {
     }
   })
 
+  describe('a place card that grows over the selected pin (#2991)', () => {
+    const projectable = mapMock as unknown as Record<string, unknown>
+    // The flat projection of the mock puts lat 0.7 / lng 0.5 at (500, 700) in a 1000x1200 map.
+    const covered = buildMapPlace({ id: 21, lat: 0.7, lng: 0.5 })
+    const clear = buildMapPlace({ id: 22, lat: 0.2, lng: 0.5 })
+    beforeEach(() => {
+      projectable.project = vi.fn(() => ({ add: vi.fn(() => ({ x: 0, y: 0 })) }))
+      projectable.unproject = vi.fn(() => [1, 1])
+      projectable.getSize = vi.fn(() => ({ x: 1000, y: 1200 }))
+    })
+    afterEach(() => {
+      delete projectable.project
+      delete projectable.unproject
+      delete projectable.getSize
+    })
+
+    it('FE-COMP-MAPVIEW-090: pans the pin back out once the card measured taller than the allowance', () => {
+      const places = [covered]
+      const { rerender } = render(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={21} hasInspector />)
+      mapMock.panTo.mockClear()
+
+      rerender(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={21} hasInspector inspectorHeight={820} />)
+      expect(mapMock.panTo).toHaveBeenCalledTimes(1)
+    })
+
+    it('FE-COMP-MAPVIEW-091: leaves a pin that is still in the open alone', () => {
+      const places = [clear]
+      const { rerender } = render(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={22} hasInspector />)
+      mapMock.panTo.mockClear()
+
+      rerender(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={22} hasInspector inspectorHeight={820} />)
+      expect(mapMock.panTo).not.toHaveBeenCalled()
+    })
+
+    it('FE-COMP-MAPVIEW-092: pans only once when the selection and the card arrive together', () => {
+      const places = [covered]
+      const { rerender } = render(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={null} />)
+      mapMock.panTo.mockClear()
+
+      rerender(<MapView places={places} leftWidth={300} rightWidth={300} selectedPlaceId={21} hasInspector inspectorHeight={820} />)
+      expect(mapMock.panTo).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('FE-COMP-MAPVIEW-052: falls back to a plain pan when the map cannot project', () => {
     const places = [buildMapPlace({ id: 9, lat: 48, lng: 2 })]
     const { rerender } = render(<MapView places={places} selectedPlaceId={null} />)
     rerender(<MapView places={places} selectedPlaceId={9} />)
     expect(mapMock.panTo).toHaveBeenCalledWith([48, 2], { animate: true })
+  })
+
+  it('FE-COMP-MAPVIEW-083: pans to a selected stay whose pin a filter keeps off the map', () => {
+    const places = [buildMapPlace({ id: 9, lat: 48, lng: 2 })]
+    const stay = buildMapPlace({ id: 11, lat: 50, lng: 4 })
+    const { rerender } = render(<MapView places={places} selectedPlaceId={null} />)
+    rerender(<MapView places={places} selectedPlaceId={11} selectedPlace={stay} />)
+    expect(mapMock.panTo).toHaveBeenCalledWith([50, 4], { animate: true })
   })
 
   it('FE-COMP-MAPVIEW-053: a selected place without coordinates is not panned to', () => {
@@ -924,6 +1451,42 @@ describe('MapView live location', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Follow my location' }))
     expect(geoMock.cycleMode).toHaveBeenCalled()
   })
+
+  it('FE-COMP-MAPVIEW-064b: turning the phone sideways and back takes the button with it', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+    geoMock.mode = 'off'
+    render(<MapView />)
+    expect(screen.getByRole('button', { name: 'Show my location' })).toBeInTheDocument()
+
+    // landscape crosses the 768px cut without remounting the map
+    act(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 844 })
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(screen.queryByRole('button', { name: 'Show my location' })).toBeNull()
+
+    act(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(screen.getByRole('button', { name: 'Show my location' })).toBeInTheDocument()
+  })
+
+  it('FE-COMP-MAPVIEW-077: the map draws no credit control of its own, on either width', () => {
+    const desktop = render(<MapView />)
+    // The desktop credit is Leaflet's own, in its own container; this component adds none.
+    expect(screen.queryByRole('button', { name: 'Map credits' })).toBeNull()
+    desktop.unmount()
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+    const { container } = render(<MapView />)
+    // The phone used to get an (i) here that opened the credit through a class on the
+    // wrapper. The phone map now carries no visible credit at all (mobile.css), so neither
+    // the button nor the class it toggled is left behind.
+    expect(screen.queryByRole('button', { name: 'Map credits' })).toBeNull()
+    const wrapper = container.querySelector('div.w-full.h-full.relative') as HTMLElement
+    expect(wrapper.classList.contains('m-attrib-open')).toBe(false)
+  })
 })
 
 describe('MapView bounds fitting', () => {
@@ -983,6 +1546,50 @@ describe('MapView bounds fitting', () => {
     mapMock.fitBounds.mockClear()
     rerender(<MapView places={places} fitKey={2} />)
     expect(mapMock.fitBounds).not.toHaveBeenCalled()
+  })
+
+  it('FE-COMP-MAPVIEW-078: a caller padding frames the focus points instead of the phone margin, and the day fit keeps its own', () => {
+    // A phone shell lays a chip rail over the top of the map and a bar plus the dock over
+    // the bottom. The flat margin put the ends of a framed leg under either of them.
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+    const leg: [number, number][] = [[48.1, 2.1], [48.3, 2.4]]
+    const chrome = { top: 120, right: 16, bottom: 290, left: 16 }
+    const { rerender } = render(<MapView places={[]} fitKey={1} />)
+    expect(mapMock.fitBounds).not.toHaveBeenCalled()
+
+    rerender(<MapView places={[]} fitKey={1} focusPoints={leg} fitPadding={chrome} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(1)
+    expect(mapMock.fitBounds.mock.calls[0][1]).toMatchObject({ paddingTopLeft: [16, 120], paddingBottomRight: [16, 290] })
+
+    // Picking a day is not the caller's frame, so that fit keeps the phone margin.
+    const places = [buildMapPlace({ id: 1, lat: 48, lng: 2 }), buildMapPlace({ id: 2, lat: 48.2, lng: 2.2 })]
+    rerender(<MapView places={places} fitKey={2} focusPoints={leg} fitPadding={chrome} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(2)
+    expect(mapMock.fitBounds.mock.calls[1][1]).toMatchObject({ paddingTopLeft: [40, 20], paddingBottomRight: [40, 20] })
+
+    // And without one, the focus fit falls back to that margin too.
+    const stage: [number, number][] = [[47, 1], [47.5, 1.5]]
+    rerender(<MapView places={places} fitKey={2} focusPoints={stage} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(3)
+    expect(mapMock.fitBounds.mock.calls[2][1]).toMatchObject({ paddingTopLeft: [40, 20], paddingBottomRight: [40, 20] })
+  })
+
+  it('FE-COMP-MAPVIEW-079: the caller padding is read by value, so only new numbers refit the points on screen', () => {
+    const leg: [number, number][] = [[48.1, 2.1], [48.3, 2.4]]
+    const { rerender } = render(
+      <MapView places={[]} fitKey={1} focusPoints={leg} fitPadding={{ top: 120, right: 16, bottom: 290, left: 16 }} />,
+    )
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(1)
+
+    // A parent that builds the object inline hands a new one on every render. The camera
+    // belongs to the traveller between fits, so that alone must not take it back.
+    rerender(<MapView places={[]} fitKey={1} focusPoints={leg} fitPadding={{ top: 120, right: 16, bottom: 290, left: 16 }} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(1)
+
+    // New numbers mean the chrome moved, so the same points are framed again around it.
+    rerender(<MapView places={[]} fitKey={1} focusPoints={leg} fitPadding={{ top: 120, right: 16, bottom: 98, left: 16 }} />)
+    expect(mapMock.fitBounds).toHaveBeenCalledTimes(2)
+    expect(mapMock.fitBounds.mock.calls[1][1]).toMatchObject({ paddingTopLeft: [16, 120], paddingBottomRight: [16, 98] })
   })
 })
 
@@ -1056,6 +1663,31 @@ describe('MapView photo thumbnails', () => {
     expect(thumbCallbacks.size).toBe(0)
     expect(vi.mocked(photoService.fetchPhoto)).not.toHaveBeenCalled()
   })
+
+  it('FE-COMP-MAPVIEW-080: an uploaded photo fills its marker whatever its proportions', () => {
+    // Leaflet's marker pane sets `width: auto` on every img in it, so a photo sized
+    // by attributes was drawn at its full pixel size and the circle only ever showed
+    // the transparent corner of it, over the category colour.
+    render(<MapView places={[buildMapPlace({ id: 27, lat: 48, lng: 2, image_url: '/uploads/places/wide.jpg' })]} />)
+    const holder = document.createElement('div')
+    holder.innerHTML = iconHtmlOf(screen.getAllByTestId('marker')[0])
+    const img = holder.querySelector('img')!
+
+    expect(img.getAttribute('src')).toBe('/uploads/places/wide.jpg')
+    expect(img.style.width).toBe('100%')
+    expect(img.style.height).toBe('100%')
+  })
+
+  it('FE-COMP-MAPVIEW-081: taking the upload off a place asks for its auto photo again, without a reload', () => {
+    const place = buildMapPlace({ id: 28, lat: 48, lng: 2, google_place_id: 'gp-28', name: 'Tower', image_url: '/uploads/places/own.jpg' })
+    const { rerender } = render(<MapView places={[place]} />)
+    expect(vi.mocked(photoService.fetchPhoto)).not.toHaveBeenCalled()
+
+    rerender(<MapView places={[{ ...place, image_url: null }]} />)
+
+    expect(vi.mocked(photoService.fetchPhoto)).toHaveBeenCalledWith('gp-28', 'gp-28', 48, 2, 'Tower')
+    expect(thumbCallbacks.has('gp-28')).toBe(true)
+  })
 })
 
 // The marker HTML is a hand-built string handed to L.divIcon, i.e. innerHTML.
@@ -1091,5 +1723,56 @@ describe('MapView — untrusted values in the marker HTML', () => {
   it('FE-COMP-MAPVIEW-075: an ordinary hex colour is passed through untouched', () => {
     render(<MapView places={[buildMapPlace({ lat: 48, lng: 2, category_color: '#00ff00' })]} />)
     expect(iconHtml()).toContain('#00ff00')
+  })
+})
+
+// Stops modelling one building — drop the bags, check in, the museum inside it — all
+// carry the same coordinates, so only the top pin of the pile is ever on screen. The
+// places rail used to raise the chosen one with a z-index; inside a bubble there is no
+// pin to raise, so the bubble has to open instead (#2344).
+describe('MapView — picking a stop that shares its coordinates', () => {
+  const hotel = { lat: 48.8584, lng: 2.2945 }
+  const stacked = [
+    buildMapPlace({ id: 1, name: 'Drop the bags', ...hotel }),
+    buildMapPlace({ id: 2, name: 'Check in', ...hotel }),
+    buildMapPlace({ id: 3, name: 'Louvre', lat: 48.8606, lng: 2.3376 }),
+  ]
+  /** The place pins, in the order the places were handed over. */
+  const pins = () => screen.getAllByTestId('marker').filter(node => node.closest('[data-testid="cluster-group"]'))
+  const markerOf = (index: number) => clusterMock.markers.get(pins()[index])
+
+  it('FE-COMP-MAPVIEW-077: the bubble it is hiding in is fanned open', () => {
+    clusterMock.stacked = true
+    const { rerender } = render(<MapView places={stacked} />)
+    expect(clusterMock.spiderfy).not.toHaveBeenCalled()
+
+    rerender(<MapView places={stacked} selectedPlaceId={2} />)
+    expect(clusterMock.spiderfy).toHaveBeenCalled()
+    // And it asked about the stop that was picked — not about the one stacked under it,
+    // which carries the same coordinates, and not about whichever registered first.
+    expect(clusterMock.asked).toContain(markerOf(1))
+    expect(clusterMock.asked).not.toContain(markerOf(0))
+    expect(clusterMock.asked).not.toContain(markerOf(2))
+  })
+
+  it('FE-COMP-MAPVIEW-079: a stop in another pile is looked up by its own id', () => {
+    clusterMock.stacked = true
+    const { rerender } = render(<MapView places={stacked} />)
+    rerender(<MapView places={stacked} selectedPlaceId={3} />)
+
+    expect(clusterMock.asked).toContain(markerOf(2))
+    expect(clusterMock.asked).not.toContain(markerOf(0))
+    expect(clusterMock.asked).not.toContain(markerOf(1))
+  })
+
+  it('FE-COMP-MAPVIEW-078: a stop with a pin of its own is left alone, camera included', () => {
+    clusterMock.stacked = false
+    const { rerender } = render(<MapView places={stacked} />)
+    rerender(<MapView places={stacked} selectedPlaceId={1} />)
+
+    expect(clusterMock.spiderfy).not.toHaveBeenCalled()
+    // The selection still only pans: the zoom belongs to the day fit.
+    expect(mapMock.panTo).toHaveBeenCalled()
+    expect(mapMock.setView).not.toHaveBeenCalled()
   })
 })

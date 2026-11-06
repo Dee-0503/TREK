@@ -1,13 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FolderOpen, Users } from 'lucide-react'
+import type { AiStatusResponse } from '@trek/shared'
 import MMehrSheet from '../../../../src/mobile/screens/trip/sheets/MMehrSheet'
 import type { MTripShellApi, TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell'
 import type { TripFile, TripMember } from '../../../../src/types'
 import { buildPlanner, buildShell } from '../../../helpers/mobileTrip'
 import { resetAllStores } from '../../../helpers/store'
-import { fireEvent, render, screen } from '../../../helpers/render'
+import { useAssistantStore } from '../../../../src/store/assistantStore'
+import { useTripStore } from '../../../../src/store/tripStore'
+import { buildAssignment, buildDay, buildPlace, buildTrip } from '../../../helpers/factories'
+import { fireEvent, render, screen, within } from '../../../helpers/render'
 
-// FE-MOB-MEHR-001 to FE-MOB-MEHR-012
+// FE-MOB-MEHR-001 to FE-MOB-MEHR-017
 //
 // The sheet takes its copy from the real TranslationProvider, so the visible
 // strings are asserted in English.
@@ -104,7 +108,7 @@ describe('MMehrSheet', () => {
 
   it('FE-MOB-MEHR-009: the action rows open the share, export and edit sheets', () => {
     const { shell } = renderSheet()
-    fireEvent.click(screen.getByRole('button', { name: 'Share Trip' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Trip settings' }))
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
     fireEvent.click(screen.getByRole('button', { name: 'Edit Trip' }))
     expect(shell.openSheet).toHaveBeenNthCalledWith(1, 'members')
@@ -116,7 +120,7 @@ describe('MMehrSheet', () => {
     const { planner } = renderSheet({ can: vi.fn(() => false) })
     expect(planner.can).toHaveBeenCalledWith('trip_edit', planner.trip)
     expect(screen.queryByRole('button', { name: 'Edit Trip' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Share Trip' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Trip settings' })).toBeInTheDocument()
   })
 
   it('FE-MOB-MEHR-011: renders only the action rows when every section sits in the dock', () => {
@@ -124,13 +128,96 @@ describe('MMehrSheet', () => {
       TRIP_TABS: TABS.filter(tab => tab.id !== 'dateien' && tab.id !== 'collab') as TripPlanner['TRIP_TABS'],
     })
     expect(screen.queryByText(/files$/)).not.toBeInTheDocument()
-    const rows = screen.getByRole('button', { name: 'Share Trip' }).parentElement
+    const rows = screen.getByRole('button', { name: 'Trip settings' }).parentElement
     expect(rows).not.toHaveClass('mt-2')
   })
 
   it('FE-MOB-MEHR-012: separates the action rows from the tile grid when both are present', () => {
     renderSheet()
-    const rows = screen.getByRole('button', { name: 'Share Trip' }).parentElement
+    const rows = screen.getByRole('button', { name: 'Trip settings' }).parentElement
     expect(rows).toHaveClass('mt-2')
+  })
+
+  // Both sides read the same priority list (dockTabs.ts). They used to be two
+  // hand-kept copies, and extending only one showed the same section in the dock AND
+  // as a tile here.
+  describe('the dock overflow', () => {
+    /** The sections with the road trip addon on, in the order the planner builds them. */
+    const WITH_ROADTRIP = [
+      { id: 'plan', label: 'Plan', icon: FolderOpen },
+      { id: 'transports', label: 'Transport', icon: FolderOpen },
+      { id: 'buchungen', label: 'Bookings', icon: FolderOpen },
+      { id: 'roadtrip', label: 'Road trip', icon: FolderOpen },
+      { id: 'listen', label: 'Lists', icon: FolderOpen },
+      { id: 'finanzplan', label: 'Budget', icon: FolderOpen },
+      { id: 'dateien', label: 'Files', icon: FolderOpen },
+      { id: 'collab', label: 'Collaboration', icon: Users },
+    ]
+
+    it('FE-MOB-MEHR-013: the section the drive pushed out of the dock lands here', () => {
+      renderSheet({ TRIP_TABS: WITH_ROADTRIP as TripPlanner['TRIP_TABS'] })
+
+      // Six sections do not fit the dock, so the packing list gives up its seat.
+      expect(screen.getByRole('button', { name: 'Lists' })).toBeInTheDocument()
+      // The drive itself never overflows: it sits second in the priority list.
+      expect(screen.queryByRole('button', { name: 'Road trip' })).not.toBeInTheDocument()
+      // Exactly the three the dock could not seat, nothing shown twice.
+      const grid = screen.getByRole('button', { name: 'Lists' }).parentElement
+      expect(within(grid as HTMLElement).getAllByRole('button')).toHaveLength(3)
+    })
+
+    it('FE-MOB-MEHR-014: a dock with room keeps the packing list, addon or no addon', () => {
+      renderSheet({
+        TRIP_TABS: WITH_ROADTRIP.filter(
+          tab => tab.id !== 'finanzplan' && tab.id !== 'dateien' && tab.id !== 'collab',
+        ) as TripPlanner['TRIP_TABS'],
+      })
+
+      // Five sections still fit beside the More button, so nothing overflows and the
+      // sheet is the action rows alone.
+      expect(screen.queryByRole('button', { name: 'Lists' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Trip settings' }).parentElement).not.toHaveClass('mt-2')
+    })
+  })
+
+  describe('the assistant tile', () => {
+    const initial = useAssistantStore.getState()
+    afterEach(() => useAssistantStore.setState(initial, true))
+
+    it('FE-MOB-MEHR-015: is not there until the assistant has a connection to use', () => {
+      renderSheet()
+      expect(screen.queryByRole('button', { name: /Ask TREK/ })).not.toBeInTheDocument()
+    })
+
+    it('FE-MOB-MEHR-016: leads the sheet and opens the chat in place of it', () => {
+      useAssistantStore.setState({ status: { available: true } as AiStatusResponse })
+      const { shell } = renderSheet()
+      fireEvent.click(screen.getByRole('button', { name: /Ask TREK/ }))
+      expect(shell.closeSheet).toHaveBeenCalledTimes(1)
+      expect(useAssistantStore.getState().window).toEqual({ open: true, minimized: false })
+    })
+
+    it('FE-MOB-MEHR-017: counts the warnings in the plan not seen yet, and opening the chat counts them seen', () => {
+      window.localStorage.clear()
+      useAssistantStore.setState({ status: { available: true } as AiStatusResponse })
+      const places = [
+        buildPlace({ id: 70, place_time: '10:00', end_time: '12:00' }),
+        buildPlace({ id: 71, place_time: '11:00', end_time: '12:30' }),
+      ]
+      useTripStore.setState({
+        trip: buildTrip({ id: 1, start_date: '2099-06-01', end_date: '2099-06-01' }),
+        days: [buildDay({ id: 1, date: '2099-06-01' })],
+        places,
+        assignments: {
+          '1': places.map((place, i) => buildAssignment({ id: 80 + i, place_id: place.id, order_index: i, place })),
+        },
+        reservations: [],
+        dayNotes: {},
+      })
+      renderSheet()
+      expect(screen.getByText('1 thing to check in your plan')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Ask TREK/ }))
+      expect(screen.queryByText('1 thing to check in your plan')).not.toBeInTheDocument()
+    })
   })
 })

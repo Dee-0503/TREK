@@ -1,11 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 import { useAnchoredPosition, scrollAnchorIntoView } from '../../hooks/useAnchoredPosition'
+import { useTranslation } from '../../i18n'
 
 interface SelectOption {
-  // Callers use both string keys and numeric ids (e.g. day/place ids) as values;
-  // the component only does strict-equality lookups and key rendering, so either works.
+  // Callers use both string keys and numeric ids (e.g. day/place ids) as values, and
+  // the value they hold need not be of the same kind as the options: see sameValue.
   value: string | number
   label: string
   icon?: React.ReactNode
@@ -16,6 +17,7 @@ interface SelectOption {
 }
 
 interface CustomSelectProps {
+  ariaLabel?: string
   value: string | number
   onChange: (value: string | number) => void
   options?: SelectOption[]
@@ -24,9 +26,53 @@ interface CustomSelectProps {
   style?: React.CSSProperties
   size?: 'sm' | 'md'
   disabled?: boolean
+  /**
+   * How wide the open menu is.
+   *
+   * 'anchor' (the default) keeps it exactly as wide as the trigger, which is what a
+   * select normally wants. 'content' lets it grow to its longest option instead, for the
+   * cases where the trigger is a narrow flex item and the options are place names: there
+   * the trigger has to shorten to share its row, and a menu that shortened with it would
+   * offer a list of identical prefixes.
+   */
+  menuFit?: 'anchor' | 'content'
+  /** The trigger's id, so a label outside can point at it. */
+  id?: string
+}
+
+/**
+ * Whether an option is the one the caller holds.
+ *
+ * onChange hands back the option's own value, and callers routinely store it in another
+ * form: the trip share dialog kept String(value) against options keyed by numeric user
+ * ids, so a strict comparison never found the pick and the trigger stayed on its
+ * placeholder while the invite button already knew who was chosen (#2478). An id reads
+ * the same as a number or as text, so both sides are compared as text. A caller holding
+ * nothing (null or undefined at runtime) matches no option.
+ */
+function sameValue(held: string | number | null | undefined, option: string | number): boolean {
+  return held != null && String(held) === String(option)
+}
+
+/** How wide a content-fitted menu may get before it stops reading as a menu. */
+const MENU_MAX_WIDTH = 420
+
+/**
+ * How much room a content-fitted menu has, measured from the trigger's left edge.
+ *
+ * Bounded by the trigger's own container first: a select sits inside a panel, and a menu
+ * that grew past that panel's edge would hang over whatever is beside it — here, the map.
+ * The window is the second bound, for a container that reaches the edge of the screen.
+ */
+function menuRoom(anchor: HTMLElement | null, left: number): number {
+  const toWindowEdge = typeof window === 'undefined' ? MENU_MAX_WIDTH : window.innerWidth - left - 8
+  const box = anchor?.parentElement?.getBoundingClientRect()
+  const toPanelEdge = box && box.width > 0 ? box.right - left : Number.POSITIVE_INFINITY
+  return Math.min(MENU_MAX_WIDTH, toWindowEdge, toPanelEdge)
 }
 
 export default function CustomSelect({
+  ariaLabel,
   value,
   onChange,
   options = [],
@@ -35,12 +81,18 @@ export default function CustomSelect({
   style = {},
   size = 'md',
   disabled = false,
+  menuFit = 'anchor',
+  id,
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const dropRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const keyboardDirection = useRef<'first' | 'last' | null>(null)
+  const menuId = useId()
+  const { t } = useTranslation()
 
   // Follows the trigger while the sheet scrolls and while the on-screen keyboard
   // resizes the viewport, instead of freezing at the rect measured on open (#1999).
@@ -48,11 +100,19 @@ export default function CustomSelect({
 
   useEffect(() => {
     if (!open || !searchable || !searchRef.current) return
-    searchRef.current.focus()
+    if (!keyboardDirection.current) searchRef.current.focus()
     // Focusing raises the keyboard on a phone; scroll the trigger up so the list
     // it just opened is not left underneath it (#2000).
     scrollAnchorIntoView(ref.current)
   }, [open, searchable])
+
+  useEffect(() => {
+    if (!open || !keyboardDirection.current) return
+    const buttons = dropRef.current?.querySelectorAll<HTMLButtonElement>('button')
+    const direction = keyboardDirection.current
+    keyboardDirection.current = null
+    if (buttons?.length) buttons[direction === 'last' ? buttons.length - 1 : 0].focus()
+  }, [open])
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -64,7 +124,7 @@ export default function CustomSelect({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const selected = options.find(o => o.value === value)
+  const selected = options.find(o => sameValue(value, o.value))
   const filtered = searchable && search
     ? (() => {
         const q = search.toLowerCase()
@@ -92,12 +152,47 @@ export default function CustomSelect({
 
   const sm = size === 'sm'
 
+  const closeMenu = () => {
+    setOpen(false)
+    setSearch('')
+    triggerRef.current?.focus()
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (disabled) return
+    if (event.key === 'Escape' && open) {
+      event.preventDefault()
+      event.stopPropagation()
+      closeMenu()
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const backwards = event.key === 'ArrowUp'
+      if (!open) {
+        keyboardDirection.current = backwards ? 'last' : 'first'
+        setSearch('')
+        setOpen(true)
+      } else {
+        const buttons = Array.from(dropRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+        const current = buttons.findIndex(button => button === document.activeElement)
+        const next = current < 0 ? (backwards ? buttons.length - 1 : 0) : (current + (backwards ? -1 : 1) + buttons.length) % buttons.length
+        buttons[next]?.focus()
+      }
+    }
+  }
+
   return (
     <div ref={ref} style={{ position: 'relative', ...style }}>
       {/* Trigger */}
       <button
+        ref={triggerRef}
+        id={id}
+        data-field-trigger=""
         type="button"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         disabled={disabled}
+        onKeyDown={handleKeyDown}
         onClick={() => { if (!disabled) { setOpen(o => !o); setSearch('') } }}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 8,
@@ -105,7 +200,7 @@ export default function CustomSelect({
           border: '1px solid var(--border-primary)',
           background: 'var(--bg-input)', color: 'var(--text-primary)',
           fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, fontFamily: 'inherit',
-          cursor: disabled ? 'default' : 'pointer', outline: 'none', textAlign: 'left',
+          cursor: disabled ? 'default' : 'pointer', outline: 'none', textAlign: 'start',
           transition: 'border-color 0.15s', overflow: 'hidden', minWidth: 0,
           opacity: disabled ? 0.5 : 1,
         }}
@@ -128,12 +223,23 @@ export default function CustomSelect({
 
       {/* Dropdown */}
       {open && createPortal(
-        <div ref={dropRef} style={{
+        <div ref={dropRef} id={menuId} role="group" aria-label={ariaLabel || selected?.label || placeholder || undefined} onKeyDown={handleKeyDown} style={{
           position: 'fixed',
           ...(anchored
-            ? anchored.flipped
-              ? { bottom: anchored.bottom, left: anchored.left, width: anchored.width }
-              : { top: anchored.top, left: anchored.left, width: anchored.width }
+            ? {
+                ...(anchored.flipped ? { bottom: anchored.bottom } : { top: anchored.top }),
+                left: anchored.left,
+                // Never narrower than the trigger, and never past the right-hand edge of
+                // the window. The cap is read at render time rather than measured, and
+                // that is enough: every reason the anchor moved already re-renders this.
+                ...(menuFit === 'content'
+                  ? {
+                      minWidth: anchored.width,
+                      width: 'max-content',
+                      maxWidth: Math.max(anchored.width, menuRoom(ref.current, anchored.left)),
+                    }
+                  : { width: anchored.width }),
+              }
             : { top: 0, left: 0, width: 200 }),
           zIndex: 99999,
           background: 'var(--bg-card)',
@@ -155,7 +261,8 @@ export default function CustomSelect({
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="..."
+                placeholder={t('common.search')}
+                aria-label={t('common.search')}
                 style={{
                   width: '100%', border: '1px solid var(--border-secondary)', borderRadius: 6,
                   padding: '5px 8px', fontSize: 'calc(12px * var(--fs-scale-body, 1))', outline: 'none', fontFamily: 'inherit',
@@ -193,18 +300,18 @@ export default function CustomSelect({
                     </div>
                   )
                 }
-                const isSelected = option.value === value
+                const isSelected = sameValue(value, option.value)
                 return (
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => { onChange(option.value); setOpen(false); setSearch('') }}
+                    onClick={() => { onChange(option.value); closeMenu() }}
                     style={{
                       width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                       padding: '7px 10px', borderRadius: 6,
                       border: 'none', background: isSelected ? 'var(--bg-hover)' : 'transparent',
                       color: 'var(--text-primary)', fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontFamily: 'inherit',
-                      cursor: 'pointer', textAlign: 'left', transition: 'background 0.1s',
+                      cursor: 'pointer', textAlign: 'start', transition: 'background 0.1s',
                     }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                     onMouseLeave={e => e.currentTarget.style.background = isSelected ? 'var(--bg-hover)' : 'transparent'}

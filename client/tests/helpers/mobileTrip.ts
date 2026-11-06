@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
 import type { TripPlanner, MTripShellApi } from '../../src/mobile/screens/trip/MTripShell';
+import type { Reservation } from '../../src/types';
+import { changeTransitRouteWith, openTransportEditorWith } from '../../src/pages/tripPlanner/transportEditorOpeners';
 import { buildTrip } from './factories';
 
 /**
@@ -16,15 +18,15 @@ import { buildTrip } from './factories';
 export function buildTripActions(): Record<string, ReturnType<typeof vi.fn>> {
   const names = [
     'addCategory', 'addDayNote', 'addFile', 'addPackingContributor', 'addPackingItem',
-    'addPlace', 'addReservation', 'addTodoItem', 'assignPlaceToDay', 'clonePackingItem',
+    'addPlace', 'addReservation', 'addTodoItem', 'appendDatedDay', 'assignPlaceToDay', 'clonePackingItem',
     'deleteBudgetItem', 'deleteDayNote', 'deleteFile', 'deletePackingItem', 'deletePlace',
-    'deletePlacesMany', 'deleteReservation', 'deleteTodoItem', 'insertDay', 'loadBudgetItems',
+    'deleteDay', 'deletePlacesMany', 'deleteReservation', 'deleteTodoItem', 'insertDay', 'loadBudgetItems',
     'loadFiles', 'loadReservations', 'loadTrip', 'moveAssignment', 'moveDayNote', 'ratePlace',
     'refreshDays', 'removeAssignment', 'removePackingContributor', 'reorderAssignments',
-    'reorderDays', 'setAssignments', 'setPackingItemSharing', 'setSelectedDay',
+    'reorderDays', 'setAssignments', 'setPackedCount', 'setPackingItemSharing', 'setSelectedDay',
     'toggleBudgetMemberPaid', 'togglePackingItem', 'toggleReservationStatus', 'toggleTodoItem',
     'updateDayNote', 'updateDayTitle', 'updatePackingItem', 'updatePlace', 'updatePlacesMany',
-    'updateReservation', 'updateTodoItem', 'updateTrip', 'uploadPlaceImage',
+    'updateReservation', 'updateReservationPositions', 'updateTodoItem', 'updateTrip', 'uploadPlaceImage',
   ];
   const actions: Record<string, ReturnType<typeof vi.fn>> = {};
   for (const name of names) actions[name] = vi.fn(async () => undefined);
@@ -58,18 +60,23 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     days: [],
     places: [],
     assignments: [],
+    // The unfiltered map the store holds. The place editor looks the visit it was
+    // opened on up here, so every sheet test that edits a place needs the shape.
+    storedAssignments: {},
     packingItems: [],
     todoItems: [],
     categories: [],
     reservations: [],
     budgetItems: [],
     files: [],
+    tours: [],
 
     selectedDayId: null,
     isLoading: false,
     tripActions: buildTripActions(),
     can: vi.fn(() => true),
     canUploadFiles: true,
+    isTourPlace: vi.fn(() => false),
 
     pushUndo: vi.fn(),
     undo: vi.fn(),
@@ -166,6 +173,9 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     routeProfile: 'driving',
     setRouteProfile: vi.fn(),
     routeVias: [],
+    // Whether the day ends at a stop, from the flag and from a manual boundary alike. The
+    // helper answers from the flag; a case about boundaries overrides it.
+    roadtripEndsDayAt: (stop: { endDay?: boolean } | null | undefined) => !!stop?.endDay,
     fitKey: 0,
     setFitKey: vi.fn(),
 
@@ -179,8 +189,21 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     deletePlaceIds: null,
     setDeletePlaceIds: vi.fn(),
 
+    // Adding a day from the days sheet: a trip without dates, so the single button.
+    dayAdd: { nextDate: null, blocked: null, datedBlocked: null, busy: false, onAddDated: vi.fn() },
+
+    // Deleting a day from the days sheet: no question open, nothing blocking.
+    deleteDayId: null,
+    setDeleteDayId: vi.fn(),
+    deleteDayTitle: '',
+    deleteDayLines: [],
+    deleteDayBlocked: null,
+    handleDeleteDay: vi.fn(),
+    confirmDeleteDay: vi.fn(async () => undefined),
+
     // resolveVisibleConnectionIds returns an array, and consumers call .includes().
     visibleConnections: [] as number[],
+    roadtripConnections: [] as number[],
     toggleConnection: vi.fn(),
     allConnectionsShown: false,
     toggleAllConnections: vi.fn(),
@@ -193,6 +216,63 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     expandedDayIds: new Set<number>(),
     setExpandedDayIds: vi.fn(),
     mapPlaces: [],
+    // The recorded-route overlay (#2279): off and empty. MMapArea reads
+    // `dawarichTrail.track` unconditionally, so the shape has to be here even
+    // when the addon is not in play.
+    dawarichEnabled: false,
+    dawarichTrailShown: false,
+    toggleDawarichTrail: vi.fn(),
+    dawarichTrail: { track: null, status: 'idle', reload: vi.fn() },
+
+    // The road trip addon's routing round. The shell reads days/totalDistance for
+    // its stage header on every render, addon on or off, so the empty-but-valid
+    // shape belongs in the base rather than in the overrides of one suite.
+    roadtripRoutes: {
+      days: [], quietDays: [], lines: [], lineDays: [], accessLines: [], vias: [], segments: [],
+      totalDistance: 0, totalDuration: 0, totalStops: 0, loading: false,
+    },
+
+    // The corridor search, idle. Both the search bar over the stage and the search
+    // sheet read it on every render of the road trip tab, addon on or off, so the
+    // empty-but-valid shape belongs here rather than in one suite's overrides.
+    roadtripCorridor: {
+      dayId: '', setDayId: vi.fn(), day: undefined,
+      categories: ['fuel'], toggleCategory: vi.fn(),
+      widthKm: 5, setWidthKm: vi.fn(),
+      search: {
+        results: [], progress: { done: 0, total: 0 }, loading: false, capped: false,
+        failedSources: [], failedAreas: 0, truncatedAreas: 0, error: false, spine: [],
+        search: vi.fn(), clear: vi.fn(),
+      },
+      nameFilter: '', setNameFilter: vi.fn(), anchors: [],
+      section: null, setSection: vi.fn(), sectionKm: 50, setSectionKm: vi.fn(),
+      socketFilter: '', setSocketFilter: vi.fn(), minKw: 0, setMinKw: vi.fn(),
+      visible: [], insertIndexFor: vi.fn(() => 0), stopsAlongKm: [], clear: vi.fn(),
+    },
+    // The fuel search, idle: the dry band in the chain reads it per leg.
+    refuel: {
+      openFor: null, loading: false, outcome: null, results: [], offered: [],
+      ask: vi.fn(), close: vi.fn(),
+    },
+    askRefuel: vi.fn(),
+    acceptRefuel: vi.fn(),
+    // Other ways of driving a leg, with no picker open. The road trip tab and the map area
+    // read the picker on every render, so the closed shape belongs in the base.
+    routeAlternatives: { open: null, ask: vi.fn(), close: vi.fn() },
+    askRouteAlternatives: vi.fn(),
+    chooseRouteAlternative: vi.fn(async () => undefined),
+    alternativeOverlays: [],
+    alternativeFocusPoints: [],
+    highlightedAlternative: null,
+    setHighlightedAlternative: vi.fn(),
+    // The drive's vias, online and empty. `editable` is what the leg buttons read.
+    roadtripVias: {
+      byDay: {}, trackByDay: {}, stale: false, editable: true,
+      add: vi.fn(), addMany: vi.fn(), move: vi.fn(), remove: vi.fn(), reanchor: vi.fn(),
+    },
+    mapFocusPoints: [],
+    focusRoadtripPoint: vi.fn(),
+    handlePoiClick: vi.fn(),
 
     route: null,
     routeSegments: [],
@@ -214,6 +294,8 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     confirmDeletePlaces: vi.fn(),
     confirmChangeCategory: vi.fn(),
     handleAssignToDay: vi.fn(),
+    tourDayQuestion: null,
+    answerTourDay: vi.fn(),
     handleRemoveAssignment: vi.fn(),
     handleReorder: vi.fn(),
     handleReorderDays: vi.fn(),
@@ -222,6 +304,10 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     handleSaveReservation: vi.fn(),
     handleSaveTransport: vi.fn(),
     handleDeleteReservation: vi.fn(),
+    // The planner's two ways into the transport editor, run on the setter spies above
+    // the way usePlannerDialogs runs them on its state.
+    openTransportEditor: vi.fn((r: Reservation) => openTransportEditorWith(planner, r)),
+    changeTransitRoute: vi.fn((r: Reservation) => changeTransitRouteWith(planner, r)),
 
     selectedPlace: null,
     dayOrderMap: new Map<number, number>(),
@@ -232,12 +318,18 @@ export function buildPlanner(overrides: Partial<TripPlanner> = {}): TripPlanner 
     splashDone: true,
   };
 
-  return { ...base, ...overrides } as unknown as TripPlanner;
+  const planner = { ...base, ...overrides } as unknown as TripPlanner;
+  return planner;
 }
 
 export function buildShell(overrides: Partial<MTripShellApi> = {}): MTripShellApi {
   const base: MTripShellApi = {
     view: 'plan',
+    rtView: 'list',
+    mapFront: false,
+    toggleRtView: vi.fn(),
+    rtReach: 'ahead',
+    setRtReach: vi.fn(),
     mode: 'go',
     trTab: 'plan',
     setTrTab: vi.fn(),
@@ -257,6 +349,7 @@ export function buildShell(overrides: Partial<MTripShellApi> = {}): MTripShellAp
     exportCostsCsvSignal: 0,
     uploadFilesSignal: 0,
     openFilesTrashSignal: 0,
+    openDocSyncSignal: 0,
   };
   return { ...base, ...overrides };
 }

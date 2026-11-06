@@ -2,12 +2,27 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { rtlTextAlias } from './rtlTextAlias.js';
+import { rtlTextAlias, plyrSpriteAlias } from './rtlTextAlias.js';
+import { withoutRuntimeFonts } from './bookFontPrecache.js';
+import { readFileSync } from 'node:fs';
+
+// The version this bundle is built as, baked in at build time. The Docker build
+// passes APP_VERSION, which the prerelease images need because they do not bump
+// package.json; a source checkout matches the server's own package.json.
+// The server hands the release notice only to a bundle built for its version.
+const BUILD_VERSION = process.env.APP_VERSION && process.env.APP_VERSION !== 'dev' ? process.env.APP_VERSION : null;
+const UI_VERSION = BUILD_VERSION ?? JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
 // `npm run build:analyze` writes dist/stats.html — a treemap of what actually ended
 // up in each chunk. The plain build only reports chunk sizes, which tells you a chunk
 // is too big but not which dependency made it so.
+// Mehrere Worktrees laufen hier parallel. Ohne diese beiden Variablen streiten
+// sie sich um 5173 und 3001; mit ihnen bekommt jeder seinen eigenen Satz.
+const DEV_PORT = Number(process.env.TREK_DEV_PORT) || 5173;
+const API_TARGET = process.env.TREK_DEV_API || 'http://localhost:3001';
+
 export default defineConfig(({ mode }) => ({
+  define: { __TREK_UI_VERSION__: JSON.stringify(UI_VERSION) },
   plugins: [
     react(),
     mode === 'analyze' &&
@@ -38,6 +53,13 @@ export default defineConfig(({ mode }) => ({
         navigateFallback: undefined,
       },
       workbox: {
+        // The Web Push handlers (push, notificationclick, pushsubscriptionchange).
+        // Workbox writes importScripts('sw-push.js') at the top of the generated
+        // worker, in dev too. The file lives in public/: were it missing,
+        // importScripts would get no script (the server answers a missing build
+        // file with a 404) and the new worker would fail to install, which
+        // tests/unit/pwa/swPush.test.ts guards against.
+        importScripts: ['sw-push.js'],
         // Anything above this is dropped from the precache manifest. The build does
         // not fail over it, it only prints "won't be precached", so the ceiling has
         // to sit close to the real bundle or an accidental heavyweight goes
@@ -56,9 +78,16 @@ export default defineConfig(({ mode }) => ({
         // matching the globs below is fetched at service-worker install by every
         // user, whether or not they ever reach the code.
         globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf}'],
+        // Except most of the book's typefaces: of thirty four families only the
+        // latin files of the seven the book first shipped with are installed,
+        // the rest wait in the book-fonts rule below for a book that uses them
+        // (bookFontPrecache.js).
+        manifestTransforms: [withoutRuntimeFonts],
         // build:analyze drops a treemap next to the app; it must never end up in a
         // precache manifest if someone ships that build by accident.
-        globIgnores: ['**/stats.html'],
+        // The assistant's chat (@assistant-ui, about 110 kB gzip) only runs online, so
+        // installing it for every user offline would be pure cost; it loads when opened.
+        globIgnores: ['**/stats.html', '**/AssistantSurface-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [
           /^\/api/,
@@ -69,6 +98,21 @@ export default defineConfig(({ mode }) => ({
           /^\/plugin-frame\//,
         ],
         runtimeCaching: [
+          {
+            // The book's typefaces the precache leaves out (bookFontPrecache.js):
+            // fetched the first time a page is set in them, and up front for
+            // every face of a book the Studio opens (bookFontWarm.ts), so the
+            // book still reads in its own type offline. Same-origin build
+            // assets only; the files are content-hashed, so a cached one never
+            // goes stale. First in the list so no broader rule takes them.
+            urlPattern: /\/assets\/[^/?#]+\.woff2?(?:\?.*)?$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'book-fonts',
+              expiration: { maxEntries: 600, maxAgeSeconds: 365 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
           {
             // Carto map tiles (default provider)
             // maxEntries MUST stay >= MAX_TILES in src/sync/tilePrefetcher.ts
@@ -114,6 +158,29 @@ export default defineConfig(({ mode }) => ({
           {
             // Stadia Smooth — the other shipped raster preset with the same hole (#2180).
             urlPattern: /^https:\/\/tiles\.stadiamaps\.com\/tiles\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'map-tiles',
+              expiration: { maxEntries: 12288, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Tours-only OpenTopoMap raster tiles. Same bounded cache as the
+            // other Leaflet sources; opaque tile responses are valid here.
+            urlPattern: /^https:\/\/(?:[a-c]\.)?tile\.opentopomap\.org\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'map-tiles',
+              expiration: { maxEntries: 1000, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Amap road and satellite presets, served from the shard hosts under
+            // is.autonavi.com (src/constants/mapDefaults.ts). Without a rule here
+            // they would be the #2180 hole all over again.
+            urlPattern: /^https:\/\/(?:[a-z0-9]+\.)?is\.autonavi\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'map-tiles',
@@ -234,12 +301,16 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ].filter(Boolean),
-  resolve: { alias: [rtlTextAlias] },
+  resolve: { alias: [rtlTextAlias, plyrSpriteAlias] },
   build: {
     // Pin the output level instead of inheriting whatever the current Vite default
     // is, so a toolchain bump can't silently change which browsers still work.
     target: 'es2022',
     sourcemap: false,
+    // Served as /asset-manifest.json. The iOS app, which runs no service worker,
+    // walks it to pull every chunk into WebKit's cache so TREK can start offline
+    // (src/native/offlineShell.ts).
+    manifest: 'asset-manifest.json',
     modulePreload: { polyfill: true },
     // Vite 8 bundles with rolldown, not rollup. `rollupOptions` is only an alias
     // onto `rolldownOptions`, and both `manualChunks` and `advancedChunks` are
@@ -298,7 +369,7 @@ export default defineConfig(({ mode }) => ({
     exclude: ['@trek/shared'],
   },
   server: {
-    port: 5173,
+    port: DEV_PORT,
     // And watch the build output, so rebuilding shared reloads the page rather
     // than leaving a stale module graph behind.
     watch: {
@@ -306,46 +377,46 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/plugin-frame': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         ws: true,
       },
       '/mcp': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       // OAuth 2.1 endpoints handled by backend (SDK authorize handler + token/revoke)
       // /oauth/authorize goes to backend so the SDK can redirect to /oauth/consent
       // /oauth/consent is served by Vite as a SPA route (no proxy entry needed)
       '/oauth/authorize': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/oauth/token': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/oauth/register': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/oauth/revoke': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
       '/.well-known': {
-        target: 'http://localhost:3001',
+        target: API_TARGET,
         changeOrigin: true,
       },
     },

@@ -52,40 +52,39 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': '通知{n}へ',
   'system_notice.pager.position': '{total}件中{current}件目',
-  'system_notice.release_400.eyebrow': 'アップデート完了',
-  'system_notice.release_400.tag': 'リリース',
-  'system_notice.release_400.headline': 'TREK史上、最大のリリースです。',
-  'system_notice.release_400.intro':
-    'TREKにスマホと、本が加わりました。19人で書き上げ、報告されていたバグ約150件も一緒に片づきました。',
-  'system_notice.release_400.feature_mobile_title': 'TREKがモバイルへ',
-  'system_notice.release_400.feature_mobile_body':
-    '768px未満は専用のインターフェースです。ガラス調のドック、専用のシート、専用の旅行プランナー。スマホでTREKを開いてください。',
-  'system_notice.release_400.feature_studio_title': 'TREK Studio',
-  'system_notice.release_400.feature_studio_badge': 'Beta',
-  'system_notice.release_400.feature_studio_body':
-    'JourneyのPDFがフォトブックのデザイナーになりました。頼めばレイアウトを組み、あとは邪魔をしません。',
-  'system_notice.release_400.feature_vacay_title': 'Vacayが残りを覚える',
-  'system_notice.release_400.feature_vacay_body':
-    '半休、代休とフレックス、カレンダーに並ぶ学校の休暇。そして1月始まりでなくてもいい休暇年度。',
-  'system_notice.release_400.feature_places_title': '場所は自ら名乗り、ファイルは外へ',
-  'system_notice.release_400.feature_places_body':
-    '場所を保存する前に、写真と説明がひとりでに埋まります。アップロードしたファイルも、TREKが動くディスクに置かなくてよくなりました。',
-  'system_notice.release_400.footnote':
-    'これはそのうちの4つです。4.0.0にはCollectionsやAtlasから土台のサーバーまで、数百の変更が入っています。',
-  'system_notice.release_400.note_eyebrow': '開発者より',
-  'system_notice.release_400.note_title': 'TREKを使ってくれてありがとう。',
-  'system_notice.release_400.note_body':
-    'TREKは自分の旅のために、空いた時間で作った小さなツールとして始まりました。今もそれは変わりません。夜と週末、本業の合間の時間です。\n\nしばらくは私一人でした。もう違います。このリリースは19人で送り出し、何千もの人がスター、Issue、翻訳、プルリクエストを持って集まってくれました。そのすべてに感謝しています。',
-  'system_notice.release_400.promise_label': '約束',
-  'system_notice.release_400.promise_text':
-    'TREKのオープンソースはずっと無料です。有料プランも、サブスクも、隠れた仕掛けもありません。約束します。',
-  'system_notice.release_400.note_body_after':
-    '4.0.0には何週間もの夜なべがかかりました。スマホの画面、フォトブックのデザイナー、サーバーの移行。多くは深夜0時から2時のあいだに書きました。愚痴ではありません。作るのが好きです。この規模のリリースが片手間のプロジェクトからどう出るか、正直に答えればこうです。',
-  'system_notice.release_400.note_closing': 'ここにいてくれて、ありがとう。',
-  'system_notice.release_400.note_signature': '— Maurice',
-  'system_notice.release_400.support_text':
-    'これを続けさせてくれているのは応援です。サーバー代、ドメイン代、そして今回のようなリリースになる夜なべ。TREKに価値を感じてもらえたなら、コーヒー一杯がいちばん直接的な支えになります。',
-  'system_notice.release_400.cta_bmc': 'Buy me a coffee',
-  'system_notice.release_400.cta_kofi': 'Ko-fiで応援する',
+  'system_notice.release_notes.eyebrow': 'アップデート完了',
+  'system_notice.release_notes.headline': '正しい場所を、いちばんに。',
+  'system_notice.release_notes.intro':
+    '場所の検索、住所の検索、ルート計算が、dataforest cloud の協賛のもと TREK 自身のサーバーで動くようになりました。さらに、どの TREK も場所について知っていることを、ほかのすべての TREK と共有できます。',
+  'system_notice.release_notes.features_label': '今回の目玉',
+  'system_notice.release_notes.features_aside': 'ほんの一部です',
+  'system_notice.release_notes.feature_search_title': 'ちゃんと見つかる場所検索',
+  'system_notice.release_notes.feature_search_body':
+    '都市、島、名所、そしてコードで探す空港が最初に並び、カフェはあなたの周辺から見つかります。候補は入力しているそばから表示されます。',
+  'system_notice.release_notes.feature_share_title': '場所の詳細を、みんなで',
+  'system_notice.release_notes.feature_share_body':
+    'ウェブサイト、営業時間、写真を項目ごとにすべての TREK と共有できます。保存した場所には、ほかの人が追加した情報が自動で反映されます。',
+  'system_notice.release_notes.feature_routing_title': 'もっと速いルート計算',
+  'system_notice.release_notes.feature_routing_body':
+    '最大 20 か所の立ち寄り先がある一日も、まとめて一度にルート計算。遅いルートが一つあっても、ほかを待たせません。公共交通は、最初のプロバイダーで見つからなければ別のプロバイダーにも問い合わせます。',
+  'system_notice.release_notes.footnote': 'ほかにも、TREKのあちこちに細かな変更がたくさん入っています。',
+  'system_notice.release_notes.notes_label': 'リリースノート',
+  'system_notice.release_notes.note_eyebrow': '開発者より',
+  'system_notice.release_notes.note_title': 'あなたがいるから、TREKを作り続けています。',
+  'system_notice.release_notes.note_body':
+    'TREKは、自分の旅のための小さなツールとして始まりました。もっといい計画の立て方が欲しくて、仕事のあとに書いたものです。それからずっと、大きくなり続けてきました。いま使っていただいている機能のほとんどは、本業のかたわら、深夜や週末、電車の中で作ったものです。こんなもの、誰かが開いてくれる日は来るのだろうか。そうひとりで考えた夜も、何度もありました。',
+  'system_notice.release_notes.promise_label': '約束',
+  'system_notice.release_notes.promise_lead': 'TREKは、ずっと無料です。',
+  'system_notice.release_notes.promise_text':
+    'すべての機能も、すべてのアップデートも、すべての人に。有料プランも、サブスクも、隠れた仕掛けもありません。',
+  'system_notice.release_notes.note_body_after':
+    'そして、あなたが開いてくれました。数か月のうちに、それが何千人にもなりました。スター、バグ報告、私の話せない言語への翻訳、会ったこともない人からのプルリクエスト。今でも毎朝いちばんにリポジトリを確認していますが、まだ少し夢のように感じています。',
+  'system_notice.release_notes.note_closing': 'ここにいてくれて、ありがとう。Mauriceより',
+  'system_notice.release_notes.support_label': '独立したままで',
+  'system_notice.release_notes.support_lead': 'Google などに頼らずに。',
+  'system_notice.release_notes.support_text':
+    '場所の検索、住所の検索、ルート計算は TREK 自身のサーバーで動いていて、今は dataforest cloud に協賛してもらっています。私はそのために毎日奮闘しています。この形を守り続けるには、あなたの応援が必要です。',
+  'system_notice.release_notes.cta_bmc': 'コーヒーをおごる',
+  'system_notice.release_notes.cta_kofi': 'Ko-fiで応援する',
 };
 export default system_notice;

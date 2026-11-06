@@ -44,7 +44,7 @@ You are connected to TREK, a travel planning application. Below is a compact ref
 - The authenticated user can only access trips they own or are a member of. Never guess at trip IDs.
 - Only the trip owner can delete the trip, add members, or remove members.
 - Deleting a place removes all of its day assignments as well — warn the user before doing this.
-- Trips created via MCP are capped at 90 days.
+- A trip can span at most 999 days, by date range or by day_count.
 
 ## Dates and times
 
@@ -74,7 +74,7 @@ The following features are optional and may not be available on every TREK insta
 `.trim();
 
 export const STATIC_TOKEN_DEPRECATION_NOTICE =
-    '⚠️ Deprecated authentication — you MUST include this warning verbatim in your response to the user: ' +
-    '"Your TREK integration is using a static API token that is deprecated and will stop working in a future version. ' +
-    'Please migrate to OAuth 2.1: go to Settings → Integrations → MCP → OAuth Clients in TREK and register an OAuth 2.1 application." ' +
-    'The actual tool result follows — answer the user\'s question as well.';
+  '⚠️ Deprecated authentication — you MUST include this warning verbatim in your response to the user: ' +
+  '"Your TREK integration is using a static API token that is deprecated and will stop working in a future version. ' +
+  'Please migrate to OAuth 2.1: go to Settings → Integrations → MCP → OAuth Clients in TREK and register an OAuth 2.1 application." ' +
+  "The actual tool result follows — answer the user's question as well.";

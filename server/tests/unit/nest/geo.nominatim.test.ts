@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
+import { GeocodingService } from '../../../src/nest/geo/geocoding.service';
 /**
  * The one Nominatim client (#576).
  *
@@ -22,12 +21,14 @@ import {
   startGeoCacheCleanup,
   stopGeoCacheCleanup,
 } from '../../../src/nest/geo/nominatim.client';
-import { GeocodingService } from '../../../src/nest/geo/geocoding.service';
 import { UA } from '../../../src/nest/maps/maps.helpers';
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const fetchMock = vi.fn();
 
 beforeEach(() => {
+  vi.stubEnv('NOMINATIM_URL', undefined);
   vi.useFakeTimers();
   // tests/setup.ts zeroes this for every other suite. This one is about the
   // throttle, so it runs against the interval the real service publishes.
@@ -43,6 +44,7 @@ afterEach(() => {
   setGeoThrottleInterval(0);
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 /** Runs `fn`, draining fake timers until it settles. */
@@ -131,8 +133,45 @@ describe('nominatimFetch', () => {
 
     // The atlas backfill walks every uncached place; a keystroke must not queue
     // behind it.
-    const order = fetchMock.mock.calls.slice(1).map(([url]) => (url as string).includes('q=ui') ? 'ui' : 'bg');
+    const order = fetchMock.mock.calls.slice(1).map(([url]) => ((url as string).includes('q=ui') ? 'ui' : 'bg'));
     expect(order[0]).toBe('ui');
+  });
+
+  it('GEO-012: an unset or blank override keeps the public endpoint', async () => {
+    vi.stubEnv('NOMINATIM_URL', '');
+    await drain(() => nominatimFetch('search', new URLSearchParams({ q: 'Berlin' })));
+    expect(fetchMock.mock.calls[0][0]).toBe('https://nominatim.openstreetmap.org/search?q=Berlin');
+  });
+
+  it.each(['search', 'reverse', 'lookup'] as const)(
+    'GEO-013: routes %s under the configured path prefix',
+    async (path) => {
+      vi.stubEnv('NOMINATIM_URL', 'http://nominatim:8080/geocoding///');
+      const params = new URLSearchParams({ q: 'New York & Berlin' });
+      await drain(() => nominatimFetch(path, params));
+      expect(fetchMock.mock.calls[0][0]).toBe(`http://nominatim:8080/geocoding/${path}?q=New+York+%26+Berlin`);
+    },
+  );
+
+  it('GEO-014: takes an override with no trailing slash as it is', async () => {
+    vi.stubEnv('NOMINATIM_URL', 'https://geo.example.com');
+    await drain(() => nominatimFetch('lookup', new URLSearchParams({ osm_ids: 'N1' })));
+    expect(fetchMock.mock.calls[0][0]).toBe('https://geo.example.com/lookup?osm_ids=N1');
+  });
+
+  // A compose file or a ConfigMap hands the value over with whatever whitespace
+  // was typed around it. The schema validates the trimmed string and calls a
+  // blank one unset, so the derivation has to read it the same way or the value
+  // that passed startup is the one that cannot be fetched.
+  it('GEO-015: trims the override, so a padded value still resolves', async () => {
+    vi.stubEnv('NOMINATIM_URL', '  https://geo.example.com/geocoding/  ');
+    await drain(() => nominatimFetch('search', new URLSearchParams({ q: 'Berlin' })));
+    expect(fetchMock.mock.calls[0][0]).toBe('https://geo.example.com/geocoding/search?q=Berlin');
+
+    fetchMock.mockClear();
+    vi.stubEnv('NOMINATIM_URL', '   ');
+    await drain(() => nominatimFetch('search', new URLSearchParams({ q: 'Berlin' })));
+    expect(fetchMock.mock.calls[0][0]).toBe('https://nominatim.openstreetmap.org/search?q=Berlin');
   });
 });
 
@@ -150,7 +189,7 @@ describe('geo cache', () => {
   });
 
   it('GEO-008: rounds to a ~110m grid, so a nudged coordinate still hits', () => {
-    expect(cacheKeyFor(52.52001, 13.40501, 'zoom18')).toBe(cacheKeyFor(52.5200, 13.4050, 'zoom18'));
+    expect(cacheKeyFor(52.52001, 13.40501, 'zoom18')).toBe(cacheKeyFor(52.52, 13.405, 'zoom18'));
     expect(cacheKeyFor(52.53, 13.405, 'zoom18')).not.toBe(cacheKeyFor(52.52, 13.405, 'zoom18'));
   });
 

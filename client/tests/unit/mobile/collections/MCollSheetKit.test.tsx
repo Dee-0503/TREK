@@ -63,8 +63,8 @@ describe('MCollSheetKit', () => {
     render(<SheetFooter><span>footer slot</span></SheetFooter>)
     expect(screen.getByText('footer slot')).toBeInTheDocument()
 
-    // Both field presets have to sit on the sheet surface token, not a raw colour.
-    expect(INPUT_CLS).toContain('bg-[color:var(--m-sheet)]')
-    expect(TEXTAREA_CLS).toContain('bg-[color:var(--m-sheet)]')
+    // Both field presets use the same inset-control surface as the other sheet inputs.
+    expect(INPUT_CLS).toContain('bg-[color:var(--m-ic)]')
+    expect(TEXTAREA_CLS).toContain('bg-[color:var(--m-ic)]')
   })
 })

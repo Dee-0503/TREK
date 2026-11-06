@@ -97,3 +97,5 @@ export function deriveTransitStats(
     walkSeconds: legs.filter((leg) => leg.mode === 'WALK').reduce((total, leg) => total + leg.duration, 0),
   };
 }
+
+export { decodePolyline, encodePolyline } from '../../utils/polyline';

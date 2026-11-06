@@ -38,6 +38,7 @@ export interface PlaceMatchCandidate {
   google_place_id?: string | null;
   google_ftid?: string | null;
   osm_id?: string | null;
+  amap_poi_id?: string | null;
 }
 
 /** One way to look for an existing place, to be tried in order. */
@@ -54,16 +55,17 @@ export function normalizePlaceName(name: string | null | undefined): string | nu
 
 /** The provider ids a candidate carries, trimmed, in provider order, blanks dropped. */
 export function externalIdsOf(candidate: PlaceMatchCandidate): string[] {
-  const provider = typeof candidate.provider === 'string'
-    ? placeProviderSchema.safeParse(candidate.provider).data
-    : undefined;
-  const providerId = typeof candidate.provider_place_id === 'string' && candidate.provider_place_id.trim() !== '' && provider
-    ? `${provider}:${candidate.provider_place_id.trim()}`
-    : null;
+  const provider =
+    typeof candidate.provider === 'string' ? placeProviderSchema.safeParse(candidate.provider).data : undefined;
+  const providerId =
+    typeof candidate.provider_place_id === 'string' && candidate.provider_place_id.trim() !== '' && provider
+      ? `${provider}:${candidate.provider_place_id.trim()}`
+      : null;
   const legacyIds = [
     typeof candidate.google_place_id === 'string' ? `google:${candidate.google_place_id}` : null,
     typeof candidate.google_ftid === 'string' ? `google:${candidate.google_ftid}` : null,
     typeof candidate.osm_id === 'string' ? `osm:${candidate.osm_id}` : null,
+    typeof candidate.amap_poi_id === 'string' ? `amap:${candidate.amap_poi_id.replace(/^amap:/i, '')}` : null,
   ];
   return [providerId, ...legacyIds]
     .filter((id): id is string => typeof id === 'string' && id.slice(id.indexOf(':') + 1).trim() !== '')

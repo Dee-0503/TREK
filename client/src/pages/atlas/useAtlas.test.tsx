@@ -5,6 +5,7 @@ import { render, act, waitFor } from '../../../tests/helpers/render';
 import { server } from '../../../tests/helpers/msw/server';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import { buildSettings } from '../../../tests/helpers/factories';
+import { addListener } from '../../api/websocket';
 import { useSettingsStore } from '../../store/settingsStore';
 import L from 'leaflet';
 import { A2_TO_A3 } from './atlasModel';
@@ -99,6 +100,9 @@ vi.mock('@maplibre/maplibre-gl-leaflet', () => ({
   }),
 }));
 vi.mock('../../components/Map/engines/maplibre', () => ({ default: {} }));
+// jsdom refuses a WebGL context, and the basemap now believes it (#2288). These
+// cases are about the GL layer, so the probe says yes here.
+vi.mock('../../utils/webgl', () => ({ hasWebGL: () => true, resetWebGLProbe: () => {} }));
 
 vi.mock('leaflet', () => {
   // The bounds a country layer reports carry its own code, so the map's bounds can
@@ -264,13 +268,13 @@ function Harness({ withPanel = true }: { withPanel?: boolean }): React.ReactElem
   );
 }
 
-function useAtlasHandlers(over: Partial<Record<string, unknown>> = {}) {
+function installAtlasHandlers(over: Partial<Record<string, unknown>> = {}) {
   server.use(
     http.get('/api/addons/atlas/stats', () => HttpResponse.json(over.stats ?? statsResponse)),
     http.get('/api/addons/atlas/bucket-list', () => HttpResponse.json({ items: over.bucket ?? [] })),
     http.get('/api/addons/atlas/regions', () => HttpResponse.json({ regions: over.regions ?? {} })),
     http.get('/api/addons/atlas/countries/geo', () => HttpResponse.json(over.geo ?? { type: 'FeatureCollection', features: [] })),
-    http.get('/api/addons/atlas/regions/geo', () => HttpResponse.json(over.regionGeo ?? { features: [] })),
+    http.get('/api/addons/atlas/regions/geo/:code', () => HttpResponse.json(over.regionGeo ?? { features: [] })),
     http.get('/api/atlas-layers', () => HttpResponse.json({ layers: over.layers ?? [] })),
   );
 }
@@ -295,7 +299,7 @@ function regionCodesOf(layer: MockGeoJson | undefined): string[] {
 }
 
 async function mountAtlas(over: Partial<Record<string, unknown>> = {}, props: { withPanel?: boolean } = {}) {
-  useAtlasHandlers(over);
+  installAtlasHandlers(over);
   const view = render(<Harness {...props} />);
   await waitFor(() => expect(atlas.loading).toBe(false));
   return view;
@@ -309,6 +313,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   delete window.__addToast;
 });
 
@@ -328,7 +333,7 @@ describe('useAtlas', () => {
   });
 
   it('FE-HOOK-ATLAS-002: a failing stats request still ends the loading state', async () => {
-    useAtlasHandlers();
+    installAtlasHandlers();
     server.use(http.get('/api/addons/atlas/stats', () => HttpResponse.error()));
     render(<Harness />);
 
@@ -464,7 +469,7 @@ describe('useAtlas', () => {
     });
 
     it('FE-HOOK-ATLAS-011b: unmarking survives atlas data that never loaded', async () => {
-      useAtlasHandlers();
+      installAtlasHandlers();
       server.use(
         http.get('/api/addons/atlas/stats', () => HttpResponse.error()),
         http.delete('/api/addons/atlas/country/:code/mark', () => HttpResponse.json({ ok: true })),
@@ -751,6 +756,24 @@ describe('useAtlas', () => {
       expect(atlas.confirmAction?.name).not.toBe('GERMANY_EN_ONLY');
     });
 
+    it('FE-HOOK-ATLAS-062: the country tooltip names both dates and shows their months (#1535)', async () => {
+      // FR's dates fall on the 1st, which a UTC parse moves into the month before over here.
+      vi.stubEnv('TZ', 'America/New_York');
+      await mountAtlas({ geo: geoCountries });
+      await waitFor(() => expect(lf.geoJson.length).toBeGreaterThan(0));
+
+      const countryLayer = lf.geoJson[0] as MockGeoJson;
+      const fr = countryLayer.entries.find((e) => (e.feature.properties as Record<string, string>).ISO_A2 === 'FR');
+      const html = fr!.layer.bindTooltip.mock.calls[0][0] as string;
+
+      expect(html).toContain('First trip');
+      expect(html).toContain('Last trip');
+      expect(html).not.toContain('atlas.lastVisitLabel');
+      const month = (y: number, m: number) => new Date(y, m, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      expect(html).toContain(month(2023, 0));
+      expect(html).toContain(month(2024, 5));
+    });
+
     it('FE-HOOK-ATLAS-026: plugin tint layers are drawn in their own pane and redrawn on theme change', async () => {
       await mountAtlas({
         geo: geoCountries,
@@ -814,7 +837,7 @@ describe('useAtlas', () => {
     });
 
     it('FE-HOOK-ATLAS-028: a failing plugin request simply leaves the map untinted', async () => {
-      useAtlasHandlers({ geo: geoCountries });
+      installAtlasHandlers({ geo: geoCountries });
       server.use(http.get('/api/atlas-layers', () => HttpResponse.error()));
       render(<Harness />);
       await waitFor(() => expect(atlas.loading).toBe(false));
@@ -1030,8 +1053,8 @@ describe('useAtlas', () => {
       await waitFor(() => expect(atlas.atlas_country_options.length).toBe(seen.length));
 
       const requested: string[] = [];
-      server.use(http.get('/api/addons/atlas/regions/geo', ({ request }) => {
-        requested.push(new URL(request.url).searchParams.get('countries') ?? '');
+      server.use(http.get('/api/addons/atlas/regions/geo/:code', ({ params }) => {
+        requested.push(String(params.code));
         return HttpResponse.json(regionGeo);
       }));
 
@@ -1362,5 +1385,29 @@ describe('useAtlas', () => {
         expect(marker.closeTooltip).toHaveBeenCalled();
       });
     });
+  });
+});
+
+describe('useAtlas: changes written elsewhere', () => {
+  it('FE-BCAST-022: atlas:changed reads the atlas again, once per burst', async () => {
+    vi.mocked(addListener).mockClear();
+    await mountAtlas();
+    let statsCalls = 0;
+    server.use(
+      http.get('/api/addons/atlas/stats', () => {
+        statsCalls++;
+        return HttpResponse.json(statsResponse);
+      }),
+    );
+    act(() => {
+      for (const [listener] of vi.mocked(addListener).mock.calls) {
+        listener({ type: 'atlas:changed' });
+        listener({ type: 'atlas:changed' });
+        listener({ type: 'collections:updated' });
+      }
+    });
+    await waitFor(() => expect(statsCalls).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(statsCalls).toBe(1);
   });
 });

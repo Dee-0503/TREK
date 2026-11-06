@@ -1,4 +1,5 @@
 import { assignmentPlaceSchema } from '../place/place.schema';
+import { stationKeySchema } from '../tours/tours.schema';
 
 import { z } from 'zod';
 
@@ -40,6 +41,7 @@ export const assignmentSchema = z.object({
   notes: z.string().nullable().optional(),
   assignment_time: z.string().nullable().optional(),
   assignment_end_time: z.string().nullable().optional(),
+  end_day: z.boolean().optional(),
   // Per-segment travel mode (#1281): the transport mode of the leg LEAVING this
   // stop for the next one. null = inherit the day's default_transport_mode.
   leg_transport_mode: z.string().nullable().optional(),
@@ -47,6 +49,20 @@ export const assignmentSchema = z.object({
   // not a place (booking arrival / morning hotel). null = inherit the day default.
   // Inert when the previous timeline element is a place.
   incoming_leg_transport_mode: z.string().nullable().optional(),
+  // Kept on the day and on the map, but not part of the day's route (#2532).
+  route_excluded: z.boolean().optional(),
+  // The lodging booking that put this stop on the day, when one did. The day
+  // planner already shows that booking as its own overnight block, so it hides
+  // this row and leaves it to road trip mode, which is the view that needs the
+  // hotel in the driving chain. Null for every stop a traveller placed.
+  accommodation_id: z.number().nullable().optional(),
+  tour_place_id: z.number().nullable().optional(),
+  tour_route_geometry: z.string().nullable().optional(),
+  /**
+   * MDT-02: the stage of a multi-day tour this day holds, by the key of the
+   * stop the stage starts at; null where the day holds the whole tour or a place.
+   */
+  tour_stage_key: z.string().nullable().optional(),
   participants: z.array(assignmentParticipantSchema).optional(),
   created_at: z.string().optional(),
   place: assignmentPlaceSchema,
@@ -56,6 +72,12 @@ export type Assignment = z.infer<typeof assignmentSchema>;
 export const assignmentCreateRequestSchema = z.object({
   place_id: z.union([z.number(), z.string()]),
   notes: z.string().nullable().optional(),
+  /**
+   * MDT-02: puts one stage of a multi-day tour on the day instead of the whole
+   * tour, by the key of the stop the stage starts at (the tour list's
+   * `stage_stops`). A stage is on one day at most.
+   */
+  tour_stage_key: stationKeySchema.optional(),
 });
 export type AssignmentCreateRequest = z.infer<typeof assignmentCreateRequestSchema>;
 
@@ -77,6 +99,11 @@ export const assignmentTimeRequestSchema = z.object({
   end_time: z.string().nullable().optional(),
 });
 export type AssignmentTimeRequest = z.infer<typeof assignmentTimeRequestSchema>;
+
+export const assignmentEndDayRequestSchema = z.object({
+  end_day: z.boolean(),
+});
+export type AssignmentEndDayRequest = z.infer<typeof assignmentEndDayRequestSchema>;
 
 /**
  * PUT /:id/notes (#2163) — edit the per-assignment note after creation.
@@ -101,6 +128,12 @@ export const assignmentTransportRequestSchema = z.object({
   direction: z.enum(['outgoing', 'incoming']).default('outgoing'),
 });
 export type AssignmentTransportRequest = z.infer<typeof assignmentTransportRequestSchema>;
+
+/** Take a stop out of the day's route, or put it back (#2532). */
+export const assignmentRouteRequestSchema = z.object({
+  excluded: z.boolean(),
+});
+export type AssignmentRouteRequest = z.infer<typeof assignmentRouteRequestSchema>;
 
 export const assignmentParticipantsRequestSchema = z.object({
   user_ids: z.array(z.number()),

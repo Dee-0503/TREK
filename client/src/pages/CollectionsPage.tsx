@@ -1,8 +1,9 @@
 import React from 'react'
 import { List as ListIcon, Map as MapIcon, Search, Bookmark, CheckCheck, X, Trash2, Copy, CopyPlus, FolderInput, Plus, Tags, DownloadCloud } from 'lucide-react'
 import Navbar from '../components/Layout/Navbar'
-import Modal from '../components/shared/Modal'
+import ConfirmDialog from '../components/shared/ConfirmDialog'
 import ListsRail from '../components/Collections/ListsRail'
+import CollectionInviteCard from '../components/Collections/CollectionInviteCard'
 import ListEditorModal from '../components/Collections/ListEditorModal'
 import CollectionHero from '../components/Collections/CollectionHero'
 import CollectionList from '../components/Collections/CollectionList'
@@ -13,18 +14,26 @@ import MoveToListModal from '../components/Collections/MoveToListModal'
 import ShareCollectionModal from '../components/Collections/ShareCollectionModal'
 import AddPlaceToCollectionModal from '../components/Collections/AddPlaceToCollectionModal'
 import ImportFromTripModal from '../components/Collections/ImportFromTripModal'
+import ImportCollectionModal from '../components/Collections/ImportCollectionModal'
 import CollectionPlaceDetail from '../components/Collections/CollectionPlaceDetail'
 import LabelManager from '../components/Collections/LabelManager'
 import BulkAssignLabelModal from '../components/Collections/BulkAssignLabelModal'
+import { ActiveCollectionTours } from '../components/Tours/collection/CollectionToursSection'
 import { useCollections } from './collections/useCollections'
 import EmptyState from '../components/shared/EmptyState'
 import '../styles/dashboard.css'
+import HelpAnchor from '../components/Help/HelpAnchor'
 import '../styles/collections.css'
 
 export default function CollectionsPage(): React.ReactElement {
   // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
   // chunk of its own instead of a dead limb in this one.
-  return <CollectionsPageDesktop />
+  return (
+    <>
+      <HelpAnchor id="collections" />
+      <CollectionsPageDesktop />
+    </>
+  )
 }
 
 function CollectionsPageDesktop(): React.ReactElement {
@@ -43,13 +52,21 @@ function CollectionsPageDesktop(): React.ReactElement {
   // Labels are per-collection, so only on a real (non "All saved") list.
   const isRealList = !c.isAllSaved && typeof c.activeId === 'number'
   const canManageLabels = isRealList && c.canEdit
+  // Invites also sit at the top of the body: with no lists of one's own the
+  // body is all there is (and the rail is hidden below 1080px), and the invite
+  // notification links to a list that is still an invite (#2645).
+  const bodyInvites = noLists ? c.orderedInvites : (c.routeInvite ? [c.routeInvite] : [])
 
-  // Selecting a place toggles it, so clicking it again — or the map background —
-  // clears it. Below the desktop breakpoint the list and map are separate views;
-  // above it the list view is a split with a persistent map that pans to the
-  // selection (the map stays mounted across the list↔map toggle so it animates).
+  // Selecting a place from the list toggles it, so clicking the row again clears
+  // it, as does the map background. A marker click always shows the place: a second
+  // click on the marker of the place that is open read as "the details do not open"
+  // rather than as "close them" (#2431). Below the desktop breakpoint the list and
+  // map are separate views; above it the list view is a split with a persistent map
+  // that pans to the selection (the map stays mounted across the list↔map toggle so
+  // it animates).
   const mappable = c.mappable
   const openPlace = (id: number) => c.setSelectedPlaceId(c.selectedPlaceId === id ? null : id)
+  const showPlace = (id: number) => c.setSelectedPlaceId(id)
   const deselect = () => c.setSelectedPlaceId(null)
   const toggleView = () => {
     // Going to the full-map view closes the (list-docked) detail sheet.
@@ -58,7 +75,7 @@ function CollectionsPageDesktop(): React.ReactElement {
   }
   // Clicking a marker in the full-map view drops back to the split so the list
   // + detail come into view alongside the map.
-  const onMapSelect = (id: number) => { openPlace(id); if (c.view === 'map') c.setView('list') }
+  const onMapSelect = (id: number) => { showPlace(id); if (c.view === 'map') c.setView('list') }
 
   const desktopSplit = c.isWide && c.hasMappable
   const mapShown = c.hasMappable && (c.view === 'map' || c.isWide)
@@ -129,9 +146,12 @@ function CollectionsPageDesktop(): React.ReactElement {
       t={t}
     />
   ) : null
+  // The whole tours the list keeps (LIB-03) open its list, as rows like its places.
+  const tourRows = isRealList ? <ActiveCollectionTours search={c.search} /> : null
   const listColumn = (
     <>
       {filterBar}
+      {tourRows}
       {c.visiblePlaces.length > 0
         ? listEl
         : <EmptyState scene="search" title={t('collections.empty.noMatchTitle')} />}
@@ -144,6 +164,7 @@ function CollectionsPageDesktop(): React.ReactElement {
   } else if (!hasPlaces) {
     body = (
       <div className="flex flex-col items-center">
+        {tourRows && <div className="w-full pb-2">{tourRows}</div>}
         <EmptyState scene="collections" title={t('collections.empty.title')} className={canAddPlace ? 'pb-4' : undefined} />
         {canAddPlace && (
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -180,6 +201,7 @@ function CollectionsPageDesktop(): React.ReactElement {
       incomingInvites={c.incomingInvites}
       onSelect={c.handleSelectList}
       onNewList={() => { c.setMobileRailOpen(false); c.setEditorTarget('new') }}
+      onImportList={() => { c.setMobileRailOpen(false); c.setShowImportFile(true) }}
       onAcceptInvite={c.handleAcceptInvite}
       onDeclineInvite={c.handleDeclineInvite}
       t={t}
@@ -194,6 +216,17 @@ function CollectionsPageDesktop(): React.ReactElement {
           <aside className="col-rail" style={{ minHeight: c.heroHeight || undefined }}>{rail}</aside>
 
           <div className="col-body">
+            {bodyInvites.length > 0 && (
+              <section className="col-invites-main" aria-label={t('collections.invites.title')}>
+                <div className="col-rail-label">
+                  {t('collections.invites.title')}
+                  <span className="badge">{bodyInvites.length}</span>
+                </div>
+                {bodyInvites.map(inv => (
+                  <CollectionInviteCard key={inv.collection_id} invite={inv} onAccept={c.handleAcceptInvite} onDecline={c.handleDeclineInvite} t={t} />
+                ))}
+              </section>
+            )}
             {noLists ? (
               <div className="flex flex-col items-center">
                 <EmptyState scene="collections" title={t('collections.empty.firstTitle')} className="pb-4" />
@@ -218,6 +251,8 @@ function CollectionsPageDesktop(): React.ReactElement {
                     onEdit={() => { if (c.activeCollection) c.setEditorTarget(c.activeCollection) }}
                     shareMemberCount={c.shareMemberCount}
                     onShare={() => c.setShowShare(true)}
+                    onExport={c.isAllSaved || !c.activeCollection ? undefined : c.handleExportList}
+                    exporting={c.exporting}
                     t={t}
                   />
                 </div>
@@ -259,24 +294,24 @@ function CollectionsPageDesktop(): React.ReactElement {
                     <span className="lbl">{t('collections.selectedCount', { count: c.selectedIds.length })}</span>
                     <div className="col-toolbar-spacer" />
                     {c.canEdit && isRealList && (
-                      <button type="button" onClick={() => c.setLabelPickerOpen(true)} disabled={c.selectedIds.length === 0} className="col-selbar-btn">
-                        <Tags size={14} /> {t('collections.labels.assign')}
+                      <button type="button" onClick={() => c.setLabelPickerOpen(true)} disabled={c.selectedIds.length === 0} className="col-selbar-btn act" title={t('collections.labels.assign')}>
+                        <Tags size={14} /> <span className="col-selbar-txt">{t('collections.labels.assign')}</span>
                       </button>
                     )}
-                    {c.canEdit && (
-                      <button type="button" onClick={() => c.setListPickerMode('move')} disabled={c.selectedIds.length === 0} className="col-selbar-btn">
-                        <FolderInput size={14} /> {t('collections.moveToList')}
+                    {c.canDelete && (
+                      <button type="button" onClick={() => c.setListPickerMode('move')} disabled={c.selectedIds.length === 0} className="col-selbar-btn act" title={t('collections.moveToList')}>
+                        <FolderInput size={14} /> <span className="col-selbar-txt">{t('collections.moveToList')}</span>
                       </button>
                     )}
-                    <button type="button" onClick={() => c.setListPickerMode('copy')} disabled={c.selectedIds.length === 0} className="col-selbar-btn">
-                      <CopyPlus size={14} /> {t('collections.duplicateToList')}
+                    <button type="button" onClick={() => c.setListPickerMode('copy')} disabled={c.selectedIds.length === 0} className="col-selbar-btn act" title={t('collections.duplicateToList')}>
+                      <CopyPlus size={14} /> <span className="col-selbar-txt">{t('collections.duplicateToList')}</span>
                     </button>
-                    <button type="button" onClick={c.openCopyForSelection} disabled={c.selectedIds.length === 0} className="col-selbar-btn">
-                      <Copy size={14} /> {t('collections.copyToTrip')}
+                    <button type="button" onClick={c.openCopyForSelection} disabled={c.selectedIds.length === 0} className="col-selbar-btn act" title={t('collections.copyToTrip')}>
+                      <Copy size={14} /> <span className="col-selbar-txt">{t('collections.copyToTrip')}</span>
                     </button>
                     {c.canDelete && (
-                      <button type="button" onClick={c.handleDeleteSelected} disabled={c.selectedIds.length === 0} className="col-selbar-btn danger">
-                        <Trash2 size={14} /> {t('common.delete')}
+                      <button type="button" onClick={c.handleDeleteSelected} disabled={c.selectedIds.length === 0} className="col-selbar-btn act danger" title={t('common.delete')}>
+                        <Trash2 size={14} /> <span className="col-selbar-txt">{t('common.delete')}</span>
                       </button>
                     )}
                     <button type="button" onClick={() => c.setSelectMode(false)} className="col-selbar-btn" aria-label={t('common.cancel')}>
@@ -341,6 +376,19 @@ function CollectionsPageDesktop(): React.ReactElement {
         />
       )}
 
+      {/* A list file as a new list, or added to one that is already there (#2198, #2301) */}
+      {c.showImportFile && (
+        <ImportCollectionModal
+          onImport={c.handleImportFile}
+          onImportInto={c.handleImportFileInto}
+          lists={c.writableLists}
+          defaultListId={typeof c.activeId === 'number' ? c.activeId : null}
+          onReadGpx={c.handleReadGpx}
+          onClose={() => c.setShowImportFile(false)}
+          t={t}
+        />
+      )}
+
       {/* Bulk import of a trip's places into the current list */}
       {typeof c.activeId === 'number' && c.activeCollection && (
         <ImportFromTripModal
@@ -367,7 +415,7 @@ function CollectionsPageDesktop(): React.ReactElement {
       {c.listPickerMode && (
         <MoveToListModal
           mode={c.listPickerMode}
-          lists={c.ownedLists.filter(l => l.id !== c.activeId)}
+          lists={c.writableLists.filter(l => l.id !== c.activeId)}
           count={c.selectedIds.length}
           onPick={c.listPickerMode === 'move' ? c.handleMoveToList : c.handleDuplicateToList}
           onClose={() => c.setListPickerMode(null)}
@@ -419,24 +467,15 @@ function CollectionsPageDesktop(): React.ReactElement {
       )}
 
       {/* Delete-list confirm */}
-      <Modal
+      <ConfirmDialog
         isOpen={c.confirmDeleteList != null}
         onClose={() => c.setConfirmDeleteList(null)}
+        onConfirm={c.handleDeleteList}
         title={t('collections.deleteList')}
-        size="sm"
-        footer={
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => c.setConfirmDeleteList(null)} className="px-3 py-1.5 rounded-lg border border-edge text-content-secondary text-[13px] hover:bg-surface-hover">
-              {t('common.cancel')}
-            </button>
-            <button type="button" onClick={c.handleDeleteList} className="px-3 py-1.5 rounded-lg bg-danger text-white text-[13px] font-semibold hover:opacity-90">
-              {t('common.delete')}
-            </button>
-          </div>
-        }
-      >
-        <p className="text-[13px] text-content-secondary">{t('collections.deleteListConfirm')}</p>
-      </Modal>
+        message={t('collections.deleteListConfirm')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+      />
     </>
   )
 }

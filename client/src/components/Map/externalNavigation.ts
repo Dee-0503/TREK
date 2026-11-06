@@ -1,11 +1,11 @@
-import type { GeographicContext } from '@trek/shared'
+import { wgs84ToGcj02, type GeographicContext } from '@trek/shared'
 
 export type ExternalNavigationContext = Pick<GeographicContext, 'countryCode'>
 export type ExternalRouteProfile = 'driving' | 'walking' | 'cycling' | (string & {})
 
 export interface ExternalWaypoint {
-  lat: number | null | undefined
-  lng: number | null | undefined
+  lat?: number | null
+  lng?: number | null
   name?: string | null
 }
 
@@ -22,9 +22,7 @@ const AMAP_ROUTE_URI = 'https://uri.amap.com/navigation'
  * WGS84; conversion is deliberately isolated to this provider-specific module.
  */
 export function toAmapCoordinates(point: { lat: number; lng: number }): { lat: number; lng: number } {
-  if (!isMainlandContext({ countryCode: 'CN' })) return { ...point }
-  const delta = deltaFor(point.lat, point.lng)
-  return { lat: point.lat + delta.lat, lng: point.lng + delta.lng }
+  return wgs84ToGcj02(point.lat, point.lng)
 }
 
 export function isMainlandContext(context?: ExternalNavigationContext | null): boolean {
@@ -102,42 +100,12 @@ export function buildAmapRouteUrl(
   if (!isMainlandContext(context) || places.length < 2 || places.length > 3) return null
   const mode = amapMode(profile)
   if (!mode || !places.every(validPoint)) return null
-  const [from, via, to] = places
+  const from = places[0]
+  const to = places[places.length - 1]
+  const via = places.length === 3 ? places[1] : undefined
   const params = [`from=${encoded(amapPoint(from))}`, `to=${encoded(amapPoint(to))}`]
   if (via) params.push(`via=${encoded(amapPoint(via))}`)
   params.push(`mode=${mode}`)
   if (shouldCallNative(options.callnative)) params.push('callnative=1')
   return `${AMAP_ROUTE_URI}?${params.join('&')}`
-}
-
-function deltaFor(lat: number, lng: number): { lat: number; lng: number } {
-  const pi = Math.PI
-  const axis = 6378245.0
-  const ee = 0.006693421622965943
-  const dLat = transformLat(lng - 105, lat - 35)
-  const dLng = transformLng(lng - 105, lat - 35)
-  const radLat = (lat / 180) * pi
-  let magic = Math.sin(radLat)
-  magic = 1 - ee * magic * magic
-  const sqrtMagic = Math.sqrt(magic)
-  return {
-    lat: (dLat * 180) / (((axis * (1 - ee)) / (magic * sqrtMagic)) * pi),
-    lng: (dLng * 180) / ((axis / sqrtMagic) * Math.cos(radLat) * pi),
-  }
-}
-
-function transformLat(x: number, y: number): number {
-  let ret = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
-  ret += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3
-  ret += ((20 * Math.sin(y * Math.PI) + 40 * Math.sin((y / 3) * Math.PI)) * 2) / 3
-  ret += ((160 * Math.sin((y / 12) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30)) * 2) / 3
-  return ret
-}
-
-function transformLng(x: number, y: number): number {
-  let ret = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
-  ret += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3
-  ret += ((20 * Math.sin(x * Math.PI) + 40 * Math.sin((x / 3) * Math.PI)) * 2) / 3
-  ret += ((150 * Math.sin((x / 12) * Math.PI) + 300 * Math.sin((x / 30) * Math.PI)) * 2) / 3
-  return ret
 }

@@ -9,17 +9,16 @@
  *   node --import tsx scripts/migrate-encryption.ts
  *
  * Usage (Docker):
- *   docker exec -it trek node --import tsx scripts/migrate-encryption.ts
+ *   docker exec -it -u node -w /app/server trek node --import tsx scripts/migrate-encryption.ts
  *
  * The script will prompt for the old and new keys interactively so they never
  * appear in shell history, process arguments, or log output.
  */
-
+import Database from 'better-sqlite3';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
-import Database from 'better-sqlite3';
 
 // ---------------------------------------------------------------------------
 // Crypto helpers — mirrors apiKeyCrypto.ts and mfaCrypto.ts but with
@@ -143,9 +142,7 @@ async function main() {
   console.log('A backup of the database will be created before any changes are made.\n');
 
   // Resolve DB path
-  const dbPath = path.resolve(
-    process.env.DB_PATH ?? path.join(__dirname, '../data/travel.db')
-  );
+  const dbPath = path.resolve(process.env.DB_PATH ?? path.join(__dirname, '../data/travel.db'));
 
   if (!fs.existsSync(dbPath)) {
     console.error(`Database not found at: ${dbPath}`);
@@ -154,6 +151,23 @@ async function main() {
   }
 
   console.log(`Database: ${dbPath}\n`);
+
+  // SQLite silently opens an unwritable file read-only (#2933); db.readonly can't tell.
+  const notWritable = [dbPath, path.dirname(dbPath)].find((p) => {
+    try {
+      fs.accessSync(p, fs.constants.W_OK);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (notWritable) {
+    rl.close();
+    console.error(`Cannot write to ${notWritable} as uid ${process.getuid?.() ?? '?'}.`);
+    console.error('Run this script as the user that owns the data directory. In the Docker image that is node:');
+    console.error('  docker exec -it -u node -w /app/server trek node --import tsx scripts/migrate-encryption.ts');
+    process.exit(1);
+  }
 
   // Collect keys interactively
   const oldKey = await promptSecret('Old ENCRYPTION_KEY: ');
@@ -184,6 +198,10 @@ async function main() {
 
   const db = new Database(dbPath);
   db.pragma('busy_timeout = 5000');
+  // Temp files in memory, like every connection src/db/connection.ts opens: a
+  // container with a read-only root and no tmpfs on /tmp has nowhere to put
+  // them, and the rotation below runs as one long transaction (#2518).
+  db.pragma('temp_store = MEMORY');
 
   // The rollback copy has to be a consistent snapshot, not a plain file copy:
   // this script is documented as running against a live server, so in WAL mode
@@ -192,7 +210,8 @@ async function main() {
   // copy is only the fallback for when it cannot (disk, lock).
   try {
     db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
-  } catch {
+  } catch (err) {
+    console.warn(`VACUUM INTO failed (${(err as Error).message}); falling back to checkpoint + copy.`);
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     fs.copyFileSync(dbPath, backupPath);
   }
@@ -209,14 +228,18 @@ async function main() {
   const wantedJournal = (process.env.TREK_DB_JOURNAL_MODE ?? '').trim().toUpperCase();
   const journalMode = journalModes.includes(wantedJournal) ? wantedJournal : 'WAL';
   if (wantedJournal && journalMode !== wantedJournal) {
-    console.warn(`TREK_DB_JOURNAL_MODE="${process.env.TREK_DB_JOURNAL_MODE}" is not a SQLite journal mode — using ${journalMode}.`);
+    console.warn(
+      `TREK_DB_JOURNAL_MODE="${process.env.TREK_DB_JOURNAL_MODE}" is not a SQLite journal mode — using ${journalMode}.`,
+    );
   }
 
   const wantedSync = (process.env.TREK_DB_SYNCHRONOUS ?? '').trim().toUpperCase();
   const defaultSync = journalMode === 'WAL' ? 'NORMAL' : 'FULL';
   const synchronous = syncLevels.includes(wantedSync) ? wantedSync : defaultSync;
   if (wantedSync && synchronous !== wantedSync) {
-    console.warn(`TREK_DB_SYNCHRONOUS="${process.env.TREK_DB_SYNCHRONOUS}" is not a SQLite synchronous level — using ${synchronous}.`);
+    console.warn(
+      `TREK_DB_SYNCHRONOUS="${process.env.TREK_DB_SYNCHRONOUS}" is not a SQLite synchronous level — using ${synchronous}.`,
+    );
   }
 
   db.pragma(`journal_mode = ${journalMode}`);
@@ -253,7 +276,10 @@ async function main() {
 
   // Helper: migrate a single MFA value (no prefix, raw base64)
   function migrateMfaValue(raw: string, label: string): string | null {
-    if (!raw) { result.skipped++; return null; }
+    if (!raw) {
+      result.skipped++;
+      return null;
+    }
 
     const plain = decryptMfa(raw, oldKey);
     if (plain !== null) {
@@ -283,6 +309,14 @@ async function main() {
     // rotation leaves it encrypted under the old key, which reads back as "no
     // key" and silently drops the install to OpenStreetMap, so the copy is
     // pinned by tests/unit/db/migrate-encryption-parity.test.ts.
+    //
+    // web_push_vapid_private_key is the Web Push signing key VapidKeysService
+    // generates. Missed here it would no longer decrypt under the new key, and
+    // push would stay off on every device until the old key came back.
+    //
+    // service_key is the installation's key towards the liketrek services.
+    // Missed here it reads back as unusable, the installation registers anew and
+    // loses its id, and a revoked key would come back as a fresh one.
     for (const key of [
       'oidc_client_secret',
       'smtp_pass',
@@ -290,6 +324,9 @@ async function main() {
       'admin_ntfy_token',
       'maps_api_key',
       'unsplash_api_key',
+      'amap_api_key',
+      'web_push_vapid_private_key',
+      'service_key',
     ]) {
       const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined;
       if (!row?.value) continue;
@@ -312,6 +349,9 @@ async function main() {
     const apiKeyColumns = [
       'maps_api_key',
       'unsplash_api_key',
+      // Added with the Amap provider; filtered against the real table below, so a
+      // database that has not run that migration yet is not a rotation failure.
+      'amap_api_key',
       'openweather_api_key',
       'immich_api_key',
       'synology_password',
@@ -322,7 +362,10 @@ async function main() {
     const users = db.prepare('SELECT id FROM users').all() as { id: number }[];
 
     for (const user of users) {
-      const row = db.prepare(`SELECT ${apiKeyColumns.join(', ')} FROM users WHERE id = ?`).get(user.id) as Record<string, string>;
+      const row = db.prepare(`SELECT ${apiKeyColumns.join(', ')} FROM users WHERE id = ?`).get(user.id) as Record<
+        string,
+        string
+      >;
 
       for (const col of apiKeyColumns) {
         if (!row[col]) continue;
@@ -333,7 +376,8 @@ async function main() {
       }
 
       // mfa_secret (mfa crypto)
-      const mfaRow = db.prepare('SELECT mfa_secret FROM users WHERE id = ? AND mfa_secret IS NOT NULL').get(user.id) as { mfa_secret: string } | undefined;
+      const mfaRow = db.prepare('SELECT mfa_secret FROM users WHERE id = ? AND mfa_secret IS NOT NULL').get(user.id) as
+        { mfa_secret: string } | undefined;
       if (mfaRow?.mfa_secret) {
         const newVal = migrateMfaValue(mfaRow.mfa_secret, `users[${user.id}].mfa_secret`);
         if (newVal !== null) {
@@ -360,8 +404,7 @@ async function main() {
     };
     {
       const row = db.prepare("SELECT value FROM app_settings WHERE key = 'storage.backends'").get() as
-        | { value: string }
-        | undefined;
+        { value: string } | undefined;
       if (row?.value) {
         let backends: unknown;
         try {
@@ -405,9 +448,11 @@ async function main() {
 
     // --- settings: per-user encrypted keys ---
     const encryptedSettingKeys = ['webhook_url', 'ntfy_token', 'mapbox_access_token', 'carto_api_key', 'llm_api_key'];
-    const settingRows = db.prepare(
-      `SELECT user_id, key, value FROM settings WHERE key IN (${encryptedSettingKeys.map(() => '?').join(', ')})`
-    ).all(...encryptedSettingKeys) as { user_id: number; key: string; value: string }[];
+    const settingRows = db
+      .prepare(
+        `SELECT user_id, key, value FROM settings WHERE key IN (${encryptedSettingKeys.map(() => '?').join(', ')})`,
+      )
+      .all(...encryptedSettingKeys) as { user_id: number; key: string; value: string }[];
 
     for (const row of settingRows) {
       if (!row.value) continue;
@@ -452,7 +497,7 @@ async function main() {
       // Which keys are secret is per plugin and per scope, and it lives in the DB
       // rather than in this script, so nothing has to be pinned by hand here.
       const secretFields = db
-        .prepare("SELECT plugin_id, field_key, scope FROM plugin_settings_fields WHERE secret = 1")
+        .prepare('SELECT plugin_id, field_key, scope FROM plugin_settings_fields WHERE secret = 1')
         .all() as { plugin_id: string; field_key: string; scope: string | null }[];
       const secretKeysFor = (pluginId: string, scope: string): string[] =>
         secretFields
@@ -487,7 +532,10 @@ async function main() {
       };
 
       if (tableExists('plugins')) {
-        const pluginRows = db.prepare('SELECT id, config FROM plugins').all() as { id: string; config: string | null }[];
+        const pluginRows = db.prepare('SELECT id, config FROM plugins').all() as {
+          id: string;
+          config: string | null;
+        }[];
         for (const row of pluginRows) {
           const next = migrateConfigJson(row.config, secretKeysFor(row.id, 'instance'), `plugins[${row.id}].config`);
           if (next !== null) {
@@ -497,9 +545,11 @@ async function main() {
       }
 
       if (tableExists('plugin_user_config')) {
-        const userConfigRows = db
-          .prepare('SELECT plugin_id, user_id, config FROM plugin_user_config')
-          .all() as { plugin_id: string; user_id: number; config: string | null }[];
+        const userConfigRows = db.prepare('SELECT plugin_id, user_id, config FROM plugin_user_config').all() as {
+          plugin_id: string;
+          user_id: number;
+          config: string | null;
+        }[];
         for (const row of userConfigRows) {
           const next = migrateConfigJson(
             row.config,
@@ -517,8 +567,40 @@ async function main() {
       }
     }
 
+    // --- addons: the AI Parsing addon's instance-wide API key ---
+    // Stored encrypted as `apiKey` inside the addon's JSON config
+    // (llm-parse/llm-config.ts). Left out, LLM parsing quietly runs without a
+    // key after the rotation, since a failed decrypt reads as "no key".
+    if (tableExists('addons')) {
+      const addonRows = db.prepare('SELECT id, config FROM addons WHERE config IS NOT NULL').all() as {
+        id: string;
+        config: string;
+      }[];
+      for (const row of addonRows) {
+        let config: unknown;
+        try {
+          config = JSON.parse(row.config);
+        } catch {
+          continue;
+        }
+        if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+        const apiKey = (config as Record<string, unknown>).apiKey;
+        if (typeof apiKey !== 'string' || !apiKey) continue;
+        const newVal = migrateApiKeyValue(apiKey, `addons[${row.id}].config.apiKey`);
+        if (newVal !== null) {
+          db.prepare('UPDATE addons SET config = ? WHERE id = ?').run(
+            JSON.stringify({ ...(config as Record<string, unknown>), apiKey: newVal }),
+            row.id,
+          );
+        }
+      }
+    }
+
     // --- trip_album_links: passphrase ---
-    const albumLinks = db.prepare('SELECT id, passphrase FROM trip_album_links WHERE passphrase IS NOT NULL').all() as { id: number; passphrase: string }[];
+    const albumLinks = db.prepare('SELECT id, passphrase FROM trip_album_links WHERE passphrase IS NOT NULL').all() as {
+      id: number;
+      passphrase: string;
+    }[];
     for (const row of albumLinks) {
       const newVal = migrateApiKeyValue(row.passphrase, `trip_album_links[${row.id}].passphrase`);
       if (newVal !== null) {
@@ -526,12 +608,89 @@ async function main() {
       }
     }
 
+    // --- dawarich_connections: api_key ---
+    // Its own table rather than a users column, so it needs its own block. The
+    // table arrived with a later migration, hence the existence check: an older
+    // database simply has nothing to rotate here.
+    if (tableExists('dawarich_connections')) {
+      const connections = db
+        .prepare('SELECT user_id, api_key FROM dawarich_connections WHERE api_key IS NOT NULL')
+        .all() as { user_id: number; api_key: string }[];
+      for (const row of connections) {
+        const newVal = migrateApiKeyValue(row.api_key, `dawarich_connections[${row.user_id}].api_key`);
+        if (newVal !== null) {
+          db.prepare('UPDATE dawarich_connections SET api_key = ? WHERE user_id = ?').run(newVal, row.user_id);
+        }
+      }
+    }
+
     // --- trek_photos: passphrase ---
-    const photos = db.prepare('SELECT id, passphrase FROM trek_photos WHERE passphrase IS NOT NULL').all() as { id: number; passphrase: string }[];
+    const photos = db.prepare('SELECT id, passphrase FROM trek_photos WHERE passphrase IS NOT NULL').all() as {
+      id: number;
+      passphrase: string;
+    }[];
     for (const row of photos) {
       const newVal = migrateApiKeyValue(row.passphrase, `trek_photos[${row.id}].passphrase`);
       if (newVal !== null) {
         db.prepare('UPDATE trek_photos SET passphrase = ? WHERE id = ?').run(newVal, row.id);
+      }
+    }
+
+    // --- document_connections: secrets ---
+    // Every credential of a document connection sits in ONE encrypted JSON blob
+    // (src/nest/doc-sync/doc-sync-secrets.ts) rather than in a column per
+    // provider, so a new provider changes nothing here: the blob is rotated as
+    // an opaque value. It also holds secrets the provider handed out itself,
+    // such as the DSM device token, which no form can re-enter. Left out of a
+    // rotation, every trip binding on the instance reads back as unauthorized
+    // and Synology needs a fresh OTP pairing. The table arrived with a later
+    // migration, hence the existence check.
+    if (tableExists('document_connections')) {
+      const documentConnections = db
+        .prepare('SELECT id, secrets FROM document_connections WHERE secrets IS NOT NULL')
+        .all() as { id: number; secrets: string }[];
+      for (const row of documentConnections) {
+        const newVal = migrateApiKeyValue(row.secrets, `document_connections[${row.id}].secrets`);
+        if (newVal !== null) {
+          db.prepare('UPDATE document_connections SET secrets = ? WHERE id = ?').run(newVal, row.id);
+        }
+      }
+    }
+
+    // --- ai_connections: secrets ---
+    // The AI assistant's connections keep their credential in ONE encrypted
+    // JSON blob (src/nest/ai-connections/ai-secrets.ts): an API key, or a
+    // ChatGPT sign-in's tokens. Left out of a rotation, the instance's
+    // connection asks the admin for its key again and every ChatGPT user has
+    // to sign in anew. The table arrived with a later migration, hence the
+    // existence check.
+    if (tableExists('ai_connections')) {
+      const aiConnections = db.prepare('SELECT id, secrets FROM ai_connections WHERE secrets IS NOT NULL').all() as {
+        id: number;
+        secrets: string;
+      }[];
+      for (const row of aiConnections) {
+        const newVal = migrateApiKeyValue(row.secrets, `ai_connections[${row.id}].secrets`);
+        if (newVal !== null) {
+          db.prepare('UPDATE ai_connections SET secrets = ? WHERE id = ?').run(newVal, row.id);
+        }
+      }
+    }
+
+    // --- trip_document_links: webhook_secret ---
+    // The secret a provider signs its webhook calls with, stored through the
+    // same blob helper. It is written once when the link is created and never
+    // regenerated, so a rotation that misses it leaves the link with nothing to
+    // check a signature against.
+    if (tableExists('trip_document_links')) {
+      const documentLinks = db
+        .prepare('SELECT id, webhook_secret FROM trip_document_links WHERE webhook_secret IS NOT NULL')
+        .all() as { id: number; webhook_secret: string }[];
+      for (const row of documentLinks) {
+        const newVal = migrateApiKeyValue(row.webhook_secret, `trip_document_links[${row.id}].webhook_secret`);
+        if (newVal !== null) {
+          db.prepare('UPDATE trip_document_links SET webhook_secret = ? WHERE id = ?').run(newVal, row.id);
+        }
       }
     }
   })();
@@ -545,12 +704,24 @@ async function main() {
   console.log(`  Skipped (empty): ${result.skipped}`);
   if (result.errors.length > 0) {
     console.warn(`  Errors:          ${result.errors.length}`);
-    result.errors.forEach(e => console.warn(`    - ${e}`));
+    result.errors.forEach((e) => console.warn(`    - ${e}`));
     console.warn('\nSome secrets could not be migrated. Check the errors above.');
     console.warn(`Your original database is backed up at: ${backupPath}`);
     process.exit(1);
   } else {
     console.log('\nAll secrets successfully re-encrypted.');
+    // The server refuses to start when ENCRYPTION_KEY and the key file disagree
+    // (src/config.ts), so the file follows the rotation. Only an existing file
+    // next to the database is touched; anything else is left to the operator.
+    const keyFile = path.join(path.dirname(dbPath), '.encryption_key');
+    if (fs.existsSync(keyFile)) {
+      fs.writeFileSync(keyFile, newKey, { mode: 0o600 });
+      console.log(`Key file updated: ${keyFile}`);
+    } else {
+      console.log(
+        'No key file next to the database. Store the new key wherever TREK reads it from (ENCRYPTION_KEY or data/.encryption_key).',
+      );
+    }
     console.log(`Backup retained at: ${backupPath}`);
   }
 }

@@ -1,35 +1,46 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { localIsoDate } from '../../../utils/localDate'
-import { Camera, Plus, Image, Images, X, MapPin, Locate, Trash2, CheckCircle2, MinusCircle } from 'lucide-react'
+import { useRef, useState, type CSSProperties } from 'react'
+import { Briefcase, Camera, Plus, Image, Images, X, MapPin, Locate, Trash2, CheckCircle2, MinusCircle, ChevronUp, ChevronDown, EyeOff, Play, NotebookPen } from 'lucide-react'
 import MSheet from '../../components/MSheet'
 import MIconBtn from '../../components/MIconBtn'
 import MToggle from '../../components/MToggle'
+import { SHEET_PRIMARY, SHEET_SECONDARY } from '../trip/sheets/MTripSheetUi'
 import { useTranslation } from '../../../i18n'
-import { useToast } from '../../../components/shared/Toast'
 import CustomTimePicker from '../../../components/shared/CustomTimePicker'
-import { journeyApi, mapsApi, weatherApi } from '../../../api/client'
-import { getApiErrorMessage } from '../../../types'
-import { normalizeImageFiles } from '../../../utils/convertHeic'
-import { getCurrentPositionOnce } from '../../../hooks/useGeolocation'
+import { CustomDatePicker } from '../../../components/shared/CustomDateTimePicker'
+import { isVideoFile } from '../../../utils/videoPoster'
 import type { ResilientResult, UploadProgress } from '../../../utils/uploadQueue'
 import type { JourneyEntry, JourneyPhoto, GalleryPhoto, JourneyTrip } from '../../../store/journeyStore'
-import { useAddonStore } from '../../../store/addonStore'
-import { photoUrl, geoOnceErrorKey, isValidGeoPoint } from '../../../pages/journeyDetail/JourneyDetailPage.helpers'
+import { photoUrl, posterlessVideo } from '../../../pages/journeyDetail/JourneyDetailPage.helpers'
 import JournalBody from '../../../components/Journey/JournalBody'
-import { ProviderPicker, type ProviderPhotoGroup } from '../../../components/Journey/JourneyDetailPageProviderPicker'
-import { journeyWeatherCategory, MOBILE_MOODS, MOBILE_WEATHERS } from './mobileJourneyMeta'
+import { ProviderPicker } from '../../../components/Journey/JourneyDetailPageProviderPicker'
+import { MOBILE_MOODS, MOBILE_WEATHERS } from './mobileJourneyMeta'
+import { useJourneyEntryForm, type PendingProviderGroup } from '../../../components/Journey/useJourneyEntryForm'
+
+const NO_PROVIDERS: { id: string; name: string }[] = []
+
+/**
+ * A picked mood chip: its colour as the frame and the label, a light wash of it
+ * behind. The frame is the full colour because a tint alone left the grey neutral
+ * mood looking like the chips at rest on a dark sheet (#2905).
+ */
+function moodChipActiveStyle(color: string): CSSProperties {
+  return { background: `${color}33`, color, borderColor: color }
+}
 
 const PRO_COLOR = '#2FA37A'
 const CON_COLOR = '#D6273B'
 
-interface LocationResult {
-  name: string
-  address?: string
-  lat: number
-  lng: number
+// A clip with no poster to show: the tinted tile and play mark the gallery grid
+// gives it, since an <img> asked for its thumbnail draws the broken glyph (#2341).
+function ClipTile() {
+  return (
+    <span className="absolute inset-0 flex items-center justify-center bg-[color:var(--m-ic)]">
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur">
+        <Play size={12} className="ml-[1px]" fill="currentColor" />
+      </span>
+    </span>
+  )
 }
-
-type PendingProviderGroup = ProviderPhotoGroup & { provider: string }
 
 interface MJourneyEntrySheetProps {
   entry: JourneyEntry
@@ -38,6 +49,28 @@ interface MJourneyEntrySheetProps {
   readOnly?: boolean
   userId?: number
   trips?: JourneyTrip[]
+  /**
+   * The photo providers (Immich, Synology Photos) connected for this user. The
+   * journey screen asks once when it opens, so the sheet has the answer the
+   * moment it appears instead of probing again and growing a button later (#2908).
+   */
+  photoProviders?: { id: string; name: string }[]
+  /** The optional fields this journey still keeps (discussion #2299). Values are never cleared. */
+  showVerdict?: boolean
+  showMood?: boolean
+  showWeather?: boolean
+  /**
+   * Move this entry within its day.
+   *
+   * The desktop feed has arrows beside every card; the phone had no way to
+   * reorder at all, so a day's stops stayed in whatever order they were written
+   * (discussion #2299). Absent when the entry is alone on its day, is a
+   * suggestion, or the reader cannot edit.
+   */
+  onMoveEarlier?: () => void
+  onMoveLater?: () => void
+  /** Wave a trip-derived suggestion away. Only ever passed for a skeleton. */
+  onDismiss?: () => void
   onClose: () => void
   onSave: (data: Record<string, unknown>, existingEntryId?: number) => Promise<number>
   onUploadPhotos: (entryId: number, files: File[], cbs?: { onProgress?: (p: UploadProgress) => void }) => Promise<ResilientResult<JourneyPhoto>>
@@ -52,290 +85,37 @@ interface MJourneyEntrySheetProps {
  * search, mood (4), weather (6) and tags. Read-only for viewer contributors.
  */
 export default function MJourneyEntrySheet({
-  entry, galleryPhotos, quickCapture = false, readOnly = false, userId = 0, trips = [],
+  entry, galleryPhotos, quickCapture = false, readOnly = false, userId = 0, trips = [], photoProviders: providers = NO_PROVIDERS,
+  showVerdict = true, showMood = true, showWeather = true, onMoveEarlier, onMoveLater, onDismiss,
   onClose, onSave, onUploadPhotos, onAddProviderPhotos, onDelete, onDone,
 }: MJourneyEntrySheetProps) {
-  const { t, language } = useTranslation()
-  const toast = useToast()
-
-  const [title, setTitle] = useState(entry.title || '')
-  const [story, setStory] = useState(entry.story || '')
-  const [entryDate, setEntryDate] = useState(entry.entry_date || localIsoDate())
-  const [entryTime, setEntryTime] = useState(entry.entry_time?.slice(0, 5) || '')
-  const [locationName, setLocationName] = useState(entry.location_name || '')
-  const [locationLat, setLocationLat] = useState<number | null>(entry.location_lat ?? null)
-  const [locationLng, setLocationLng] = useState<number | null>(entry.location_lng ?? null)
-  const [locationQuery, setLocationQuery] = useState('')
-  const [locationResults, setLocationResults] = useState<LocationResult[]>([])
-  const [showLocationResults, setShowLocationResults] = useState(false)
-  const locationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [mood, setMood] = useState(entry.mood || '')
-  const [weather, setWeather] = useState(entry.weather || '')
-  const [statsExcluded, setStatsExcluded] = useState(entry.stats_excluded ?? false)
-  const [pros, setPros] = useState<string[]>(entry.pros_cons?.pros ?? [])
-  const [cons, setCons] = useState<string[]>(entry.pros_cons?.cons ?? [])
-  const [tags, setTags] = useState<string[]>(entry.tags ?? [])
-  const [tagInput, setTagInput] = useState('')
-  const [photos, setPhotos] = useState<(JourneyPhoto | GalleryPhoto)[]>(entry.photos || [])
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [pendingLinkIds, setPendingLinkIds] = useState<number[]>([])
-  const [pendingProviderGroups, setPendingProviderGroups] = useState<PendingProviderGroup[]>([])
-  const [showGalleryPick, setShowGalleryPick] = useState(false)
+  const { t } = useTranslation()
+  const {
+    title, setTitle, story, setStory, entryDate, setEntryDate, entryTime, setEntryTime,
+    locationName, locationLat, locationQuery, locationResults, showLocationResults, setShowLocationResults,
+    locating, locationError, mood, setMood, weather, setWeather, statsExcluded, setStatsExcluded, tripSuggestion,
+    isDraft, setIsDraft, pros, setPros, cons, setCons, tags, setTags, tagInput, setTagInput, saving, uploadProgress,
+    photos, photoOrder, pendingFiles, setPendingFiles, pendingPreviews, setPendingProviderGroups,
+    showGalleryPick, setShowGalleryPick, isDirty, availableGalleryPhotos, queuedProviderPhotos, providerAssetIds,
+    contextLocation, offersStatsToggle, addVerdictRow, verdictRowRef, addTag, handleSave, handleFileChange,
+    pickGalleryPhoto, removePhoto, searchLocation, pickLocation, handleUseCurrentLocation,
+  } = useJourneyEntryForm({
+    entry, journeyId: entry.journey_id, trips, galleryPhotos, onSave, onUploadPhotos, onAddProviderPhotos, onDone,
+    readOnly, quickCapture, withTags: true, inlineLocateError: true,
+  })
   const [showExternal, setShowExternal] = useState(false)
   const [externalProvider, setExternalProvider] = useState<string | null>(null)
-  const [providers, setProviders] = useState<{ id: string; name: string }[]>([])
-  const [saving, setSaving] = useState(false)
   const [captureOnly, setCaptureOnly] = useState(quickCapture)
-  const [locating, setLocating] = useState(false)
-  const [locationError, setLocationError] = useState('')
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
-  // A save that creates the entry and then fails on the provider photos keeps
-  // the sheet open; without the id of what was just created, the retry would
-  // create a second entry (#1808).
-  const persistedEntryIdRef = useRef<number | null>(entry.id > 0 ? entry.id : null)
-
-  // The addon list is already in the store — this only probes which of the
-  // photo providers is actually connected for this user.
-  const addons = useAddonStore(s => s.addons)
-  const addonsLoaded = useAddonStore(s => s.loaded)
-  const photoProviders = useMemo(
-    () => addons.filter(a => a.type === 'photo_provider' && a.enabled).map(a => ({ id: a.id, name: a.name })),
-    [addons],
-  )
-
-  // Minting the preview inside the tile markup would hand out a fresh blob URL on
-  // every keystroke in the story field, and nothing would ever release them.
-  const pendingPreviews = useMemo(() => pendingFiles.map(f => URL.createObjectURL(f)), [pendingFiles])
-  useEffect(() => () => { pendingPreviews.forEach(url => URL.revokeObjectURL(url)) }, [pendingPreviews])
-
-  useEffect(() => {
-    if (readOnly) return
-    // App.tsx loads the addon list on boot, so this only reacts to it. Kicking off
-    // a second load from here would race the other consumers, and loadAddons
-    // overwrites the list unconditionally when it lands.
-    if (!addonsLoaded) return
-    if (photoProviders.length === 0) { setProviders([]); return }
-    let active = true
-    ;(async () => {
-      const connected: { id: string; name: string }[] = []
-      for (const provider of photoProviders) {
-        try {
-          const res = await fetch(`/api/integrations/memories/${provider.id}/status`, { credentials: 'include' })
-          if (res.ok && (await res.json()).connected) connected.push(provider)
-        } catch { /* provider stays hidden */ }
-      }
-      if (active) setProviders(connected)
-    })()
-    return () => { active = false }
-  }, [readOnly, addonsLoaded, photoProviders])
 
   const activeProvider = externalProvider || providers[0]?.id || null
-  const queuedProviderPhotos = pendingProviderGroups.reduce((sum, group) => sum + group.assetIds.length, 0)
-  const providerExistingAssetIds = new Set<string>()
-  if (activeProvider) {
-    photos.forEach(photo => {
-      if (photo.provider === activeProvider && photo.asset_id) providerExistingAssetIds.add(photo.asset_id)
-    })
-    pendingProviderGroups.forEach(group => {
-      if (group.provider === activeProvider) group.assetIds.forEach(assetId => providerExistingAssetIds.add(assetId))
-    })
-  }
-  const contextLocation = isValidGeoPoint({ lat: locationLat ?? Number.NaN, lng: locationLng ?? Number.NaN })
-    ? { lat: locationLat!, lng: locationLng!, name: locationName || undefined }
-    : null
-
-  // The route switch belongs to an entry that is a stop, or was one: an entry
-  // without a point was never on the route, and a new one is not on it yet.
-  const offersStatsToggle = entry.id > 0 && (contextLocation != null || !!entry.stats_excluded)
-
-  useEffect(() => {
-    if (!quickCapture || readOnly || entry.location_lat != null || entry.location_lng != null) return
-
-    let active = true
-    setLocating(true)
-    getCurrentPositionOnce({ enableHighAccuracy: true, maximumAge: 60_000, timeout: 10_000 })
-      .then(async pos => {
-        if (!active) return
-        setLocationLat(pos.lat)
-        setLocationLng(pos.lng)
-
-        const [placeResult, weatherResult] = await Promise.allSettled([
-          mapsApi.reverse(pos.lat, pos.lng, language),
-          weatherApi.getCurrent(pos.lat, pos.lng, language),
-        ])
-        if (!active) return
-        if (placeResult.status === 'fulfilled') {
-          setLocationName(placeResult.value.name || placeResult.value.address || '')
-        }
-        if (weatherResult.status === 'fulfilled' && !weatherResult.value.error) {
-          setWeather(current => current || journeyWeatherCategory(weatherResult.value.main, weatherResult.value.description))
-        }
-        setLocating(false)
-      }, err => {
-        if (!active) return
-        setLocationError(t(geoOnceErrorKey(err)))
-        setLocating(false)
-      })
-
-    return () => { active = false }
-  }, [quickCapture, readOnly, entry.location_lat, entry.location_lng, entry.entry_date, t, language])
-
-  const isDirty =
-    title !== (entry.title || '') ||
-    story !== (entry.story || '') ||
-    entryDate !== (entry.entry_date || localIsoDate()) ||
-    entryTime !== (entry.entry_time?.slice(0, 5) || '') ||
-    locationName !== (entry.location_name || '') ||
-    mood !== (entry.mood || '') ||
-    weather !== (entry.weather || '') ||
-    statsExcluded !== (entry.stats_excluded ?? false) ||
-    pros.filter(p => p.trim()).join('\n') !== (entry.pros_cons?.pros ?? []).join('\n') ||
-    cons.filter(c => c.trim()).join('\n') !== (entry.pros_cons?.cons ?? []).join('\n') ||
-    tags.join('\n') !== (entry.tags ?? []).join('\n') ||
-    pendingFiles.length > 0 ||
-    pendingLinkIds.length > 0 ||
-    pendingProviderGroups.length > 0
+  const providerExistingAssetIds = providerAssetIds(activeProvider)
 
   const handleClose = () => {
     if (!captureOnly && !readOnly && isDirty && !window.confirm(t('journey.editor.discardChangesConfirm'))) return
     onClose()
   }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      const entryId = await onSave({
-        title: title || null,
-        story: story || null,
-        entry_date: entryDate,
-        entry_time: entryTime || null,
-        location_name: locationName || null,
-        location_lat: locationLat,
-        location_lng: locationLng,
-        stats_excluded: offersStatsToggle ? statsExcluded : undefined,
-        mood: mood || null,
-        weather: weather || null,
-        tags: tags.filter(tag => tag.trim()),
-        pros_cons: { pros: pros.filter(p => p.trim()), cons: cons.filter(c => c.trim()) },
-        // An explicit Save is the user saying this suggestion is now their entry —
-        // it does not need a story to earn that (#2008).
-        type: entry.type === 'skeleton' ? 'entry' : undefined,
-      }, persistedEntryIdRef.current ?? undefined)
-      if (entryId > 0) persistedEntryIdRef.current = entryId
-      if (pendingFiles.length > 0 && entryId) {
-        const toUpload = pendingFiles
-        setUploadProgress({ done: 0, total: toUpload.length })
-        try {
-          const { failed } = await onUploadPhotos(entryId, toUpload, {
-            onProgress: p => setUploadProgress({ done: p.done, total: p.total }),
-          })
-          setPendingFiles(failed)
-          if (failed.length > 0) {
-            toast.error(t('journey.editor.uploadPartialFailed', { failed: String(failed.length), total: String(toUpload.length) }))
-          }
-        } catch (err) {
-          toast.error(getApiErrorMessage(err, t('journey.editor.uploadFailed')))
-        } finally {
-          setUploadProgress(null)
-        }
-      }
-      if (pendingLinkIds.length > 0 && entryId) {
-        for (const photoId of pendingLinkIds) {
-          try { await journeyApi.linkPhoto(entryId, photoId) } catch { /* linked photo stays in gallery */ }
-        }
-      }
-      if (pendingProviderGroups.length > 0 && entryId && onAddProviderPhotos) {
-        const failed: PendingProviderGroup[] = []
-        for (const group of pendingProviderGroups) {
-          try { await onAddProviderPhotos(entryId, group) } catch { failed.push(group) }
-        }
-        if (failed.length > 0) {
-          // Keep the sheet open with the failed groups queued so the next save
-          // retries them instead of losing the selection.
-          setPendingProviderGroups(failed)
-          toast.error(t('journey.editor.externalPhotosPartialFailed', { failed: String(failed.length), total: String(pendingProviderGroups.length) }))
-          return
-        }
-        setPendingProviderGroups([])
-      }
-      onDone()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files?.length) return
-    const normalized = await normalizeImageFiles(files)
-    setPendingFiles(prev => [...prev, ...normalized])
-  }
-
-  const searchLocation = (query: string) => {
-    setLocationQuery(query)
-    setShowLocationResults(true)
-    if (locationTimerRef.current) clearTimeout(locationTimerRef.current)
-    if (query.trim().length < 2) {
-      setLocationResults([])
-      return
-    }
-    locationTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await mapsApi.search(query)
-        setLocationResults((res.places || []).slice(0, 6).map((p: { name: string; address?: string; lat: number | string; lng: number | string }) => ({
-          name: p.name, address: p.address, lat: Number(p.lat), lng: Number(p.lng),
-        })))
-      } catch {
-        setLocationResults([])
-      }
-    }, 400)
-  }
-
-  const handleUseCurrentLocation = async () => {
-    if (locating) return
-    setLocating(true)
-    setLocationError('')
-    try {
-      const pos = await getCurrentPositionOnce()
-      // Fill coordinates right away; the name is refined below once the
-      // reverse geocode comes back.
-      const fallbackName = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`
-      if (locationTimerRef.current) clearTimeout(locationTimerRef.current)
-      setLocationLat(pos.lat)
-      setLocationLng(pos.lng)
-      setLocationName(fallbackName)
-      setLocationQuery('')
-      setLocationResults([])
-      setShowLocationResults(false)
-      try {
-        const data = await mapsApi.reverse(pos.lat, pos.lng, language)
-        const name = data.name || data.address
-        // Only replace the coordinate fallback — don't clobber a search
-        // result the user may have picked while the reverse call was in flight.
-        if (name) setLocationName(prev => (prev === fallbackName ? name : prev))
-      } catch { /* best effort — keep the coordinate fallback */ }
-    } catch (err) {
-      setLocationError(t(geoOnceErrorKey(err)))
-    } finally {
-      setLocating(false)
-    }
-  }
-
-  const addTag = () => {
-    // Trailing commas dropped by a scan, not /,+$/: an unanchored ,+ before $ has to
-    // retry from every comma in the run, so a pasted string of them freezes the tab.
-    const trimmed = tagInput.trim()
-    let end = trimmed.length
-    while (end > 0 && trimmed[end - 1] === ',') end--
-    const value = trimmed.slice(0, end)
-    if (!value) return
-    if (!tags.includes(value)) setTags(prev => [...prev, value])
-    setTagInput('')
-  }
-
-  const availableGalleryPhotos = galleryPhotos.filter(gp => !photos.some(p => p.id === gp.id))
 
   const eyebrow = 'font-geist text-[0.625rem] font-bold uppercase tracking-[.09em] text-m-faint'
   const fieldShell = 'rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)]'
@@ -345,20 +125,39 @@ export default function MJourneyEntrySheet({
       open
       onClose={handleClose}
       variant="card"
-      material="opaque"
+      material="glass"
       ariaLabel={entry.id === 0 ? t('journey.detail.newEntry') : t('journey.detail.editEntry')}
     >
-      <div className="flex flex-none items-center border-b border-[color:var(--m-rowbr)] px-[18px] pb-[10px] pt-4">
-        <span className="flex-1 text-[1.0625rem] font-bold">
+      {/* TileHeader's shape, with the move buttons between the title and the close. */}
+      <div className="flex flex-none items-center gap-3 px-[18px] pb-1 pt-4">
+        <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[13px] bg-[color:var(--m-ic)] text-m-ink">
+          <NotebookPen size={19} strokeWidth={1.8} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[1.0625rem] font-bold leading-tight">
           {entry.id === 0 ? t('journey.detail.newEntry') : t('journey.detail.editEntry')}
         </span>
+        {(onMoveEarlier || onMoveLater) && (
+          <span className="me-1 flex items-center gap-1">
+            <MIconBtn variant="neutral" size={34} onClick={() => onMoveEarlier?.()} disabled={!onMoveEarlier} ariaLabel={t('dayplan.moveUp')}>
+              <ChevronUp size={15} strokeWidth={2.4} />
+            </MIconBtn>
+            <MIconBtn variant="neutral" size={34} onClick={() => onMoveLater?.()} disabled={!onMoveLater} ariaLabel={t('dayplan.moveDown')}>
+              <ChevronDown size={15} strokeWidth={2.4} />
+            </MIconBtn>
+          </span>
+        )}
         <MIconBtn variant="neutral" size={34} onClick={handleClose} ariaLabel={t('common.cancel')}>
           <X size={15} strokeWidth={2.2} />
         </MIconBtn>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-[18px] py-3">
-        {!captureOnly && (readOnly ? (
+      <div className="m-scroll-fade mt-2 min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px] pt-[14px]">
+        {/* Quick capture had no title field at all: it asked for a note and nothing
+            else, so every entry caught on the move arrived nameless and the day's
+            list read as a column of identical placeholders (discussion #2299). The
+            name is the one thing that makes an entry findable later, and it is one
+            line to type, so it comes first here too. */}
+        {readOnly ? (
           <div className="pb-[10px] pt-1 text-[1.25rem] font-extrabold">{title || t('journey.editor.titlePlaceholder')}</div>
         ) : (
           <input
@@ -367,12 +166,12 @@ export default function MJourneyEntrySheet({
             placeholder={t('journey.editor.titlePlaceholder')}
             className="w-full bg-transparent pb-[10px] pt-1 text-[1.25rem] font-extrabold text-m-ink outline-none placeholder:text-m-faint"
           />
-        ))}
+        )}
 
         {!readOnly && (
           <>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} onClick={e => { (e.target as HTMLInputElement).value = '' }} />
-            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileChange} onClick={e => { (e.target as HTMLInputElement).value = '' }} />
+            <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleFileChange} onClick={e => { (e.target as HTMLInputElement).value = '' }} />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -382,13 +181,13 @@ export default function MJourneyEntrySheet({
               >
                 {uploadProgress ? (
                   <>
-                    <span className="h-[14px] w-[14px] animate-spin rounded-full border-2 border-[color:var(--m-rowbr)] border-t-m-muted" />
-                    {t('journey.editor.uploadingProgress', { done: String(uploadProgress.done), total: String(uploadProgress.total) })}
+                    <span className="h-[14px] w-[14px] shrink-0 animate-spin rounded-full border-2 border-[color:var(--m-rowbr)] border-t-m-muted" />
+                    <span className="truncate">{t('journey.editor.uploadingProgress', { done: String(uploadProgress.done), total: String(uploadProgress.total) })}</span>
                   </>
                 ) : (
                   <>
-                    {captureOnly ? <Camera size={14} strokeWidth={2.2} /> : <Plus size={14} strokeWidth={2.2} />}
-                    {captureOnly ? t('journey.photo.add') : t('journey.editor.uploadPhotos')}
+                    {captureOnly ? <Camera size={14} strokeWidth={2.2} className="shrink-0" /> : <Plus size={14} strokeWidth={2.2} className="shrink-0" />}
+                    <span className="truncate">{captureOnly ? t('journey.photo.add') : t('journey.editor.uploadPhotos')}</span>
                   </>
                 )}
               </button>
@@ -406,12 +205,14 @@ export default function MJourneyEntrySheet({
                     : 'border-dashed border-[color:var(--m-rowbr)] text-m-muted'
                 }`}
               >
-                <Image size={14} strokeWidth={2} />
-                {captureOnly ? t('journey.share.gallery') : t('journey.editor.fromGallery')}
+                <Image size={14} strokeWidth={2} className="shrink-0" />
+                <span className="truncate">{captureOnly ? t('journey.share.gallery') : t('journey.editor.fromGallery')}</span>
               </button>
               {/* Immich/Synology, the same source the desktop editor offers (#1808).
-                  Only shown once a provider is actually connected — on a phone a
-                  button that can only say "nothing connected" is not worth its width. */}
+                  Only shown once a provider is actually connected: on a phone a
+                  button that can only say "nothing connected" is not worth its width.
+                  The icons keep their size and the labels truncate, so a third
+                  button never squeezes the other two (#2908). */}
               {!captureOnly && providers.length > 0 && (
                 <button
                   type="button"
@@ -423,8 +224,8 @@ export default function MJourneyEntrySheet({
                       : 'border-dashed border-[color:var(--m-rowbr)] text-m-muted'
                   }`}
                 >
-                  <Images size={14} strokeWidth={2} />
-                  {t('journey.editor.externalPhotos')}
+                  <Images size={14} strokeWidth={2} className="shrink-0" />
+                  <span className="truncate">{t('journey.editor.externalPhotos')}</span>
                 </button>
               )}
             </div>
@@ -521,19 +322,13 @@ export default function MJourneyEntrySheet({
                       type="button"
                       className="relative w-full overflow-hidden rounded-lg"
                       style={{ paddingTop: '100%' }}
-                      onClick={async () => {
-                        if (entry.id > 0) {
-                          try {
-                            const linked = await journeyApi.linkPhoto(entry.id, gp.id)
-                            if (linked) setPhotos(prev => [...prev, linked])
-                          } catch { /* keep picker open on failure */ }
-                        } else {
-                          setPendingLinkIds(prev => [...prev, gp.id])
-                          setPhotos(prev => [...prev, gp])
-                        }
-                      }}
+                      onClick={() => pickGalleryPhoto(gp)}
                     >
-                      <img src={photoUrl(gp)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+                      {posterlessVideo(gp) ? (
+                        <ClipTile />
+                      ) : (
+                        <img src={photoUrl(gp)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+                      )}
                     </button>
                   ))}
                   {availableGalleryPhotos.length === 0 && (
@@ -551,30 +346,16 @@ export default function MJourneyEntrySheet({
           <div className="mt-[10px] flex flex-wrap gap-2">
             {photos.map((p, idx) => (
               <div key={p.id} className="relative h-16 w-16 overflow-hidden rounded-[13px]">
-                <img src={photoUrl(p)} alt="" className="h-full w-full object-cover" />
+                {posterlessVideo(p) ? (
+                  <ClipTile />
+                ) : (
+                  <img src={photoUrl(p)} alt="" className="h-full w-full object-cover" />
+                )}
                 {!readOnly && idx > 0 && photos.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => {
-                      // The PATCHes stay outside the updater — StrictMode invokes it
-                      // twice in dev and would send the whole batch a second time.
-                      const prevOrder = photos
-                      const next = [...photos]
-                      const [moved] = next.splice(idx, 1)
-                      next.unshift(moved)
-                      setPhotos(next)
-                      // Same as the desktop editor: the order is shared with the other
-                      // members, the share view and the PDF, so a run the server refused
-                      // outright goes back instead of passing for saved.
-                      void (async () => {
-                        const results = await Promise.allSettled(next.map((ph, i) => journeyApi.updatePhoto(ph.id, { sort_order: i })))
-                        const rejected = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
-                        if (rejected.length === 0) return
-                        toast.error(getApiErrorMessage(rejected[0].reason, t('common.error')))
-                        if (rejected.length === results.length) setPhotos(prevOrder)
-                      })()
-                    }}
-                    className="absolute bottom-[3px] left-[3px] rounded-full bg-black/60 px-[6px] py-[1px] font-geist text-[0.5rem] font-bold text-white"
+                    onClick={() => photoOrder.makeFirst(idx)}
+                    className="absolute bottom-[3px] start-[3px] rounded-full bg-black/60 px-[6px] py-[1px] font-geist text-[0.5rem] font-bold text-white"
                   >
                     {t('journey.editor.photoFirst')}
                   </button>
@@ -582,30 +363,28 @@ export default function MJourneyEntrySheet({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={async () => {
-                      setPhotos(prev => prev.filter(x => x.id !== p.id))
-                      if (entry.id > 0) {
-                        try { await journeyApi.unlinkPhoto(entry.id, p.id) } catch { /* refreshed on next load */ }
-                      } else {
-                        setPendingLinkIds(prev => prev.filter(id => id !== p.id))
-                      }
-                    }}
+                    onClick={() => removePhoto(p)}
                     aria-label={t('common.delete')}
-                    className="absolute right-[3px] top-[3px] flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                    className="absolute end-[3px] top-[3px] flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
                   >
                     <X size={10} />
                   </button>
                 )}
               </div>
             ))}
-            {pendingFiles.map((_, i) => (
+            {pendingFiles.map((f, i) => (
               <div key={`pending-${i}`} className="relative h-16 w-16 overflow-hidden rounded-[13px]">
-                <img src={pendingPreviews[i]} alt="" className="h-full w-full object-cover" />
+                {/* A clip in an <img> is a broken-image glyph (issue #2341). */}
+                {isVideoFile(f) ? (
+                  <video src={pendingPreviews[i]} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                ) : (
+                  <img src={pendingPreviews[i]} alt="" className="h-full w-full object-cover" />
+                )}
                 <button
                   type="button"
                   onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}
                   aria-label={t('common.delete')}
-                  className="absolute right-[3px] top-[3px] flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                  className="absolute end-[3px] top-[3px] flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
                 >
                   <X size={10} />
                 </button>
@@ -645,8 +424,8 @@ export default function MJourneyEntrySheet({
             />
           )}
 
-          {/* Pros & Cons */}
-          {(!readOnly || pros.length > 0 || cons.length > 0) && (
+          {/* Pros & Cons — gone when the journey has put the verdict away (#2299) */}
+          {showVerdict && (!readOnly || pros.length > 0 || cons.length > 0) && (
           <div className="mt-3 rounded-2xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-[13px]">
             <div className={`${eyebrow} mb-2`}>{t('journey.editor.prosCons')}</div>
             <div className="flex gap-[10px]">
@@ -659,9 +438,11 @@ export default function MJourneyEntrySheet({
                   <div key={i} className="mb-[6px] flex items-center gap-[6px] rounded-[10px] border border-[color:var(--m-rowbr)] bg-m-sheetop px-2 py-[6px]">
                     <span className="h-[5px] w-[5px] flex-none rounded-full" style={{ background: PRO_COLOR }} />
                     <input
+                      ref={verdictRowRef(`pros-${i}`)}
                       value={p}
                       readOnly={readOnly}
                       onChange={e => { const next = [...pros]; next[i] = e.target.value; setPros(next) }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVerdictRow('pros', i) } }}
                       placeholder={t('journey.editor.proPlaceholder')}
                       className="min-w-0 flex-1 bg-transparent font-geist text-[0.6875rem] font-semibold text-m-ink outline-none placeholder:text-m-faint"
                     />
@@ -675,7 +456,7 @@ export default function MJourneyEntrySheet({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => setPros([...pros, ''])}
+                    onClick={() => addVerdictRow('pros', pros.length - 1)}
                     className="block w-full rounded-[10px] border border-dashed py-[9px] text-center font-geist text-[0.6875rem] font-semibold"
                     style={{ borderColor: 'rgba(47,163,122,.35)', color: PRO_COLOR }}
                   >
@@ -692,9 +473,11 @@ export default function MJourneyEntrySheet({
                   <div key={i} className="mb-[6px] flex items-center gap-[6px] rounded-[10px] border border-[color:var(--m-rowbr)] bg-m-sheetop px-2 py-[6px]">
                     <span className="h-[5px] w-[5px] flex-none rounded-full" style={{ background: CON_COLOR }} />
                     <input
+                      ref={verdictRowRef(`cons-${i}`)}
                       value={c}
                       readOnly={readOnly}
                       onChange={e => { const next = [...cons]; next[i] = e.target.value; setCons(next) }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVerdictRow('cons', i) } }}
                       placeholder={t('journey.editor.conPlaceholder')}
                       className="min-w-0 flex-1 bg-transparent font-geist text-[0.6875rem] font-semibold text-m-ink outline-none placeholder:text-m-faint"
                     />
@@ -708,7 +491,7 @@ export default function MJourneyEntrySheet({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => setCons([...cons, ''])}
+                    onClick={() => addVerdictRow('cons', cons.length - 1)}
                     className="block w-full rounded-[10px] border border-dashed py-[9px] text-center font-geist text-[0.6875rem] font-semibold"
                     style={{ borderColor: 'rgba(214,39,59,.35)', color: CON_COLOR }}
                   >
@@ -721,21 +504,17 @@ export default function MJourneyEntrySheet({
           )}
         </>}
 
-        {/* Date + Time */}
-        <div className="mt-3 flex gap-2">
-          <div className="min-w-0 flex-1">
+        {/* Date + Time. Split in the date's favour: a localized date needs the
+            room ("10. Sept. 2026"), a clock never does. */}
+        <div className="mt-3 grid grid-cols-[minmax(0,1fr)_104px] gap-2">
+          <div className="min-w-0">
             <div className={`${eyebrow} mb-[5px]`}>{t('journey.editor.date')}</div>
-            <div className={`${fieldShell} overflow-hidden`}>
-              <input
-                type="date"
-                value={entryDate}
-                disabled={readOnly}
-                onChange={e => setEntryDate(e.target.value)}
-                className="block min-w-0 w-full box-border border-0 bg-transparent px-3 py-[10px] text-center text-[0.78125rem] font-semibold text-m-ink outline-none [font-variant-numeric:tabular-nums]"
-              />
-            </div>
+            {/* TREK's own picker, like the time field beside it: a native
+                `<input type="date">` paints itself from the OS locale and takes
+                no theme, so the two sat in one row looking like two apps. */}
+            <CustomDatePicker value={entryDate} onChange={setEntryDate} disabled={readOnly} />
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <div className={`${eyebrow} mb-[5px]`}>{t('mobileJourney.time')}</div>
             {/* A native <input type="time"> paints 12h or 24h from the browser
                 locale, whatever the user picked in settings (#2067). The picker
@@ -743,6 +522,20 @@ export default function MJourneyEntrySheet({
             <CustomTimePicker value={entryTime} onChange={setEntryTime} disabled={readOnly} />
           </div>
         </div>
+
+        {tripSuggestion.trip && (
+          <div className={`mt-3 flex items-center gap-3 px-3 py-[10px] ${fieldShell}`}>
+            <Briefcase size={15} strokeWidth={2} className="flex-none text-m-muted" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[0.75rem] font-semibold text-m-ink [overflow-wrap:anywhere]">{tripSuggestion.trip.title}</div>
+              <div className="mt-[2px] font-geist text-[0.65625rem] leading-[1.4] text-m-muted">{t('journey.editor.tripSuggestionHint')}</div>
+            </div>
+            <button type="button" onClick={() => void tripSuggestion.link()} disabled={tripSuggestion.linking}
+              className="flex-none rounded-full bg-m-act px-3 py-[6px] text-[0.6875rem] font-bold text-m-actfg disabled:opacity-50">
+              {t('journey.trips.linkTrip')}
+            </button>
+          </div>
+        )}
 
         {/* Location */}
         <div className="relative mt-3">
@@ -772,20 +565,13 @@ export default function MJourneyEntrySheet({
             )}
           </div>
           {showLocationResults && locationResults.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-[200px] overflow-y-auto rounded-[14px] border border-[color:var(--m-rowbr)] bg-m-sheetop shadow-[0_16px_40px_-18px_rgba(0,0,0,.5)]">
+            <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-[200px] overflow-y-auto rounded-[14px] border border-[color:var(--m-rowbr)] bg-m-sheetop shadow-[0_16px_40px_-18px_rgba(0,0,0,.5)]">
               {locationResults.map((r, i) => (
                 <button
                   key={i}
                   type="button"
-                  onClick={() => {
-                    setLocationName(r.name)
-                    setLocationLat(r.lat)
-                    setLocationLng(r.lng)
-                    setLocationQuery('')
-                    setShowLocationResults(false)
-                    setLocationResults([])
-                  }}
-                  className="flex w-full items-start gap-2 border-b border-[color:var(--m-rowbr)] px-3 py-[10px] text-left last:border-0"
+                  onClick={() => pickLocation(r)}
+                  className="flex w-full items-start gap-2 border-b border-[color:var(--m-rowbr)] px-3 py-[10px] text-start last:border-0"
                 >
                   <MapPin size={13} className="mt-[2px] flex-none text-m-faint" />
                   <span className="min-w-0">
@@ -813,8 +599,17 @@ export default function MJourneyEntrySheet({
           </div>
         )}
 
+        {/* Kept among the contributors until it is ready (#696). */}
+        <div className={`mt-3 flex items-center gap-3 px-3 py-[10px] ${fieldShell}`}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[0.75rem] font-semibold text-m-ink">{t('journey.editor.draft')}</div>
+            <div className="mt-[2px] font-geist text-[0.65625rem] leading-[1.4] text-m-muted">{t('journey.editor.draftHint')}</div>
+          </div>
+          <MToggle checked={isDraft} onChange={setIsDraft} disabled={readOnly} ariaLabel={t('journey.editor.draft')} />
+        </div>
+
         {/* Mood */}
-        {!captureOnly && <>
+        {showMood && !captureOnly && <>
           <div className={`${eyebrow} mb-[6px] mt-3`}>{t('journey.editor.mood')}</div>
           <div className="flex flex-wrap gap-[6px]">
             {MOBILE_MOODS.map(m => {
@@ -824,11 +619,12 @@ export default function MJourneyEntrySheet({
                   key={m.id}
                   type="button"
                   disabled={readOnly}
+                  aria-pressed={active}
                   onClick={() => setMood(active ? '' : m.id)}
                   className={`flex items-center gap-[5px] rounded-full border px-3 py-[7px] text-[0.71875rem] font-semibold ${
                     active ? '' : 'border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] text-m-muted'
                   }`}
-                  style={active ? { background: `${m.color}24`, color: m.color, borderColor: `${m.color}4D` } : undefined}
+                  style={active ? moodChipActiveStyle(m.color) : undefined}
                 >
                   <m.icon size={13} strokeWidth={2.2} />
                   {t(m.labelKey)}
@@ -839,6 +635,7 @@ export default function MJourneyEntrySheet({
         </>}
 
         {/* Weather */}
+        {showWeather && <>
         <div className={`${eyebrow} mb-[6px] mt-3`}>{t('journey.editor.weather')}</div>
         <div className="flex flex-wrap gap-[6px]">
           {MOBILE_WEATHERS.map(w => {
@@ -861,6 +658,7 @@ export default function MJourneyEntrySheet({
             )
           })}
         </div>
+        </>}
 
         {/* Tags */}
         {!captureOnly && (!readOnly || tags.length > 0) && (
@@ -897,30 +695,48 @@ export default function MJourneyEntrySheet({
         )}
       </div>
 
+      {/* A suggestion is not deleted, it is put down: the row survives so the trip
+          sync does not offer the same place again (discussion #2299).
+
+          Its own row above the buttons rather than among them: the sentence is
+          longer than a button label and wrapped into two lines between Delete and
+          Cancel. Full width, it reads as what it is, an alternative to saving this
+          suggestion rather than a fourth thing competing with them. */}
+      {!readOnly && onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mx-[18px] mt-1 mb-[10px] flex flex-none items-center gap-[9px] rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-[13px] py-[10px] text-start"
+        >
+          <EyeOff size={15} strokeWidth={2} className="flex-none text-m-muted" />
+          <span className="min-w-0 flex-1 text-[0.8125rem] font-semibold">{t('journey.suggestions.dismiss')}</span>
+        </button>
+      )}
+
       <div className="flex flex-none items-center gap-2 border-t border-[color:var(--m-rowbr)] px-[18px] pb-4 pt-3">
         {!readOnly && onDelete && (
           <button
             type="button"
             onClick={onDelete}
-            className="flex items-center gap-[5px] text-[0.75rem] font-bold text-[color:var(--m-st-danger)]"
+            aria-label={t('common.delete')}
+            className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] text-[color:var(--m-st-danger)]"
           >
-            <Trash2 size={13} strokeWidth={2} />
-            {t('common.delete')}
+            <Trash2 size={15} strokeWidth={2} />
           </button>
         )}
         {!readOnly && captureOnly && (
           <button
             type="button"
             onClick={() => setCaptureOnly(false)}
-            className="rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-4 py-[9px] text-[0.78125rem] font-semibold"
+            className={`${SHEET_SECONDARY} whitespace-nowrap`}
           >
-            {t('collections.addDetails')}
+            {t('journey.editor.addDetails')}
           </button>
         )}
         <button
           type="button"
           onClick={handleClose}
-          className="ml-auto rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-4 py-[9px] text-[0.78125rem] font-semibold"
+          className={`${SHEET_SECONDARY} ms-auto`}
         >
           {t('common.cancel')}
         </button>
@@ -929,7 +745,7 @@ export default function MJourneyEntrySheet({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="rounded-full bg-m-act px-[18px] py-[9px] text-[0.78125rem] font-semibold text-m-actfg disabled:opacity-50"
+            className={SHEET_PRIMARY}
           >
             {saving ? t('common.saving') : t('common.save')}
           </button>

@@ -1,5 +1,7 @@
+import { placeProviderIdentitySchema } from '../place/place.schema';
 import {
   mapsSearchRequestSchema,
+  mapsNearbyRequestSchema,
   mapsAutocompleteRequestSchema,
   mapsReverseQuerySchema,
   mapsResolveUrlRequestSchema,
@@ -14,28 +16,78 @@ import {
   mapsSearchResultSchema,
   mapsPlaceDetailsResultSchema,
 } from './maps.schema';
-import { placeProviderIdentitySchema } from '../place/place.schema';
 
 import { describe, it, expect } from 'vitest';
 
 describe('provider-neutral map contracts', () => {
   it('uses one provider identity source and validates route results', () => {
     expect(mapProviderSchema.parse('amap')).toBe('amap');
-    expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' });
+    expect(placeProviderIdentitySchema.parse({ provider: 'amap', providerPlaceId: 'B0FFFAB6J2' })).toEqual({
+      provider: 'amap',
+      providerPlaceId: 'B0FFFAB6J2',
+    });
     expect(() => providerOverrideSchema.parse('unknown')).toThrow();
-    expect(routeSourceSchema.parse({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' })).toMatchObject({ provider: 'plugin', pluginId: 'ev-router' });
-    expect(routeSourceSchema.parse({ provider: 'mixed', fallback: true, fallbackReason: 'mixed_provider' })).toMatchObject({ provider: 'mixed', fallback: true });
-    expect(routeWithLegsSchema.safeParse({ coordinates: [[39.9, 116.4]], distance: 0, duration: 0, routeSource: { provider: 'osrm', fallback: true }, legs: [] }).success).toBe(true);
+    expect(
+      routeSourceSchema.parse({ provider: 'plugin', fallback: false, pluginId: 'ev-router', profile: 'fastest' }),
+    ).toMatchObject({ provider: 'plugin', pluginId: 'ev-router' });
+    expect(
+      routeSourceSchema.parse({ provider: 'mixed', fallback: true, fallbackReason: 'mixed_provider' }),
+    ).toMatchObject({ provider: 'mixed', fallback: true });
+    expect(
+      routeWithLegsSchema.safeParse({
+        coordinates: [[39.9, 116.4]],
+        distance: 0,
+        duration: 0,
+        routeSource: { provider: 'osrm', fallback: true },
+        legs: [],
+      }).success,
+    ).toBe(true);
   });
 
-  it('projects old Google and OSM payloads without depending on unknown fields', () => {
-    const google = mapsSearchResultSchema.parse({ places: [{ google_place_id: 'ChIJx', name: 'Museum', address: 'Berlin', lat: 52.5, lng: 13.4, rating: 4.5, types: ['museum'], source: 'google', providerOnlyBlob: { nested: true } }], source: 'google' });
-    const osm = mapsPlaceDetailsResultSchema.parse({ place: { osm_id: 'node:42', name: 'Park', address: 'Berlin', lat: 52.5, lng: 13.4, source: 'openstreetmap', extratags: { amenity: 'park' } } });
+  it('preserves upstream provider result fields alongside provider identity', () => {
+    const google = mapsSearchResultSchema.parse({
+      places: [
+        {
+          google_place_id: 'ChIJx',
+          name: 'Museum',
+          address: 'Berlin',
+          lat: 52.5,
+          lng: 13.4,
+          rating: 4.5,
+          types: ['museum'],
+          source: 'google',
+          providerOnlyBlob: { nested: true },
+        },
+      ],
+      source: 'google',
+    });
+    const osm = mapsPlaceDetailsResultSchema.parse({
+      place: {
+        osm_id: 'node:42',
+        name: 'Park',
+        address: 'Berlin',
+        lat: 52.5,
+        lng: 13.4,
+        source: 'openstreetmap',
+        extratags: { amenity: 'park' },
+      },
+    });
     expect(google.places[0]).toMatchObject({ google_place_id: 'ChIJx', name: 'Museum' });
-    expect(google.places[0]).not.toHaveProperty('providerOnlyBlob');
+    expect(google.places[0]).toHaveProperty('providerOnlyBlob');
     expect(osm.place).toMatchObject({ osm_id: 'node:42', name: 'Park' });
   });
 });
+describe('mapsNearbyRequestSchema', () => {
+  it('takes a point and caps the circle and the count', () => {
+    expect(mapsNearbyRequestSchema.safeParse({ lat: 52.5, lng: 13.4 }).success).toBe(true);
+    expect(mapsNearbyRequestSchema.safeParse({ lat: 52.5, lng: 13.4, radius: 5000, limit: 20 }).success).toBe(true);
+    expect(mapsNearbyRequestSchema.safeParse({ lat: 52.5, lng: 13.4, radius: 5001 }).success).toBe(false);
+    expect(mapsNearbyRequestSchema.safeParse({ lat: 52.5, lng: 13.4, limit: 21 }).success).toBe(false);
+    expect(mapsNearbyRequestSchema.safeParse({ lat: 91, lng: 13.4 }).success).toBe(false);
+    expect(mapsNearbyRequestSchema.safeParse({ lng: 13.4 }).success).toBe(false);
+  });
+});
+
 describe('mapsSearchRequestSchema', () => {
   it('requires a non-empty query', () => {
     expect(mapsSearchRequestSchema.safeParse({ query: 'berlin' }).success).toBe(true);
@@ -43,18 +95,24 @@ describe('mapsSearchRequestSchema', () => {
     expect(mapsSearchRequestSchema.safeParse({}).success).toBe(false);
   });
 
+  it('takes "google" as the one provider a search can be sent to alone, and nothing else', () => {
+    expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', provider: 'google' }).success).toBe(true);
+    expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', provider: 'osm' }).success).toBe(false);
+    expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', provider: '' }).success).toBe(false);
+  });
+
   it('allows an optional circle locationBias with numeric lat/lng and optional radius', () => {
-    expect(
-      mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: 52.5, lng: 13.4 } }).success,
-    ).toBe(true);
+    expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: 52.5, lng: 13.4 } }).success).toBe(
+      true,
+    );
     expect(
       mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: 52.5, lng: 13.4, radius: 50000 } })
         .success,
     ).toBe(true);
     // NaN arrives as null over JSON; either way a non-numeric lat must fail.
-    expect(
-      mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: null, lng: 13.4 } }).success,
-    ).toBe(false);
+    expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: null, lng: 13.4 } }).success).toBe(
+      false,
+    );
     expect(mapsSearchRequestSchema.safeParse({ query: 'berlin', locationBias: { lat: 52.5 } }).success).toBe(false);
   });
 });
@@ -80,7 +138,12 @@ describe('mapsReverseQuerySchema', () => {
 
   it('normalizes country codes and preserves valid routing context', () => {
     const parsed = mapsReverseQuerySchema.parse({
-      lat: '31.2', lng: '121.5', countryCode: 'cN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap',
+      lat: '31.2',
+      lng: '121.5',
+      countryCode: 'cN',
+      latitude: 31.2,
+      longitude: 121.5,
+      providerOverride: 'amap',
     });
     expect(parsed).toMatchObject({ countryCode: 'CN', latitude: 31.2, longitude: 121.5, providerOverride: 'amap' });
   });
@@ -88,12 +151,13 @@ describe('mapsReverseQuerySchema', () => {
   it('rejects malformed geographic context', () => {
     expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', countryCode: 'CHN' }).success).toBe(false);
     expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', latitude: 91 }).success).toBe(false);
-    expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', providerOverride: 'unknown' }).success).toBe(false);
+    expect(mapsReverseQuerySchema.safeParse({ lat: '31.2', lng: '121.5', providerOverride: 'unknown' }).success).toBe(
+      false,
+    );
   });
 });
 
 describe('mapsResolveUrlRequestSchema', () => {
-
   it('requires a non-empty url', () => {
     expect(
       mapsResolveUrlRequestSchema.safeParse({
@@ -211,8 +275,12 @@ describe('mapsPlaceEnrichmentResultSchema', () => {
     ).toBe(true);
     // Google's search results carry a rating but no count.
     expect(
-      mapsPlaceEnrichmentResultSchema.safeParse({ photos: [], description: null, facts: [], rating: { value: 4, count: null } })
-        .success,
+      mapsPlaceEnrichmentResultSchema.safeParse({
+        photos: [],
+        description: null,
+        facts: [],
+        rating: { value: 4, count: null },
+      }).success,
     ).toBe(true);
   });
 

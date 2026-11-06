@@ -47,47 +47,47 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.highlight_opensource': "GitHub'da %100 açık kaynak",
   'system_notice.thank_you_support.highlight_free': 'Sonsuza dek ücretsiz — hiçbir ücretli plan yok',
   'system_notice.thank_you_support.highlight_community': 'Toplulukla birlikte geliştirildi',
-  'system_notice.thank_you_support.cta_bmc': 'Buy Me a Coffee',
+  'system_notice.thank_you_support.cta_bmc': 'Bana bir kahve ısmarla',
   'system_notice.thank_you_support.cta_kofi': "Ko-fi'de Destek Ol",
   'system_notice.pager.prev': 'Önceki bildirim',
   'system_notice.pager.next': 'Sonraki bildirim',
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': '{n}. bildirime git',
   'system_notice.pager.position': '{total} Bildirimden {current}.',
-  'system_notice.release_400.eyebrow': 'Güncelleme yüklendi',
-  'system_notice.release_400.tag': 'Sürüm',
-  'system_notice.release_400.headline': "TREK'in bugüne kadarki en büyük sürümü.",
-  'system_notice.release_400.intro':
-    'TREK bir telefon ve bir kitap kazanıyor. Bunu on dokuz kişi yazdı — ve yaklaşık yüz elli bildirilen hata da onunla birlikte gitti.',
-  'system_notice.release_400.feature_mobile_title': 'TREK mobile geçiyor',
-  'system_notice.release_400.feature_mobile_body':
-    "768px altındaki her şey artık kendi arayüzü — cam bir dock, kendi panelleri, kendi seyahat planlayıcısı. TREK'i telefonunda aç.",
-  'system_notice.release_400.feature_studio_title': 'TREK Studio',
-  'system_notice.release_400.feature_studio_badge': 'Beta',
-  'system_notice.release_400.feature_studio_body':
-    "Journey PDF'i bir fotoğraf kitabı tasarımcısına dönüştü. İstediğinde kitabı kendisi düzenler, sonra yoldan çekilir.",
-  'system_notice.release_400.feature_vacay_title': 'Vacay gerisini öğreniyor',
-  'system_notice.release_400.feature_vacay_body':
-    'Yarım günler, telafi ve esnek günler, takvimde okul tatilleri — ve ocakta başlamak zorunda olmayan bir izin yılı.',
-  'system_notice.release_400.feature_places_title': 'Yerler kendini gösterir, dosyalar taşınır',
-  'system_notice.release_400.feature_places_body':
-    "Bir yeri kaydetmeden önce resimler ve açıklama kendiliğinden dolar. Ve yüklemelerinin artık TREK'in çalıştığı diskte durması gerekmiyor.",
-  'system_notice.release_400.footnote':
-    "Ve bunlar onlardan sadece dördü. 4.0.0, Collections ve Atlas'tan alttaki sunucunun tamamına kadar birkaç yüz değişiklik daha taşıyor.",
-  'system_notice.release_400.note_eyebrow': 'Geliştiriciden bir not',
-  'system_notice.release_400.note_title': "TREK'i kullandığın için teşekkürler.",
-  'system_notice.release_400.note_body':
-    "TREK, boş zamanlarımda kendi seyahatlerim için yazdığım küçük bir araç olarak başladı. Hâlâ da öyle: akşamlar, hafta sonları, tam zamanlı bir işin yanındaki saatler.\n\nBir süre yalnızca bendim. Artık değil — bu sürümü on dokuz kişi çıkardı ve binlerceniz yıldızlarla, issue'larla, çevirilerle ve pull request'lerle geldiniz. Her biri için minnettarım.",
-  'system_notice.release_400.promise_label': 'Söz',
-  'system_notice.release_400.promise_text':
-    "TREK'in açık kaynak tarafı sonsuza dek ücretsiz kalıyor. Ücretli paket yok, abonelik yok, gizli şart yok. Söz.",
-  'system_notice.release_400.note_body_after':
-    '4.0.0, haftalarca süren geç geceler demekti — bir telefon uygulaması, bir kitap tasarımcısı, bir sunucu taşıması, çoğu gece yarısı ile ikisi arasında yazıldı. Şikâyet değil: bunu geliştirmeyi seviyorum. Sadece bu büyüklükte bir sürümün boş zaman projesinden nasıl çıktığının dürüst cevabı.',
-  'system_notice.release_400.note_closing': 'Burada olduğun için teşekkür ederim.',
-  'system_notice.release_400.note_signature': '— Maurice',
-  'system_notice.release_400.support_text':
-    'Bunu ayakta tutan şey destek — sunucular, alan adları ve böyle sürümlere dönüşen geç geceler. TREK senin için bir şey ifade ediyorsa, bir kahve bunu sürdürmenin en doğrudan yolu.',
-  'system_notice.release_400.cta_bmc': 'Buy me a coffee',
-  'system_notice.release_400.cta_kofi': "Ko-fi'de Destek Ol",
+  'system_notice.release_notes.eyebrow': 'Güncelleme yüklendi',
+  'system_notice.release_notes.features_label': 'Öne çıkanlar',
+  'system_notice.release_notes.features_aside': 'Hepsi bu kadar değil',
+  'system_notice.release_notes.feature_search_title': 'İsabetli yer arama',
+  'system_notice.release_notes.feature_search_body':
+    'Şehirler, adalar, simge yapılar ve koduyla aranan havalimanları önce gelir, kafeler çevrenizden gelir ve öneriler siz yazarken belirir.',
+  'system_notice.release_notes.feature_share_title': 'Paylaşılan yer ayrıntıları',
+  'system_notice.release_notes.feature_share_body':
+    'Web sitelerini, çalışma saatlerini ve fotoğrafları alan alan her TREK ile paylaşın, kayıtlı yerleriniz de başkalarının eklediklerini alır.',
+  'system_notice.release_notes.feature_routing_title': 'Daha hızlı rota hesaplama',
+  'system_notice.release_notes.feature_routing_body':
+    'Bütün bir gün, yirmi durağa kadar tek seferde hesaplanır, yavaş bir rota artık diğerlerini bekletmez ve toplu taşıma, ilk sağlayıcı bir şey bulamazsa ikinci bir sağlayıcıya sorar.',
+  'system_notice.release_notes.footnote':
+    "Ayrıca TREK'in geri kalanına yayılmış, daha küçük değişikliklerden oluşan uzun bir liste var.",
+  'system_notice.release_notes.notes_label': 'Sürüm notları',
+  'system_notice.release_notes.note_eyebrow': 'Geliştiriciden bir not',
+  'system_notice.release_notes.note_title': "TREK'i geliştirmeye devam etmemin sebebi sensin.",
+  'system_notice.release_notes.note_body':
+    'TREK, kendi seyahatlerim için küçük bir araç olarak başladı. Onları daha iyi planlamak istediğim için iş çıkışlarında yazıyordum. O günden beri de büyümeyi hiç tam olarak bırakmadı. Kullandığın neredeyse her şey gece geç saatlerde, hafta sonlarında, trenlerde, tam zamanlı bir işin yanında yapıldı ve birinin onu bir gün gerçekten açıp açmayacağını içten içe merak ettiğim çok akşam oldu.',
+  'system_notice.release_notes.promise_label': 'Söz',
+  'system_notice.release_notes.promise_lead': 'TREK sonsuza dek ücretsiz kalacak.',
+  'system_notice.release_notes.promise_text':
+    'Her özellik, her güncelleme, herkes için. Ücretli paket yok, abonelik yok, gizli şart yok.',
+  'system_notice.release_notes.note_body_after':
+    "Sonra sizler açtınız. Birkaç ay içinde sayınız binleri buldu: yıldızlar, hata bildirimleri, konuşmadığım dillere çeviriler, hiç tanışmadığım insanlardan pull request'ler. Hâlâ her sabah ilk iş repoya bakıyorum ve bu hâlâ tam olarak gerçekmiş gibi gelmiyor.",
+  'system_notice.release_notes.note_closing': 'Burada olduğun için teşekkür ederim. Sevgiler, Maurice.',
+  'system_notice.release_notes.support_label': 'Bağımsız kalmak',
+  'system_notice.release_notes.support_lead': 'Google ve benzerleri olmadan.',
+  'system_notice.release_notes.support_text':
+    "Yer arama, adres arama ve rota hesaplama TREK'in kendi sunucularında çalışıyor, bugün dataforest cloud sponsorluğunda. Bunun için her gün mücadele ediyorum ve böyle kalması sizin desteğinize bağlı.",
+  'system_notice.release_notes.cta_bmc': 'Bana bir kahve ısmarla',
+  'system_notice.release_notes.cta_kofi': "Ko-fi'de Destek Ol",
+  'system_notice.release_notes.headline': 'Önce doğru yer.',
+  'system_notice.release_notes.intro':
+    "Yer arama, adres arama ve rota hesaplama artık dataforest cloud sponsorluğunda TREK'in kendi sunucularında çalışıyor ve her TREK, yerler hakkında bildiklerini diğer tüm TREK'lerle paylaşabiliyor.",
 };
 export default system_notice;

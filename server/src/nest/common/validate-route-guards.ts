@@ -1,11 +1,11 @@
+import { CookieAuthGuard } from '../auth-core/cookie-auth.guard';
+import { JwtAuthGuard } from '../auth-core/jwt-auth.guard';
+import { OptionalJwtGuard } from '../auth-core/optional-jwt.guard';
+import { IS_PUBLIC, OPTIONAL_AUTH } from '../auth-core/public.decorator';
+import { ApiTokenGuard } from '../public-api/api-token.guard';
+import type { INestApplication } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA, GUARDS_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
-import type { INestApplication } from '@nestjs/common';
-import { IS_PUBLIC, OPTIONAL_AUTH } from '../auth/public.decorator';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CookieAuthGuard } from '../auth/cookie-auth.guard';
-import { OptionalJwtGuard } from '../auth/optional-jwt.guard';
-import { ApiTokenGuard } from '../public-api/api-token.guard';
 
 export interface RouteGuardEntry {
   /** `ControllerClass.methodName` */
@@ -103,13 +103,20 @@ export const PUBLIC_ROUTE_ALLOW_LIST: string[] = [
   'ConfigController.getConfig',
   // OAuth/OIDC discovery documents + the JSON 404 catchalls that keep
   // /.well-known probes from ever seeing SPA HTML.
+  'DiscoveryController.authorizationServerForMcp',
   'DiscoveryController.openidConfiguration',
   'DiscoveryController.protectedResource',
   'DiscoveryController.wellKnownFallback',
   'DiscoveryController.wellKnownRoot',
+  // A document provider cannot hold a TREK session. The per-binding token in
+  // the path is the credential, a shared secret is checked on top where the
+  // provider can send one, and the handler's only effect is to schedule a sync
+  // run. It never reads the request body as data.
+  'DocSyncWebhookController.nudge',
   'FeaturesController.features',
-  // The container/uptime probe.
+  // The container/uptime probe, and the readiness probe beside it.
   'FeaturesController.health',
+  'FeaturesController.ready',
   // Subscribable ICS feeds. The token in the path is the credential, and the
   // calendar client polling it has no TREK session to send.
   'FeedsPublicController.tripFeed',
@@ -119,14 +126,25 @@ export const PUBLIC_ROUTE_ALLOW_LIST: string[] = [
   'HelpController.asset',
   'HelpController.index',
   'HelpController.page',
+  'HelpController.search',
   // Share-token validated.
   'JourneyPublicController.get',
   'JourneyPublicController.legacyPhoto',
+  'JourneyPublicController.mapLayers',
   'JourneyPublicController.photo',
   // The MCP transport — bearer tokens are verified inside the handler.
+  // The same documents under the resource URL, for clients that append the
+  // well-known path to the server address they were handed.
+  'McpResourceDiscoveryController.authorizationServer',
+  'McpResourceDiscoveryController.fallback',
+  'McpResourceDiscoveryController.openidConfiguration',
+  'McpResourceDiscoveryController.protectedResource',
   'McpTransportController.delete',
   'McpTransportController.get',
   'McpTransportController.post',
+  // The native app redeems a one-time code from the system browser here. The
+  // code is only good together with the verifier the app kept to itself.
+  'NativeAuthController.exchange',
   'OauthPublicController.revoke',
   'OauthPublicController.token',
   'OauthPublicController.userinfo',
@@ -179,14 +197,10 @@ export function validateRouteGuards(
 
   const problems: string[] = [];
   if (undeclared.length > 0) {
-    problems.push(
-      `route(s) marked @Public() but not in PUBLIC_ROUTE_ALLOW_LIST:\n  ${undeclared.join('\n  ')}`,
-    );
+    problems.push(`route(s) marked @Public() but not in PUBLIC_ROUTE_ALLOW_LIST:\n  ${undeclared.join('\n  ')}`);
   }
   if (stale.length > 0) {
-    problems.push(
-      `PUBLIC_ROUTE_ALLOW_LIST entries that are no longer @Public():\n  ${stale.join('\n  ')}`,
-    );
+    problems.push(`PUBLIC_ROUTE_ALLOW_LIST entries that are no longer @Public():\n  ${stale.join('\n  ')}`);
   }
   if (undeclaredAnonymous.length > 0) {
     problems.push(

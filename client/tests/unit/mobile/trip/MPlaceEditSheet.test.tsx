@@ -5,10 +5,13 @@ import type { TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell
 import type { Assignment, Category, Place } from '../../../../src/types'
 import { buildPlanner } from '../../../helpers/mobileTrip'
 import { useAddonStore } from '../../../../src/store/addonStore'
+import { useAuthStore } from '../../../../src/store/authStore'
+import { useTripStore } from '../../../../src/store/tripStore'
 import { server } from '../../../helpers/msw/server'
+import { resetAllStores, seedStore } from '../../../helpers/store'
 import { fireEvent, render, screen, waitFor } from '../../../helpers/render'
 
-// FE-MOB-PLEDIT-001 to FE-MOB-PLEDIT-024, plus FE-MOB-PLEDIT-033 to -035
+// FE-MOB-PLEDIT-001 to FE-MOB-PLEDIT-048, plus the 009b, 025b and 029b variants
 // planner.t echoes the key, so every label/placeholder is asserted as its key.
 
 const CATEGORIES = [
@@ -38,6 +41,7 @@ const submit = () => screen.getByRole('button', { name: /^(common\.add|common\.s
 
 describe('MPlaceEditSheet', () => {
   beforeEach(() => {
+    resetAllStores()
     server.use(
       http.post('/api/maps/search', () => HttpResponse.json({
         source: 'osm',
@@ -90,7 +94,9 @@ describe('MPlaceEditSheet', () => {
       id: 7, day_id: 2, place_id: 42, order_index: 0,
       place: { ...EDITED, place_time: '14:00', end_time: '15:00' },
     } as unknown as Assignment
-    setup({ editingPlace: EDITED, editingAssignmentId: 7, assignments: { '2': [assignment] } })
+    // A visit the plan tab lists is in both of the planner's lists.
+    const visits = { '2': [assignment] }
+    setup({ editingPlace: EDITED, editingAssignmentId: 7, assignments: visits, storedAssignments: visits })
     expect(screen.getByText('places.startTime')).toBeInTheDocument()
     const times = screen.getAllByDisplayValue(/^1[45]:00$/)
     expect(times.map(el => (el as HTMLInputElement).value)).toEqual(['14:00', '15:00'])
@@ -183,6 +189,34 @@ describe('MPlaceEditSheet', () => {
     expect(screen.getByPlaceholderText('places.formLng')).toHaveValue('139.6917')
   })
 
+  it('FE-MOB-PLEDIT-047: a pasted "lat, lng" pair counts as typed, so a later pick without a position keeps it', async () => {
+    let searches = 0
+    server.use(
+      http.post('/api/maps/search', () => {
+        searches += 1
+        return HttpResponse.json(searches === 1
+          ? { source: 'osm', places: [{ name: 'Ueno Koen', address: 'Taito', lat: 35.7, lng: 139.7 }] }
+          : { source: 'osm', places: [{ name: 'Ameyoko', address: 'Ueno' }] })
+      }),
+    )
+    setup()
+    const search = screen.getByPlaceholderText('places.mapsSearchPlaceholder')
+    fireEvent.change(search, { target: { value: 'ueno koen' } })
+    fireEvent.click(screen.getByRole('button', { name: 'common.search' }))
+    fireEvent.click(await screen.findByText('Ueno Koen'))
+
+    const lat = screen.getByPlaceholderText('places.formLat')
+    fireEvent.paste(lat, { clipboardData: { getData: () => '35.7101, 139.7745' } })
+
+    fireEvent.change(search, { target: { value: 'ameyoko' } })
+    fireEvent.click(screen.getByRole('button', { name: 'common.search' }))
+    fireEvent.click(await screen.findByText('Ameyoko'))
+
+    expect(nameField()).toHaveValue('Ameyoko')
+    expect(lat).toHaveValue('35.7101')
+    expect(screen.getByPlaceholderText('places.formLng')).toHaveValue('139.7745')
+  })
+
   it('FE-MOB-PLEDIT-013: an unparseable paste is left to the browser', () => {
     setup()
     const lat = screen.getByPlaceholderText('places.formLat')
@@ -219,6 +253,39 @@ describe('MPlaceEditSheet', () => {
     expect(nameField()).toHaveValue('Ueno Koen')
     fireEvent.click(submit())
     expect(planner.toast.warning).toHaveBeenCalledWith('places.duplicateExists:Ueno Park')
+  })
+
+  it('FE-MOB-PLEDIT-046: tapping a suggestion only puts its name in, so a failed lookup keeps the position of the last pick', async () => {
+    let searches = 0
+    server.use(
+      http.post('/api/maps/search', () => {
+        searches += 1
+        return HttpResponse.json(searches === 1
+          ? { source: 'osm', places: [{ name: 'Ueno Koen', address: 'Taito', lat: 35.7, lng: 139.7, website: 'https://ueno.example' }] }
+          : { source: 'osm', places: [] })
+      }),
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({
+        source: 'osm', suggestions: [{ placeId: 'sug-46', mainText: 'Louvre', secondaryText: 'Paris' }],
+      })),
+      http.get('/api/maps/details/:placeId', () => HttpResponse.json({}, { status: 500 })),
+    )
+    const { planner } = setup()
+    const search = screen.getByPlaceholderText('places.mapsSearchPlaceholder')
+    fireEvent.change(search, { target: { value: 'ueno koen' } })
+    fireEvent.click(screen.getByRole('button', { name: 'common.search' }))
+    fireEvent.click(await screen.findByText('Ueno Koen'))
+    expect(screen.getByPlaceholderText('places.formLat')).toHaveValue('35.7')
+
+    fireEvent.change(search, { target: { value: 'Lou' } })
+    fireEvent.click(await screen.findByText('Louvre'))
+    await waitFor(() => expect(planner.toast.error).toHaveBeenCalledWith('places.mapsSearchError'))
+
+    // The same as the desktop dialog: the name is the suggestion's, the rest is what the last pick wrote.
+    expect(nameField()).toHaveValue('Louvre')
+    expect(screen.getByPlaceholderText('places.formAddressPlaceholder')).toHaveValue('Taito')
+    expect(screen.getByPlaceholderText('places.formLat')).toHaveValue('35.7')
+    expect(screen.getByPlaceholderText('places.formLng')).toHaveValue('139.7')
+    expect(screen.getByPlaceholderText('https://')).toHaveValue('https://ueno.example')
   })
 
   it('FE-MOB-PLEDIT-017: an existing place never triggers the duplicate guard', async () => {
@@ -273,6 +340,16 @@ describe('MPlaceEditSheet', () => {
     expect(planner.setShowPlaceForm).toHaveBeenCalledWith(false)
   })
 
+  it('requires explicit permanent confirmation when a dormant Tour is deleted from the Place editor', async () => {
+    const tour = { ...EDITED, tour_place_id: EDITED.id } as Place
+    const { planner } = setup({ editingPlace: tour, isTourPlace: vi.fn(() => true) })
+    fireEvent.click(screen.getByRole('button', { name: 'common.delete' }))
+
+    expect(planner.toast.warning).toHaveBeenCalledWith('tours.delete.confirmBody')
+    fireEvent.click(screen.getByRole('button', { name: 'tours.delete.confirmAction' }))
+    await waitFor(() => expect(planner.confirmDeletePlace).toHaveBeenCalledTimes(1))
+  })
+
   it('FE-MOB-PLEDIT-022: cancelling an armed delete un-stages the id', () => {
     const { planner } = setup({ editingPlace: EDITED })
     fireEvent.click(screen.getByRole('button', { name: 'common.delete' }))
@@ -290,7 +367,8 @@ describe('MPlaceEditSheet', () => {
 
   it('FE-MOB-PLEDIT-024: blocks the save while the end time is not after the start', () => {
     const assignment = { id: 7, day_id: 2, place_id: 42, order_index: 0, place: EDITED } as unknown as Assignment
-    setup({ editingPlace: EDITED, editingAssignmentId: 7, assignments: { '2': [assignment] } })
+    const visits = { '2': [assignment] }
+    setup({ editingPlace: EDITED, editingAssignmentId: 7, assignments: visits, storedAssignments: visits })
     const [start, end] = screen.getAllByDisplayValue(/^0[89]:[0-3]0$/) as HTMLInputElement[]
     expect(submit()).not.toBeDisabled()
     fireEvent.change(end, { target: { value: '07:00' } })
@@ -316,7 +394,7 @@ describe('MPlaceEditSheet', () => {
   it('FE-MOB-PLEDIT-025b: attaches files chosen through the picker', async () => {
     const { planner } = setup()
     const file = new File(['x'], 'map.pdf', { type: 'application/pdf' })
-    const picker = document.querySelector('input[type="file"]') as HTMLInputElement
+    const picker = document.querySelector('input[type="file"][multiple]') as HTMLInputElement
     fireEvent.change(picker, { target: { files: [file] } })
     expect(await screen.findByText('map.pdf')).toBeInTheDocument()
 
@@ -354,32 +432,70 @@ describe('MPlaceEditSheet', () => {
     expect(screen.queryByText('ticket.png')).not.toBeInTheDocument()
   })
 
-  /** Types into the search row and returns the bias the autocomplete request carried. */
-  async function capturedBias(places: Place[]) {
+  /**
+   * Types into the search row and returns the bias the autocomplete request
+   * carried. The hint comes from useLocationBias, which reads the trip store,
+   * not the planner prop, so both are seeded the way the running app has them.
+   */
+  async function capturedBias(places: Place[], day?: { id: number; placeIds: number[] }, extra: Record<string, unknown> = {}) {
     const bodies: Record<string, unknown>[] = []
     server.use(http.post('/api/maps/autocomplete', async ({ request }) => {
       bodies.push(await request.json() as Record<string, unknown>)
       return HttpResponse.json({ source: 'osm', suggestions: [] })
     }))
+    seedStore(useTripStore, {
+      places,
+      assignments: day ? { [String(day.id)]: day.placeIds.map(id => ({ place_id: id })) } : {},
+      selectedDayId: day?.id ?? null,
+      ...extra,
+    })
     setup({ places })
     fireEvent.change(screen.getByPlaceholderText('places.mapsSearchPlaceholder'), { target: { value: 'ueno' } })
     await waitFor(() => expect(bodies).toHaveLength(1))
     return bodies[0].locationBias
   }
 
-  it('FE-MOB-PLEDIT-029: biases the maps search on the trip bounding box', async () => {
+  it('FE-MOB-PLEDIT-029: biases the maps search on the trip box while the trip fits one region', async () => {
     const places = [
       { id: 1, name: 'A', lat: 35.6, lng: 139.7 },
       { id: 2, name: 'B', lat: 35.8, lng: 139.9 },
       { id: 3, name: 'C', lat: null, lng: null },
     ] as unknown as Place[]
+    // 25km across and no day open, so the trip is the best hint there is.
     expect(await capturedBias(places)).toEqual({ low: { lat: 35.6, lng: 139.7 }, high: { lat: 35.8, lng: 139.9 } })
   })
 
-  it('FE-MOB-PLEDIT-030: drops the bias for a trip that spans more than 500 km', async () => {
+  it('FE-MOB-PLEDIT-029b: narrows the bias to the open day when the trip is too wide for one', async () => {
+    const places = [
+      { id: 1, name: 'Ueno', lat: 35.71, lng: 139.77 },
+      { id: 2, name: 'Asakusa', lat: 35.71, lng: 139.8 },
+      { id: 3, name: 'Nagoya', lat: 35.18, lng: 136.91 },
+    ] as unknown as Place[]
+    // The trip reaches Nagoya and is dropped, but the day being planned still
+    // gets a hint. That is what preferring the day buys.
+    expect(await capturedBias(places, { id: 7, placeIds: [1, 2] })).toEqual({
+      low: { lat: 35.71, lng: 139.77 }, high: { lat: 35.71, lng: 139.8 },
+    })
+  })
+
+  it('FE-MOB-PLEDIT-029c: biases on the visible map area first, even for a trip too wide for one region (#2620)', async () => {
     const places = [
       { id: 1, name: 'Tokyo', lat: 35.68, lng: 139.76 },
-      { id: 2, name: 'Sapporo', lat: 43.06, lng: 141.35 },
+      { id: 2, name: 'Kyoto', lat: 35.01, lng: 135.77 },
+    ] as unknown as Place[]
+    // The map is zoomed in on Kyoto. The trip alone would send nothing at all.
+    expect(await capturedBias(places, undefined, {
+      trip: { id: 1 },
+      planMapViewport: { tripId: 1, south: 34.96, west: 135.7, north: 35.06, east: 135.82 },
+    })).toEqual({ low: { lat: 34.96, lng: 135.7 }, high: { lat: 35.06, lng: 135.82 } })
+  })
+
+  it('FE-MOB-PLEDIT-030: drops the bias for a trip that outgrows one region', async () => {
+    // Tokyo to Nagoya, 264km across: inside the old 500km diagonal rule, outside
+    // the 60km radius one. A box that wide has its centre in open country.
+    const places = [
+      { id: 1, name: 'Tokyo', lat: 35.68, lng: 139.76 },
+      { id: 2, name: 'Nagoya', lat: 35.18, lng: 136.91 },
     ] as unknown as Place[]
     expect(await capturedBias(places)).toBeUndefined()
   })
@@ -403,12 +519,12 @@ describe('MPlaceEditSheet', () => {
 
     it('FE-MOB-PLEDIT-033: the button only appears while the Budget addon is on', () => {
       const { unmount } = setup()
-      expect(screen.queryByRole('button', { name: 'reservations.createExpense' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Create expense' })).not.toBeInTheDocument()
       unmount()
 
       withBudget()
       setup()
-      expect(screen.getByRole('button', { name: 'reservations.createExpense' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Create expense' })).toBeInTheDocument()
     })
 
     it('FE-MOB-PLEDIT-034: creating an expense saves the place first, then opens the editor', async () => {
@@ -417,7 +533,7 @@ describe('MPlaceEditSheet', () => {
       const { onOpenExpense } = setup({ handleSavePlace })
 
       fireEvent.change(nameField(), { target: { value: 'Louvre' } })
-      fireEvent.click(screen.getByRole('button', { name: 'reservations.createExpense' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Create expense' }))
 
       await waitFor(() => expect(onOpenExpense).toHaveBeenCalled())
       expect(handleSavePlace.mock.invocationCallOrder[0]).toBeLessThan(onOpenExpense.mock.invocationCallOrder[0])
@@ -432,10 +548,174 @@ describe('MPlaceEditSheet', () => {
       const { onOpenExpense } = setup({ handleSavePlace })
 
       fireEvent.change(nameField(), { target: { value: 'Louvre' } })
-      fireEvent.click(screen.getByRole('button', { name: 'reservations.createExpense' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Create expense' }))
 
       await waitFor(() => expect(handleSavePlace).toHaveBeenCalled())
       expect(onOpenExpense).not.toHaveBeenCalled()
     })
+
+    it('FE-MOB-PLEDIT-044: an edited place lists its expenses and opens one for editing (#2084)', () => {
+      withBudget()
+      const tickets = { id: 70, trip_id: 1, name: 'Temple tickets', total_price: 5, category: 'activities', place_id: 42 }
+      seedStore(useTripStore, { trip: { id: 1, currency: 'JPY' }, budgetItems: [tickets] })
+      const { onOpenExpense } = setup({ editingPlace: EDITED })
+      expect(screen.getByText('Linked expenses')).toBeInTheDocument()
+      fireEvent.click(screen.getByText('Temple tickets'))
+      expect(onOpenExpense).toHaveBeenCalledWith({ editItem: tickets })
+      // The place hint only shows while nothing is linked.
+      expect(screen.queryByText('Saves the place, then opens the Costs editor.')).not.toBeInTheDocument()
+    })
+
+    it('FE-MOB-PLEDIT-045: a new place shows the place hint and nothing to link to yet', () => {
+      withBudget()
+      setup()
+      expect(screen.getByText('Saves the place, then opens the Costs editor.')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Link' })).not.toBeInTheDocument()
+    })
+  })
+
+  // ── A visit the day lists hide (the road trip stop sheet opens the editor on them) ──
+
+  describe('a visit the day lists hide', () => {
+    /**
+     * A booked night: the phone's filtered `assignments` never carries it, the stored
+     * map does. Its own times differ from the pool place's (08:00 to 09:30), so a
+     * lookup in the wrong list shows up as the wrong clock.
+     */
+    const NIGHT = {
+      id: 7, day_id: 2, place_id: 42, order_index: 0, accommodation_id: 9, notes: 'Late check-in',
+      place: { ...EDITED, place_time: '10:00', end_time: '11:00' },
+    } as unknown as Assignment
+
+    const openOnNight = (overrides: Partial<TripPlanner> = {}) => setup({
+      editingPlace: EDITED,
+      editingAssignmentId: 7,
+      assignments: {},
+      storedAssignments: { '2': [NIGHT] },
+      ...overrides,
+    })
+
+    it('FE-MOB-PLEDIT-036: reads the times and the day note off the stored visit', () => {
+      openOnNight()
+      const times = screen.getAllByDisplayValue(/^1[01]:00$/) as HTMLInputElement[]
+      expect(times.map(el => el.value)).toEqual(['10:00', '11:00'])
+      expect(screen.getByPlaceholderText('places.assignmentNotesPlaceholder')).toHaveValue('Late check-in')
+    })
+
+    it('FE-MOB-PLEDIT-037: saving it untouched keeps the pinned time and sends no note', async () => {
+      const { planner } = openOnNight()
+      fireEvent.click(submit())
+      await waitFor(() => expect(planner.handleSavePlace).toHaveBeenCalledTimes(1))
+      const payload = vi.mocked(planner.handleSavePlace).mock.calls[0][0]
+      expect(payload).toMatchObject({ place_time: '10:00', end_time: '11:00' })
+      expect(payload).not.toHaveProperty('assignment_notes')
+    })
+
+    it('FE-MOB-PLEDIT-038: an edited day note on it travels with the save', async () => {
+      const { planner } = openOnNight()
+      fireEvent.change(screen.getByPlaceholderText('places.assignmentNotesPlaceholder'), { target: { value: 'Key box at the door' } })
+      fireEvent.click(submit())
+      await waitFor(() => expect(planner.handleSavePlace).toHaveBeenCalledTimes(1))
+      expect(planner.handleSavePlace).toHaveBeenCalledWith(expect.objectContaining({ assignment_notes: 'Key box at the door' }))
+    })
+
+    it('FE-MOB-PLEDIT-039: clearing Start on it sends the empty time that unpins the stop', async () => {
+      const { planner } = openOnNight()
+      const [start] = screen.getAllByDisplayValue('10:00')
+      fireEvent.change(start, { target: { value: '' } })
+      fireEvent.click(submit())
+      await waitFor(() => expect(planner.handleSavePlace).toHaveBeenCalledTimes(1))
+      expect(planner.handleSavePlace).toHaveBeenCalledWith(expect.objectContaining({ place_time: '', end_time: '11:00' }))
+    })
+
+    it('FE-MOB-PLEDIT-040: the overlap warning names what the day lists show, never a hidden stop', () => {
+      const listed = {
+        id: 8, day_id: 2, place_id: 50, order_index: 1,
+        place: { id: 50, name: 'Kaminarimon', place_time: '10:30', end_time: '11:30' },
+      } as unknown as Assignment
+      const hiddenPump = {
+        id: 9, day_id: 2, place_id: 51, order_index: 2,
+        place: { id: 51, name: 'ENEOS Asakusa', stop_type: 'fuel', place_time: '10:15', end_time: '10:45' },
+      } as unknown as Assignment
+      openOnNight({
+        assignments: { '2': [listed] },
+        storedAssignments: { '2': [NIGHT, listed, hiddenPump] },
+      })
+      // The night itself is hidden too, and still gets warned: the warning reads its day off it.
+      const warning = screen.getByText(/places\.timeCollision/)
+      expect(warning).toHaveTextContent('Kaminarimon')
+      expect(warning).not.toHaveTextContent('ENEOS')
+    })
+  })
+
+  it('FE-MOB-PLEDIT-041: shows the details block for the place under edit', async () => {
+    server.use(
+      http.post('/api/maps/enrichment', () => HttpResponse.json({
+        photos: [],
+        description: { text: 'The oldest temple in Tokyo.', source: 'wikipedia', sourceUrl: null, license: null },
+        facts: [],
+        rating: null,
+        hours: null,
+      })),
+    )
+    setup({ editingPlace: EDITED })
+    expect(await screen.findByText('The oldest temple in Tokyo.')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-PLEDIT-042: keeps the details block off while the instance has enrichment disabled', () => {
+    seedStore(useAuthStore, { placesEnrichEnabled: false })
+    setup({ editingPlace: EDITED })
+    expect(screen.queryByText('places.details.title')).not.toBeInTheDocument()
+    // The picture is still chosen in the sheet, by the form's own picker.
+    expect(screen.getByText('places.details.pickImage')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-PLEDIT-048: a picture picked from the device waits for the save and travels with it', async () => {
+    const preview = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:sheet-preview')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    try {
+      seedStore(useAuthStore, { placesEnrichEnabled: false })
+      const { planner } = setup({ editingPlace: EDITED })
+      const picture = new File(['x'], 'gate.png', { type: 'image/png' })
+      fireEvent.change(document.querySelector('input[type="file"][accept^="image"]') as HTMLInputElement, {
+        target: { files: [picture] },
+      })
+      const tile = await screen.findByRole('button', { name: 'places.uploadImage', pressed: true })
+      expect(tile.querySelector('img')).toHaveAttribute('src', 'blob:sheet-preview')
+      // Nothing is sent before the save.
+      expect(planner.handleSavePlace).not.toHaveBeenCalled()
+
+      fireEvent.click(submit())
+      await waitFor(() => expect(planner.handleSavePlace).toHaveBeenCalledTimes(1))
+      expect(planner.handleSavePlace).toHaveBeenCalledWith(expect.objectContaining({ _pendingImage: picture }))
+    } finally {
+      preview.mockRestore()
+      revoke.mockRestore()
+    }
+  })
+
+  it('FE-MOB-PLEDIT-043: a plugin POI pick fills the form and asks the details block about its plugin id, not a Google one', async () => {
+    const asked: unknown[] = []
+    server.use(
+      http.post('/api/maps/enrichment', async ({ request }) => {
+        asked.push(await request.json())
+        return HttpResponse.json({ photos: [], description: null, facts: [], rating: null, hours: null })
+      }),
+    )
+    const { planner } = setup({
+      prefillCoords: {
+        lat: 47.1, lng: 11.2, name: 'Trailhead', address: 'Hut 1', website: 'https://trails.example/th-043',
+        phone: '+43 1', osm_id: 'plugin:trail-finder:th-043',
+      },
+    })
+    expect(nameField()).toHaveValue('Trailhead')
+    expect(screen.getByPlaceholderText('https://')).toHaveValue('https://trails.example/th-043')
+    // The server decides who to ask by this id, and never takes a `plugin:` one for Google's.
+    await waitFor(() => expect(asked).toEqual([expect.objectContaining({ placeId: 'plugin:trail-finder:th-043', lat: 47.1, lng: 11.2 })]))
+
+    fireEvent.click(submit())
+    await waitFor(() => expect(planner.handleSavePlace).toHaveBeenCalledTimes(1))
+    expect(planner.handleSavePlace).toHaveBeenCalledWith(expect.objectContaining({ name: 'Trailhead', osm_id: 'plugin:trail-finder:th-043' }))
+    expect(planner.handleSavePlace).not.toHaveBeenCalledWith(expect.objectContaining({ google_place_id: expect.anything() }))
   })
 })

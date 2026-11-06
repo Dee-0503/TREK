@@ -57,4 +57,3 @@ Expected: existing saved Google/OSM places and new AMap places both work.
 **Acceptance:** A selected AMap result can be saved, reopened, matched, and refreshed without Google-specific misclassification; opening hours remain in the existing detail-cache/enrichment path.
 
 ---
-

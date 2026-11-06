@@ -1,12 +1,16 @@
+import { useRef } from 'react'
 import { useNavigate } from 'react-router'
 import { ArrowLeft, CheckCheck, Trash2 } from 'lucide-react'
 import MDancingTrek from '../../components/MDancingTrek'
+import ConfirmDialog from '../../../components/shared/ConfirmDialog'
 import { useTranslation } from '../../../i18n'
 import { useInAppNotifications } from '../../../pages/inAppNotifications/useInAppNotifications'
 import MGlassBar from '../../components/MGlassBar'
 import MIconBtn from '../../components/MIconBtn'
 import MSegmented from '../../components/MSegmented'
 import MNotificationRow from './MNotificationRow'
+import { usePullToRefresh } from '../../usePullToRefresh'
+import MPullIndicator from '../../components/MPullIndicator'
 
 function Spinner({ size = 20 }: { size?: number }) {
   return (
@@ -28,9 +32,11 @@ export default function MNotifications() {
   const navigate = useNavigate()
   const {
     notifications, unreadCount, isLoading, hasMore,
-    unreadOnly, setUnreadOnly, loaderRef, displayed,
-    markAllRead, deleteAll,
+    unreadOnly, setUnreadOnly, loaderRef, displayed, refresh,
+    markAllRead, confirmingDeleteAll, requestDeleteAll, cancelDeleteAll, confirmDeleteAll,
   } = useInAppNotifications()
+  const contentRef = useRef<HTMLDivElement>(null)
+  const pull = usePullToRefresh(contentRef, refresh)
 
   return (
     <>
@@ -52,13 +58,14 @@ export default function MNotifications() {
           </MIconBtn>
         )}
         {notifications.length > 0 && (
-          <MIconBtn ariaLabel={t('notifications.deleteAll')} onClick={deleteAll}>
+          <MIconBtn ariaLabel={t('notifications.deleteAll')} onClick={requestDeleteAll}>
             <Trash2 size={16} strokeWidth={2} className="text-[color:var(--m-st-danger)]" />
           </MIconBtn>
         )}
       </MGlassBar>
 
-      <div className="px-4 pb-[calc(var(--bottom-nav-h)+24px)] pt-[calc(var(--m-safe-top,12px)+66px)]">
+      <MPullIndicator state={pull} label={t('common.loading')} />
+      <div ref={contentRef} className="px-4 pb-[calc(var(--bottom-nav-h)+24px)] pt-[calc(var(--m-safe-top,12px)+66px)]">
         <MSegmented
           options={[
             { value: 'all', label: t('notifications.all') },
@@ -89,6 +96,14 @@ export default function MNotifications() {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={confirmingDeleteAll}
+        onClose={cancelDeleteAll}
+        onConfirm={confirmDeleteAll}
+        title={t('notifications.deleteAllConfirmTitle')}
+        message={t('notifications.deleteAllConfirmText')}
+        confirmLabel={t('notifications.deleteAll')}
+      />
     </>
   )
 }

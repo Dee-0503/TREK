@@ -12,7 +12,6 @@ import { STATUS_ORDER } from '../../../pages/collections/collectionsModel'
 import type { StatusFilter } from '../../../store/collectionStore'
 import { ALL_SAVED } from '../../../store/collectionStore'
 import CollectionMap from '../../../components/Collections/CollectionMap'
-import MSheet from '../../components/MSheet'
 import MCollPlaceRow from './MCollPlaceRow'
 import MCollPlaceSheet from './MCollPlaceSheet'
 import MCollAddSheet from './MCollAddSheet'
@@ -21,8 +20,10 @@ import MCollEditSheet from './MCollEditSheet'
 import MCollLabelsSheet from './MCollLabelsSheet'
 import MCollTripPickerSheet from './MCollTripPickerSheet'
 import MCollListPickerSheet from './MCollListPickerSheet'
+import MCollTours from './MCollTours'
+import MCollInvites from './MCollInvites'
 import { STATUS_SPEC } from './collectionsMobileModel'
-import { CancelPill, PrimaryPill } from './MCollSheetKit'
+import MConfirmSheet from '../settings/MConfirmSheet'
 
 const HEADER_CIRCLE =
   'flex h-[38px] w-[38px] flex-none items-center justify-center rounded-full border border-[color:var(--m-gbr)] bg-[color:var(--m-sheet)] text-m-ink shadow-[0_5px_12px_-8px_rgba(0,0,0,.18)]'
@@ -71,16 +72,25 @@ export default function MCollections() {
   // The bottom-nav "+" hands off via the ?create= contract.
   const [searchParams, setSearchParams] = useSearchParams()
   const createParam = searchParams.get('create')
-  const { activeId, canEdit, setShowAddPlace, ownedLists } = c
+  const { activeId, canEdit, setShowAddPlace, ownedLists, setEditorTarget } = c
+  const listCount = c.collections.length
+  const listsLoading = c.loading
   useEffect(() => {
     if (createParam !== 'place' && createParam !== '1') return
+    // Wait for the lists: whether there is one decides what "+" means.
+    if (listsLoading) return
     const next = new URLSearchParams(searchParams)
     next.delete('create')
     setSearchParams(next, { replace: true })
+    // Without a list yet, "+" starts the first one; places come after.
+    if (listCount === 0) {
+      setEditorTarget('new')
+      return
+    }
     // Open whenever the user can add somewhere: an editable active list, or at
     // least one owned list to pick as the target in the sheet.
     if ((typeof activeId === 'number' && canEdit) || ownedLists.length > 0) setShowAddPlace(true)
-  }, [createParam, searchParams, setSearchParams, activeId, canEdit, ownedLists.length, setShowAddPlace])
+  }, [createParam, searchParams, setSearchParams, activeId, canEdit, ownedLists.length, setShowAddPlace, listsLoading, listCount, setEditorTarget])
 
   // Close transient popovers when the active list changes under them.
   useEffect(() => {
@@ -154,7 +164,7 @@ export default function MCollections() {
           className="flex h-[38px] min-w-0 flex-1 items-center gap-[7px] rounded-full border border-[color:var(--m-gbr)] bg-[color:var(--m-sheet)] px-[14px] text-[0.8125rem] font-bold text-m-ink shadow-[0_5px_12px_-8px_rgba(0,0,0,.18)]"
         >
           <Bookmark size={14} strokeWidth={2.2} className="flex-none" />
-          <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-start">{title}</span>
           <ChevronDown size={13} strokeWidth={2} className="flex-none text-m-faint" />
         </button>
         {canEditList && (
@@ -189,7 +199,7 @@ export default function MCollections() {
                 key={l.id}
                 type="button"
                 onClick={() => selectList(l.id)}
-                className={`flex w-full items-center gap-[10px] rounded-[11px] p-[10px] text-left ${active ? 'bg-[color:var(--m-ic)]' : ''}`}
+                className={`flex w-full items-center gap-[10px] rounded-[11px] p-[10px] text-start ${active ? 'bg-[color:var(--m-ic)]' : ''}`}
                 style={active ? { boxShadow: `inset 0 0 0 1.5px ${l.color || '#6366F1'}` } : undefined}
               >
                 <span className="h-[9px] w-[9px] flex-none rounded-full" style={{ background: l.color || '#6366F1' }} />
@@ -209,18 +219,16 @@ export default function MCollections() {
         </div>
       )}
 
+      <MCollInvites invites={c.orderedInvites} onAccept={c.handleAcceptInvite} onDecline={c.handleDeclineInvite} t={t} />
+
       {c.loading && c.collections.length === 0 ? (
         <div className="flex items-center justify-center py-20 text-m-faint">
           <Loader2 size={22} className="animate-spin" />
         </div>
       ) : noLists ? (
         <div className="mt-6">
+          {/* The dock's "+" starts the first list (see the ?create= handoff above). */}
           <EmptyNote scene="collections" title={t('collections.empty.firstTitle')} />
-          <div className="mt-4 flex justify-center">
-            <PrimaryPill onClick={openNewList}>
-              <Bookmark size={14} strokeWidth={2.2} /> {t('collections.newList')}
-            </PrimaryPill>
-          </div>
         </div>
       ) : (
         <>
@@ -304,14 +312,14 @@ export default function MCollections() {
                   />
                 )}
                 {statusDrop && (
-                  <div className={`absolute left-0 right-0 top-[calc(100%+6px)] z-20 p-[6px] ${DROP_PANEL}`}>
+                  <div className={`absolute inset-x-0 top-[calc(100%+6px)] z-20 p-[6px] ${DROP_PANEL}`}>
                     <button
                       type="button"
                       onClick={() => pickStatusFilter('all')}
                       className={`flex w-full items-center gap-[9px] rounded-[11px] p-[10px] text-[0.8125rem] font-semibold text-m-ink ${c.statusFilter === 'all' ? 'bg-[color:var(--m-ic)]' : ''}`}
                     >
                       <Layers size={15} strokeWidth={2} />
-                      <span className="flex-1 text-left">{t('collections.status.filterAll')}</span>
+                      <span className="flex-1 text-start">{t('collections.status.filterAll')}</span>
                       <span className="font-geist text-[0.6875rem] font-bold text-m-faint">{c.counts.all}</span>
                     </button>
                     {STATUS_ORDER.map(s => {
@@ -325,7 +333,7 @@ export default function MCollections() {
                           className={`flex w-full items-center gap-[9px] rounded-[11px] p-[10px] text-[0.8125rem] font-semibold text-m-ink ${c.statusFilter === s ? 'bg-[color:var(--m-ic)]' : ''}`}
                         >
                           <Icon size={15} strokeWidth={2} style={{ color: meta.color }} />
-                          <span className="flex-1 text-left">{t(meta.labelKey)}</span>
+                          <span className="flex-1 text-start">{t(meta.labelKey)}</span>
                           <span className="font-geist text-[0.6875rem] font-bold text-m-faint">{c.counts[s]}</span>
                         </button>
                       )
@@ -333,14 +341,14 @@ export default function MCollections() {
                   </div>
                 )}
                 {labelDrop && (
-                  <div className={`absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-[240px] overflow-y-auto p-[6px] ${DROP_PANEL}`}>
+                  <div className={`absolute inset-x-0 top-[calc(100%+6px)] z-20 max-h-[240px] overflow-y-auto p-[6px] ${DROP_PANEL}`}>
                     <button
                       type="button"
                       onClick={() => { c.setLabelFilter([]); setLabelDrop(false) }}
                       className={`flex w-full items-center gap-[9px] rounded-[11px] p-[10px] text-[0.8125rem] font-semibold text-m-ink ${c.labelFilter.length === 0 ? 'bg-[color:var(--m-ic)]' : ''}`}
                     >
                       <Tag size={15} strokeWidth={2} />
-                      <span className="flex-1 text-left">{t('collections.status.filterAll')}</span>
+                      <span className="flex-1 text-start">{t('collections.status.filterAll')}</span>
                     </button>
                     {c.labelOptions.map(l => {
                       const on = c.labelFilter.includes(l.id)
@@ -349,7 +357,7 @@ export default function MCollections() {
                           key={l.id}
                           type="button"
                           onClick={() => toggleLabelFilter(l.id)}
-                          className={`flex w-full items-center gap-[10px] rounded-[11px] p-[10px] text-left ${on ? 'bg-[color:var(--m-ic)]' : ''}`}
+                          className={`flex w-full items-center gap-[10px] rounded-[11px] p-[10px] text-start ${on ? 'bg-[color:var(--m-ic)]' : ''}`}
                         >
                           <span className="h-[9px] w-[9px] flex-none rounded-full" style={{ background: l.color || '#6366F1' }} />
                           <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold text-m-ink">{l.name}</span>
@@ -383,7 +391,7 @@ export default function MCollections() {
                 <button type="button" onClick={c.openCopyForSelection} disabled={c.selectedIds.length === 0} className={selectChip(c.selectedIds.length === 0)}>
                   <Copy size={13} strokeWidth={2.2} /> {t('collections.copyToTrip')}
                 </button>
-                {c.canEdit && (
+                {c.canDelete && (
                   <button type="button" onClick={() => c.setListPickerMode('move')} disabled={c.selectedIds.length === 0} className={selectChip(c.selectedIds.length === 0)}>
                     <FolderInput size={13} strokeWidth={2.2} /> {t('collections.moveToList')}
                   </button>
@@ -409,6 +417,8 @@ export default function MCollections() {
           </div>
 
           {/* List view */}
+          {/* The whole tours the list keeps (LIB-03) open it, as rows like its places. */}
+          {c.view === 'list' && <MCollTours search={c.search} />}
           {c.view === 'list' && (
             c.placesLoading && !hasPlaces ? (
               <div className="flex items-center justify-center py-16 text-m-faint">
@@ -527,7 +537,7 @@ export default function MCollections() {
 
       <MCollListPickerSheet
         mode={c.listPickerMode}
-        lists={c.ownedLists.filter(l => l.id !== c.activeId)}
+        lists={c.writableLists.filter(l => l.id !== c.activeId)}
         count={c.selectedIds.length}
         onPick={id => (c.listPickerMode === 'move' ? c.handleMoveToList(id) : c.handleDuplicateToList(id))}
         onClose={() => c.setListPickerMode(null)}
@@ -535,23 +545,16 @@ export default function MCollections() {
       />
 
       {/* Delete-list confirm */}
-      <MSheet
+      <MConfirmSheet
         open={c.confirmDeleteList != null}
         onClose={() => c.setConfirmDeleteList(null)}
-        material="opaque"
-        ariaLabel={t('collections.deleteList')}
-      >
-        <div className="px-[18px] pb-[18px] pt-4">
-          <div className="text-[1.0625rem] font-bold text-m-ink">{t('collections.deleteList')}</div>
-          <div className="mt-2 font-geist text-[0.78125rem] leading-[1.5] text-m-muted">{t('collections.deleteListConfirm')}</div>
-          <div className="mt-4 flex items-center gap-2">
-            <CancelPill className="ml-auto" onClick={() => c.setConfirmDeleteList(null)}>{t('common.cancel')}</CancelPill>
-            <PrimaryPill onClick={c.handleDeleteList} className="!bg-[color:var(--m-st-danger)] !text-white">
-              <Trash2 size={14} strokeWidth={2.2} /> {t('common.delete')}
-            </PrimaryPill>
-          </div>
-        </div>
-      </MSheet>
+        title={t('collections.deleteList')}
+        message={t('collections.deleteListConfirm')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={c.handleDeleteList}
+      />
     </div>
   )
 }

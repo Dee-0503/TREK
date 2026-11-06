@@ -1,15 +1,14 @@
-import { useRef, useState, type MouseEvent } from 'react'
-import {
-  ArrowRight, BedDouble, CalendarDays, CalendarRange, ChevronRight, Compass, LogIn, LogOut,
-  MapPin, Pencil, PencilLine, Route, Ticket, TrainFront, Undo2,
-  Car, Footprints, Zap, RotateCcw,
-} from 'lucide-react'
+import { useEffect, useState, type MouseEvent } from 'react'
+import { ArrowRight, BedDouble, CalendarDays, CalendarRange, ChevronRight, LogIn, LogOut, Map as MapIcon, MapPin, Pencil, PencilLine, Route, Ticket, TrainFront, Undo2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useContextMenu, ContextMenu } from '../../../../components/shared/ContextMenu'
+import MarkdownText from '../../../../components/shared/MarkdownText'
 import { fmtTransitDuration } from '../../../../components/Planner/transitDisplay'
+import { legModeMenuItems } from '../../../../components/Planner/useLegModeActions'
 import { formatTime } from '../../../../utils/formatters'
 import { useMPlanTimeline, type MPlanTimelineController } from './useMPlanTimeline'
-import { cityPillsForDay, weatherIconFor } from './planTimelineModel'
+import { cityPillsForDay } from './planTimelineModel'
+import { weatherIconFor } from '../../../../components/Weather/weatherIcons'
 import type { HotelChip, PlanRow } from './planTimelineModel'
 import { useMPlanDragReorder } from './useMPlanDragReorder'
 import { useTouchDragBridge } from '../../../../hooks/useTouchDragBridge'
@@ -21,11 +20,13 @@ import { Fragment } from 'react'
 import MDancingTrek from '../../../components/MDancingTrek'
 import type { MPlanTimelineProps } from '../MTripShell'
 import type { MergedItem } from '../../../../utils/dayMerge'
+import type { RouteSegment } from '../../../../types'
 import type { Assignment } from '../../../../types'
-import type { ComponentType, ReactNode } from 'react'
-import GoogleMapsIcon from '../../../../components/shared/GoogleMapsIcon'
-import { isRtlLanguage } from '../../../../i18n'
-import { useMPlanDaySwipe } from './useMPlanDaySwipe'
+import type { ReactNode } from 'react'
+import { useSettingsStore } from '../../../../store/settingsStore'
+import MRouteAppsSheet, { openRouteTarget } from './MRouteAppsSheet'
+import MDayPager from '../../../components/MDayPager'
+import { useDayPreviewStore } from '../../../dayPreviewStore'
 
 /**
  * Plan-tab timeline of the mobile trip screen: the UP-NEXT card in go mode,
@@ -35,35 +36,105 @@ import { useMPlanDaySwipe } from './useMPlanDaySwipe'
  */
 
 const GLASS_PILL = 'rounded-full border border-[color:var(--m-gbr)] bg-[color:var(--m-glass)]'
+/** A tappable pill in the same glass, 28px tall like GLASS_ROUND, for a label. */
+const GLASS_CHIP = `relative flex h-7 flex-none items-center whitespace-nowrap font-geist text-[0.6875rem] font-semibold text-m-ink transition-transform active:scale-95 ${GLASS_PILL}`
+/** A round control the size of a GLASS_PILL row, with a 44px hit area around it. */
+const GLASS_ROUND = `relative flex h-7 w-7 flex-none items-center justify-center text-m-muted transition-transform active:scale-95 before:absolute before:-inset-2 before:content-[''] ${GLASS_PILL}`
 
 export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
-  const tl = useMPlanTimeline(planner)
   const { t, trip, can } = planner
-  const canEdit = can('day_edit', trip)
-  const editing = shell.mode === 'edit' && canEdit
-  // Per-segment travel mode (#1281): tap a connector → pick the leg's mode.
+  const editing = shell.mode === 'edit' && can('day_edit', trip)
+  // Per-segment travel mode (#1281): one menu for the whole pager, opened from
+  // whichever day is current.
   const legMenu = useContextMenu()
-  const modeIcon = (key: string) => (key === 'walking' ? Footprints : key.startsWith('plugin:') ? Zap : Car)
-  const openLegMenu = (e: MouseEvent, assignmentId: number) => {
-    legMenu.open(e, [
-      ...tl.routeModeOptions.map(o => ({ label: o.label, icon: modeIcon(o.key), onClick: () => tl.setLegMode(assignmentId, o.key) })),
-      { divider: true },
-      { label: t('dayplan.transportMode.useDefault'), icon: RotateCcw, onClick: () => tl.setLegMode(assignmentId, null) },
-    ])
-  }
   // Plugin time contributions in the day plan (dayScheduleProvider hook) —
   // slotted under their anchor rows, same as the desktop sidebar.
   const daySchedule = usePluginDaySchedule(planner.tripId)
+  // Long-press drag reordering (#1997). Armed only in edit mode, so go-mode taps,
+  // map pans and plain list scrolling keep the gesture — which is what kept
+  // #1432/#1440 from coming back when the old document-wide polyfill was dropped.
+  // Coarse pointers only: a hybrid laptop narrow enough to land in the phone
+  // shell already loads drag-drop-touch (utils/touchDragPolyfill), and two
+  // bridges would fight over one gesture. The rows' native drag props serve
+  // both, so nothing is lost there. One bridge for the pager: it listens on
+  // the document, and only the current day arms its rows.
+  const isTouch = useIsTouch()
+  useTouchDragBridge(editing && isTouch)
+  const [dragging, setDragging] = useState(false)
+  const setDayPreview = useDayPreviewStore(s => s.setDayId)
+
+  return (
+    <div className="absolute inset-0">
+      <ContextMenu menu={legMenu.menu} onClose={legMenu.close} />
+      {/* Swipe the days like pages (#2051): the one-handed way to the next day,
+          since the chip rail is pinned to the top of the screen. */}
+      <MDayPager
+        days={planner.days}
+        selectedDayId={planner.selectedDayId}
+        // skipFit, exactly like the chip tap in plan view: the map underneath stays
+        // mounted, and re-framing it here would move it somewhere nobody asked for.
+        onSelectDay={dayId => planner.handleSelectDay(dayId, true)}
+        onPreview={setDayPreview}
+        locked={dragging || legMenu.menu != null}
+        describeDay={(i, n) => t('mobileTrip.dayAnnounce', { current: i + 1, total: n })}
+        renderDay={(dayId, active) => (
+          <PlanDayPage
+            planner={planner}
+            shell={shell}
+            dayId={dayId}
+            active={active}
+            editing={editing}
+            legMenu={legMenu}
+            daySchedule={daySchedule}
+            onDragging={active ? setDragging : undefined}
+          />
+        )}
+      />
+    </div>
+  )
+}
+
+/**
+ * One day of the timeline: the UP-NEXT card or the edit header, and the frosted
+ * card. The pager draws the current day and its two neighbours with this; only
+ * the current one is live, the others are inert previews of the same markup so
+ * the page that slides in is exactly what lands.
+ */
+function PlanDayPage({ planner, shell, dayId: pageDayId, active, editing, legMenu, daySchedule, onDragging }: MPlanTimelineProps & {
+  dayId: number | null
+  active: boolean
+  editing: boolean
+  legMenu: ReturnType<typeof useContextMenu>
+  daySchedule: ReturnType<typeof usePluginDaySchedule>
+  onDragging?: (dragging: boolean) => void
+}) {
+  const tl = useMPlanTimeline(planner, pageDayId)
+  const { t, trip, can } = planner
+  const canEdit = can('day_edit', trip)
+  const canEditPlaces = can('place_edit', trip)
+  const openLegMenu = (e: MouseEvent, assignmentId: number, seg: RouteSegment) => {
+    // Public transit sits under the road profiles, as on the desktop (#2398).
+    const transitLeg = tl.transitLegFor(seg)
+    legMenu.open(e, legModeMenuItems(
+      tl.routeModeOptions,
+      mode => tl.setLegMode(assignmentId, mode),
+      t,
+      transitLeg ? () => tl.planTransitLeg(transitLeg, assignmentId) : undefined,
+    ))
+  }
   const day = tl.day
   const dayId = day?.id
-  // A stay chip opens the stay, the same way the stay card in the day sheet
-  // does: the editor for members who may edit days, otherwise the hotel's
-  // place. A stay with neither still leads to the day sheet, so the chip
-  // never goes dead (#2210).
+  // A stay chip shows the stay before anything can be changed, as on the
+  // desktop: its booking's overview (dates, nights, status, Edit) where one is
+  // booked, else the hotel's place. Only a stay with neither opens the editor
+  // for members who may edit days, or the day sheet, so the chip never goes
+  // dead (#2210).
   const openStay = (chip: HotelChip) => {
     if (!day) return
-    if (canEdit) shell.openSheet('accommodation', { dayId: day.id, accId: chip.accId, from: 'timeline' })
+    const booking = planner.reservations.find(r => r.accommodation_id != null && String(r.accommodation_id) === String(chip.accId))
+    if (booking) shell.openSheet('transport', { reservationId: booking.id })
     else if (chip.placeId != null) planner.handlePlaceClick(chip.placeId)
+    else if (canEdit) shell.openSheet('accommodation', { dayId: day.id, accId: chip.accId, from: 'timeline' })
     else shell.openSheet('day', { dayId: day.id })
   }
   // The icon alone tells check-out from check-in; the accessible name says it.
@@ -87,39 +158,14 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
     planner.handlePlaceClick(assignment.place?.id ?? null, assignment.id)
   }
 
-  // Long-press drag reordering (#1997). Armed only in edit mode, so go-mode taps,
-  // map pans and plain list scrolling keep the gesture — which is what kept
-  // #1432/#1440 from coming back when the old document-wide polyfill was dropped.
-  // Coarse pointers only: a hybrid laptop narrow enough to land in the phone
-  // shell already loads drag-drop-touch (utils/touchDragPolyfill), and two
-  // bridges would fight over one gesture. The rows' native drag props serve
-  // both, so nothing is lost there.
-  const isTouch = useIsTouch()
-  useTouchDragBridge(editing && isTouch)
   const dnd = useMPlanDragReorder({
     merged: tl.merged,
     dayId,
     onMove: tl.moveRowTo,
-    enabled: editing,
+    enabled: editing && active,
   })
-  // Swipe the whole panel left/right to step days (#2051) — the one-handed way
-  // to the next day, since the chip rail is pinned to the top of the screen.
-  const panelRef = useRef<HTMLDivElement>(null)
-  const cardRef = useRef<HTMLDivElement>(null)
-  const daySwipe = useMPlanDaySwipe({
-    days: planner.days,
-    selectedDayId: planner.selectedDayId,
-    // skipFit, exactly like the chip tap in plan view: the map underneath stays
-    // mounted, and re-framing it here would move it somewhere nobody asked for.
-    onSelectDay: dayId => planner.handleSelectDay(dayId, true),
-    panelRef,
-    cardRef,
-    editing,
-    dragging: dnd.draggingKey != null,
-    menuOpen: legMenu.menu != null,
-    rtl: isRtlLanguage(planner.language),
-    describeDay: (i, n) => t('mobileTrip.dayAnnounce', { current: i + 1, total: n }),
-  })
+  const draggingNow = dnd.draggingKey != null
+  useEffect(() => { onDragging?.(draggingNow) }, [onDragging, draggingNow])
 
   const dragFor = (row: PlanRow): RowDrag | undefined => {
     const props = dnd.dragPropsFor(row)
@@ -142,25 +188,37 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
 
   const chrome = { editing, t, language: tl.language, timeFormat: tl.timeFormat }
 
+  // One Maps button for every app the day can be opened in: the preferred app
+  // from settings (#2423) opens straight away, otherwise the sheet asks.
+  const [mapsOpen, setMapsOpen] = useState(false)
+  const preferredNavApp = useSettingsStore(s => s.settings.preferred_nav_app)
+  const openMaps = () => {
+    const preferred = preferredNavApp ? tl.routeTargets.find(target => target.id === preferredNavApp) : undefined
+    if (preferred) openRouteTarget(preferred)
+    else setMapsOpen(true)
+  }
+
   return (
-    <div ref={panelRef} className="absolute inset-0" {...daySwipe.handlers}>
-      <ContextMenu menu={legMenu.menu} onClose={legMenu.close} />
-      {/* Swipe-committed day changes only — a chip tap already speaks its own
-          button label plus the aria-current flip, so announcing there would say
-          the day twice. */}
-      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{daySwipe.announcement}</span>
+    <>
+    <MRouteAppsSheet open={mapsOpen} onClose={() => setMapsOpen(false)} targets={tl.routeTargets} t={t} />
+    {/* One column under the day chips: the UP-NEXT card (go mode) or the edit
+        header, then the timeline card filling the rest, 12px apart whatever height
+        the card above it has. A day without an up-next starts the timeline right
+        under the chips. */}
+    <div className="absolute inset-x-4 flex flex-col gap-3 top-[calc(var(--m-safe-top,12px)+102px)] bottom-[calc(env(safe-area-inset-bottom,0px)+90px)]">
       {!editing && <UpNextCard tl={tl} t={t} onOpen={openPlace} />}
       {editing && <EditHeader tl={tl} planner={planner} shell={shell} />}
 
-      {/* Timeline card — go mode leaves room for the UP-NEXT card above, but
-          collapses that reserved space up to the day chips when the day has no
-          up-next (no places), so an empty day shows no gap. */}
       <div
-        ref={cardRef}
-        data-touch-drag={editing ? '' : undefined}
-        className="absolute left-4 right-4 overflow-y-auto overscroll-contain rounded-[22px] border border-[color:var(--m-cbr)] bg-[color:var(--m-card)] px-3.5 pb-2 pt-1 backdrop-blur-[24px] backdrop-saturate-[1.6] bottom-[calc(env(safe-area-inset-bottom,0px)+90px)]"
-        style={{ top: `calc(var(--m-safe-top, 12px) + ${editing ? 140 : tl.upNext ? 216 : 102}px)` }}
+        data-touch-drag={editing && active ? '' : undefined}
+        data-timeline-card=""
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain rounded-[22px] border border-[color:var(--m-cbr)] bg-[color:var(--m-card)] px-3.5 pb-2 pt-1 backdrop-blur-[24px] backdrop-saturate-[1.6]"
       >
+        {planner.toursEnabled && tl.rows.some(row => row.kind === 'place' && row.invalidTour) && (
+          <div role="status" className="border-b border-[color:var(--warning)] p-2 text-sm text-[color:var(--warning)]">
+            {t('tours.dayRoute.endpointUnknown')}
+          </div>
+        )}
         {day && (
           <TimelineHeader
             tl={tl}
@@ -191,14 +249,16 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                 <Fragment key={row.key}>
                   <PlaceRow
                     assignment={row.assignment}
+                    tour={planner.toursEnabled ? planner.tours.find(tour => tour.place_id === row.assignment.place_id) : undefined}
                     fullPlace={tl.fullPlaceOf(row.assignment)}
                     linkedReservations={row.linkedReservations}
                     chrome={chrome}
                     reorder={reorderFor(row.item)}
                     drag={dragFor(row)}
                     onOpen={() => openPlace(row.assignment)}
-                    onEdit={() => tl.editAssignment(row.assignment)}
+                    onEdit={canEditPlaces ? () => tl.editAssignment(row.assignment) : undefined}
                     onRemove={() => tl.removeAssignment(row.assignment)}
+                    overrun={planner.toursEnabled ? tl.tourOverrun(row.item) : null}
                   />
                   {dayScheduleFor('assignment', row.assignment.id)}
                 </Fragment>
@@ -214,7 +274,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                     drag={dragFor(row)}
                     onOpen={() => {
                       if (editing) tl.editTransport(row.res)
-                      else shell.openSheet('transport', { reservationId: row.res.id })
+                      else shell.openSheet('transport', { reservationId: row.res.id, legIndex: row.res.__leg?.index })
                     }}
                   />
                   {dayScheduleFor('reservation', row.res.id)}
@@ -233,6 +293,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                     drag={dragFor(row)}
                     onToggle={() => tl.toggleTransit(row.key)}
                     onOpenJourney={() => tl.openTransitJourney(row.res)}
+                    late={tl.journeyLate(row.item)}
                   />
                   {dayScheduleFor('reservation', row.res.id)}
                 </Fragment>
@@ -249,7 +310,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                 />
               )
             case 'conn':
-              return <ConnRow key={row.key} seg={row.seg} onTap={editing && row.assignmentId != null ? e => openLegMenu(e, row.assignmentId!) : undefined} />
+              return <ConnRow key={row.key} seg={row.seg} onTap={editing && row.assignmentId != null ? e => openLegMenu(e, row.assignmentId!, row.seg) : undefined} />
           }
         })}
 
@@ -266,7 +327,9 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
         )}
 
         {editing && (
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          // The day's actions as one group on one glass surface, the way iOS groups
+          // its controls: each a round icon over its label.
+          <div className="mt-3 grid grid-cols-3 gap-x-1 gap-y-2 rounded-[22px] border border-[color:var(--m-gbr)] bg-[color:var(--m-glass)] p-2 shadow-[0_8px_24px_-16px_rgba(0,0,0,.35)] backdrop-blur-[24px] backdrop-saturate-[1.7]">
             <PlanAction icon={MapPin} label={t('mobileTrip.addPlaceShort')} onClick={tl.addPlace} />
             <PlanAction
               icon={PencilLine}
@@ -276,13 +339,14 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
             <PlanAction icon={Ticket} label={t('mobileTrip.addBookingShort')} onClick={tl.addBooking} />
             <PlanAction icon={TrainFront} label={t('mobileTrip.addTransportShort')} onClick={tl.addTransport} />
             <PlanAction icon={Route} label={t('dayplan.optimize')} onClick={() => void tl.optimize()} />
-            <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
-            <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
-            {tl.exportAmap && <PlanAction icon={MapPin} label="AMap" onClick={tl.exportAmap} />}
+            {tl.canExportRoute && tl.routeTargets.length > 0 && (
+              <PlanAction icon={MapIcon} label={t('mobileTrip.maps')} onClick={openMaps} />
+            )}
           </div>
         )}
       </div>
     </div>
+    </>
   )
 }
 
@@ -302,7 +366,9 @@ function UpNextCard({ tl, t, onOpen }: {
     <button
       type="button"
       onClick={() => onOpen(upNext.assignment)}
-      className="absolute left-4 right-4 cursor-pointer rounded-[22px] border border-[color:var(--m-inbr)] bg-[color:var(--m-inner)] px-4 py-3.5 text-left shadow-[0_18px_44px_-18px_rgba(0,0,0,.3)] backdrop-blur-[28px] backdrop-saturate-[1.8] top-[calc(var(--m-safe-top,12px)+102px)]"
+      // The same surface as the timeline card under it: the two are one plan, and
+      // the place at the top plus the round arrow already say which stop is next.
+      className="flex-none cursor-pointer rounded-[22px] border border-[color:var(--m-cbr)] bg-[color:var(--m-card)] px-4 py-3.5 text-start backdrop-blur-[24px] backdrop-saturate-[1.6] transition-transform active:scale-[.99]"
     >
       <div className="flex items-center justify-between">
         <span className="whitespace-nowrap font-geist text-[0.65625rem] font-bold uppercase tracking-[.08em] text-m-muted">
@@ -324,9 +390,9 @@ function UpNextCard({ tl, t, onOpen }: {
             )}
             <span className="min-w-0 truncate text-[1.125rem] font-bold">{place?.name}</span>
           </div>
-          {sub && <div className="mt-[2px] truncate font-geist text-[0.75rem] text-m-muted">{sub}</div>}
+          {sub && <MarkdownText clamp className="mt-[2px] font-geist text-[0.75rem] text-m-muted">{sub}</MarkdownText>}
         </div>
-        <span className="ml-2 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-m-act text-m-actfg">
+        <span className="ms-2 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-m-act text-m-actfg">
           <ChevronRight size={16} strokeWidth={2.4} />
         </span>
       </div>
@@ -351,7 +417,7 @@ function EditHeader({ tl, planner, shell }: {
   }
 
   return (
-    <div className="absolute left-4 right-4 flex items-center gap-2 top-[calc(var(--m-safe-top,12px)+102px)]">
+    <div className="flex flex-none items-center gap-2">
       {renaming ? (
         <input
           autoFocus
@@ -381,17 +447,17 @@ function EditHeader({ tl, planner, shell }: {
             type="button"
             aria-label={t('mobileTrip.renameDay')}
             onClick={() => { setDraft(tl.day?.title ?? ''); setRenaming(true) }}
-            className="flex-none text-m-faint"
+            className={GLASS_ROUND}
           >
-            <Pencil size={14} strokeWidth={2} />
+            <Pencil size={13} strokeWidth={2.2} />
           </button>
           <button
             type="button"
             aria-label={t('dayplan.reorderDays')}
             onClick={() => shell.openSheet('days')}
-            className="flex-none text-m-faint"
+            className={GLASS_ROUND}
           >
-            <CalendarRange size={14} strokeWidth={2} />
+            <CalendarRange size={13} strokeWidth={2.2} />
           </button>
         </>
       )}
@@ -400,7 +466,7 @@ function EditHeader({ tl, planner, shell }: {
         onClick={() => void handleUndo()}
         disabled={!canUndo}
         title={lastActionLabel ? t('undo.tooltip', { action: lastActionLabel }) : undefined}
-        className={`ml-auto flex flex-none items-center gap-[5px] px-3 py-1.5 text-[0.75rem] font-semibold disabled:opacity-40 ${GLASS_PILL}`}
+        className={`ms-auto flex flex-none items-center gap-[5px] px-3 py-1.5 text-[0.75rem] font-semibold disabled:opacity-40 ${GLASS_PILL}`}
       >
         <Undo2 size={14} strokeWidth={2} />
         {t('undo.button')}
@@ -432,19 +498,27 @@ function TimelineHeader({ tl, dayLabel, openLabel, weatherLabel, onOpenDay, onOp
   const WeatherIcon = weatherIconFor(tl.weather?.main)
   return (
     <div className="flex items-center gap-1.5 border-b border-[color:var(--m-rowbr)] px-0.5 py-[9px]">
-      {/* The one horizontal scroller inside the swipe zone, marked so a swipe
-          that starts here is handed back to it — but only while it really
-          overflows, so a short day title still swipes. */}
-      <span data-hswipe-ignore className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+      {/* The one horizontal scroller inside the day pager. Nested scrolling is
+          the browser's: while the chips overflow they pan first, and the pager
+          takes over at their end or when they fit. */}
+      <span className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+        {/* The same glass controls as the edit header's: a round one when the day
+            is already named above it, a pill with the day's name otherwise. */}
         <button
           type="button"
           onClick={onOpenDay}
           aria-label={openLabel}
-          className="flex flex-none items-center gap-[5px] whitespace-nowrap rounded-full bg-[color:var(--m-ic)] px-2.5 py-1 font-geist text-[0.6875rem] font-semibold"
+          // No widened hit area here: inside the scrolling chip strip it would add
+          // a few pixels of sideways scroll.
+          className={dayLabel ? `${GLASS_CHIP} gap-[5px] px-2.5` : `${GLASS_CHIP} w-7 justify-center`}
         >
-          <CalendarDays size={12} strokeWidth={2.2} className="text-m-muted" />
-          {dayLabel}
-          <ChevronRight size={11} strokeWidth={2.4} aria-hidden="true" className="text-m-faint" />
+          <CalendarDays size={13} strokeWidth={2.2} className="text-m-muted" />
+          {dayLabel && (
+            <>
+              {dayLabel}
+              <ChevronRight size={11} strokeWidth={2.4} aria-hidden="true" className="text-m-faint" />
+            </>
+          )}
         </button>
         {tl.hotelChips.map(chip => (
           <button
@@ -452,7 +526,7 @@ function TimelineHeader({ tl, dayLabel, openLabel, weatherLabel, onOpenDay, onOp
             type="button"
             onClick={() => onOpenStay(chip)}
             aria-label={stayLabel(chip)}
-            className="flex flex-none items-center gap-[5px] whitespace-nowrap rounded-full bg-[color:var(--m-ic)] px-2.5 py-1 font-geist text-[0.6875rem] font-semibold"
+            className={`${GLASS_CHIP} gap-[5px] px-2.5`}
           >
             <HotelChipIcon variant={chip.variant} />
             {chip.name}
@@ -466,7 +540,7 @@ function TimelineHeader({ tl, dayLabel, openLabel, weatherLabel, onOpenDay, onOp
           onClick={onOpenDay}
           aria-label={weatherLabel || openLabel}
           title={tl.weatherPlaceName || undefined}
-          className="ml-auto flex flex-none items-center gap-1 whitespace-nowrap px-1.5 py-1 text-[0.71875rem] font-semibold"
+          className={`${GLASS_CHIP} ms-auto gap-1 px-2.5`}
         >
           <WeatherIcon size={13} strokeWidth={2} />
           {tl.weatherTemp}°
@@ -483,10 +557,10 @@ function HotelChipIcon({ variant }: { variant: 'checkout' | 'checkin' | 'stay' }
   return <BedDouble size={12} strokeWidth={2.2} className="text-m-muted" />
 }
 
-/** Edit-mode action tile — Place · Note · Booking · Transport · Optimize · Google Maps, three per row. */
+/** One action of the edit-mode group: Place, Note, Booking, Transport, Optimize, Maps,
+ *  three per row, a round icon over its label. */
 function PlanAction({ icon: Icon, label, onClick }: {
-  // Google Maps hands in its own brand mark, which is not a lucide icon (#2005).
-  icon: LucideIcon | ComponentType<{ size?: number; className?: string }>
+  icon: LucideIcon
   label: string
   onClick: () => void
 }) {
@@ -494,10 +568,12 @@ function PlanAction({ icon: Icon, label, onClick }: {
     <button
       type="button"
       onClick={onClick}
-      className="flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-1 py-2.5 transition-transform active:scale-[.97]"
+      className="group flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-[16px] px-1 py-2 transition-transform active:scale-[.94]"
     >
-      <Icon size={17} strokeWidth={2} className="text-m-muted" />
-      <span className="max-w-full text-center font-geist text-[0.625rem] font-semibold leading-tight text-m-ink">{label}</span>
+      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--m-ic)] text-m-ink transition-colors group-active:bg-[color:var(--m-rowbr)]">
+        <Icon size={19} strokeWidth={2} />
+      </span>
+      <span className="max-w-full text-center font-geist text-[0.6875rem] font-semibold leading-tight text-m-ink">{label}</span>
     </button>
   )
 }

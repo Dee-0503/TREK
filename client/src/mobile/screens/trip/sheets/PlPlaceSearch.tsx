@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
-import { mapsApi } from '../../../../api/client'
-import { PlacesSession } from '../../../../utils/placesSession'
-import { isGoogleMapsUrl } from '../../../../components/Planner/PlaceFormModal.helpers'
-import { getApiErrorMessage } from '../../../../utils/apiError'
+import { Loader2, RotateCcw, Search } from 'lucide-react'
+import { offersGoogleRetry } from '../../../../utils/placeSource'
+import { usePlaceSearch, type MapsPlace } from '../../../../components/Planner/usePlaceSearch'
 import { FIELD_CLS } from './PlSheetChrome'
 import type { TripPlanner } from '../MTripShell'
 
@@ -13,189 +10,97 @@ export interface PlSearchPick {
   address?: string
   lat?: string
   lng?: string
+  provider?: 'google' | 'amap' | 'osm'
+  provider_place_id?: string
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
+  amap_poi_id?: string
   website?: string
   phone?: string
+  /**
+   * The full record the pick came from. mergeResult ignores unknown keys, so
+   * this rides along for free, and the details block hands it to the server so
+   * the enrichment call can skip its own details lookup — one fewer provider
+   * round trip on a phone network.
+   */
+  details?: MapsPlace
 }
 
-interface Suggestion {
-  placeId: string
-  mainText: string
-  secondaryText: string
+/** The same mark the desktop form shows, in the sheet's own tokens. */
+function SourceMark({ label }: { label: string | null }) {
+  if (!label) return null
+  return (
+    <span className="shrink-0 rounded-md border border-[color:var(--m-rowbr)] px-1.5 py-0.5 font-geist text-[0.5625rem] font-medium text-m-muted">
+      {label}
+    </span>
+  )
 }
-
-type MapsPlace = Record<string, unknown>
 
 interface PlPlaceSearchProps {
   planner: TripPlanner
   /** Search bias derived from the trip's existing places (trip centre). */
   locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } }
-  /** Geographic evidence used by the server provider router. */
-  countryCode?: string
-  providerOverride?: 'google' | 'amap' | 'osm'
   onPick: (pick: PlSearchPick) => void
+  /**
+   * A suggestion was tapped: only its name goes into the form while its place is
+   * looked up, as on the desktop. Handing it over as a pick would clear every
+   * field the previous pick filled, and a failed lookup would leave them empty.
+   */
+  onSuggestionName: (name: string) => void
   /** True while a suggestion's details are being resolved (name spinner). */
   onResolvingChange?: (resolving: boolean) => void
 }
 
-/** "48.8566, 2.3522" (also ; or whitespace separated) → direct coordinates. */
-const COORD_RE = /^(-?\d+(?:\.\d*)?)(?:\s*[,;]\s*|\s+)(-?\d+(?:\.\d*)?)$/
-
 function placeToPick(place: MapsPlace): PlSearchPick {
   const s = (v: unknown) => (v == null ? undefined : String(v))
+  const identity = place.providerIdentity as { provider?: string; providerPlaceId?: string } | undefined
+  const provider = identity?.provider ?? place.provider
   return {
     name: s(place.name),
     address: s(place.address),
     lat: s(place.lat),
     lng: s(place.lng),
+    ...(provider === 'google' || provider === 'amap' || provider === 'osm' ? { provider, provider_place_id: s(identity?.providerPlaceId ?? place.provider_place_id) } : {}),
     google_place_id: s(place.google_place_id),
     google_ftid: s(place.google_ftid),
     osm_id: s(place.osm_id),
+    amap_poi_id: s(place.amap_poi_id),
     website: s(place.website),
     phone: s(place.phone),
+    details: place,
   }
 }
 
 /**
  * Search row of the place form: Google/OSM text search biased on the trip
  * centre, autocomplete dropdown, plus Google-Maps-URL and "lat, lng" paste
- * detection — the mobile counterpart of PlaceFormModal's search block.
+ * detection — the mobile counterpart of PlaceFormModal's search block, on the
+ * same search logic (usePlaceSearch).
  */
-export default function PlPlaceSearch({ planner, locationBias, countryCode, providerOverride, onPick, onResolvingChange }: PlPlaceSearchProps) {
-  const { t, language, toast } = planner
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<MapsPlace[]>([])
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [searching, setSearching] = useState(false)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  // One Google billing session per search (see utils/placesSession).
-  const placesSessionRef = useRef(new PlacesSession())
-
-  const setResolving = useCallback(
-    (v: boolean) => {
-      setSearching(v)
-      onResolvingChange?.(v)
-    },
-    [onResolvingChange],
-  )
-
-  const fetchSuggestions = useCallback(
-    async (input: string) => {
-      abortRef.current?.abort()
-      const controller = new AbortController()
-      abortRef.current = controller
-      try {
-        const result = await mapsApi.autocomplete(input, { lang: language, countryCode, providerOverride, locationBias, sessionToken: placesSessionRef.current.current() }, undefined, controller.signal)
-        setSuggestions(result.suggestions || [])
-      } catch (err: unknown) {
-        // Superseded request — axios rejects an aborted call with CanceledError.
-        if (err instanceof Error && err.name === 'CanceledError') return
-        setSuggestions([])
-      }
-    },
-    [language, locationBias, countryCode, providerOverride],
-  )
-
-  // Debounced autocomplete — URLs and coordinate pastes go to the search button.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    const trimmed = query.trim()
-    if (trimmed.length < 2 || isGoogleMapsUrl(trimmed) || COORD_RE.test(trimmed)) {
-      setSuggestions([])
-      return
-    }
-    debounceRef.current = setTimeout(() => fetchSuggestions(trimmed), 300)
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [query, fetchSuggestions])
-
-  const applyPlace = (place: MapsPlace) => {
-    onPick(placeToPick(place))
-    setResults([])
-    setSuggestions([])
-    setQuery('')
-  }
-
-  const handleSearch = async () => {
-    const trimmed = query.trim()
-    if (!trimmed) return
-    setSuggestions([])
-
-    // "lat, lng" paste → straight to coordinates, no lookup needed.
-    const coords = trimmed.match(COORD_RE)
-    if (coords) {
-      onPick({ lat: coords[1], lng: coords[2] })
-      setQuery('')
-      return
-    }
-
-    setResolving(true)
-    try {
-      if (isGoogleMapsUrl(trimmed)) {
-        const resolved = await mapsApi.resolveUrl(trimmed)
-        if (resolved.lat && resolved.lng) {
-          onPick({
-            name: resolved.name || undefined,
-            address: resolved.address || undefined,
-            lat: String(resolved.lat),
-            lng: String(resolved.lng),
-            google_ftid: resolved.google_ftid || undefined,
-          })
-          setQuery('')
-          toast.success(t('places.urlResolved'))
-          return
-        }
-      }
-      const result = await mapsApi.search(trimmed, { lang: language, countryCode, providerOverride, locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
-      setResults(result.places || [])
-    } catch (err: unknown) {
-      toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
-    } finally {
-      setResolving(false)
-      placesSessionRef.current.end()
-    }
-  }
-
-  const handleSelectSuggestion = async (suggestion: Suggestion) => {
-    setSuggestions([])
-    const previousQuery = query
-    setQuery('')
-    onPick({ name: suggestion.mainText })
-    setResolving(true)
-    try {
-      // Details are a fragile second hop (kill-switch, Overpass load) — fall
-      // back to the text-search path so suggestions never dead-end. (#1192)
-      let place: MapsPlace | null = null
-      try {
-        // Spends the session the suggestions opened.
-        const result = await mapsApi.details(suggestion.placeId, { lang: language, provider: suggestion.placeId.startsWith('amap:') ? 'amap' : providerOverride, countryCode, sessionToken: suggestion.placeId.startsWith('amap:') ? undefined : placesSessionRef.current.peek() })
-        if (result.place && result.place.lat != null && result.place.lng != null) place = result.place
-      } catch {
-        // fall through to text search
-      }
-      if (!place) {
-        const fullQuery = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(fullQuery, { lang: language, countryCode, providerOverride, locationBias: locationBias ? { lat: (locationBias.low.lat + locationBias.high.lat) / 2, lng: (locationBias.low.lng + locationBias.high.lng) / 2 } : undefined })
-        place = (search.places?.[0] as MapsPlace | undefined) ?? null
-      }
-      if (place) {
-        applyPlace(place)
-      } else {
-        setQuery(previousQuery)
-        toast.error(t('places.mapsSearchError'))
-      }
-    } catch (err: unknown) {
-      setQuery(previousQuery)
-      toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
-    } finally {
-      setResolving(false)
-      placesSessionRef.current.end()
-    }
-  }
+export default function PlPlaceSearch({ planner, locationBias, onPick, onSuggestionName, onResolvingChange }: PlPlaceSearchProps) {
+  const { t, toast } = planner
+  const {
+    query, setQuery, results, suggestions, setSuggestions, acSource, searchSource, searching, googleAnswers,
+    sourceLabel, runSearch: handleSearch, pickPlace: applyPlace, selectSuggestion: handleSelectSuggestion,
+  } = usePlaceSearch({
+    variant: 'sheet',
+    locationBias,
+    countryCode: planner.trip?.country_code ?? undefined,
+    t,
+    toast,
+    onPlace: place => onPick(placeToPick(place)),
+    onSuggestionName,
+    onMapLink: resolved => onPick({
+      name: resolved.name || undefined,
+      address: resolved.address || undefined,
+      lat: String(resolved.lat),
+      lng: String(resolved.lng),
+      google_ftid: resolved.google_ftid || undefined,
+    }),
+    onCoordinates: (lat, lng) => onPick({ lat, lng }),
+    onResolvingChange,
+  })
 
   return (
     <div className="relative">
@@ -207,7 +112,7 @@ export default function PlPlaceSearch({ planner, locationBias, countryCode, prov
           onKeyDown={e => {
             if (e.key === 'Enter') {
               e.preventDefault()
-              handleSearch()
+              void handleSearch()
             }
           }}
           onBlur={() => setTimeout(() => setSuggestions([]), 150)}
@@ -216,7 +121,7 @@ export default function PlPlaceSearch({ planner, locationBias, countryCode, prov
         />
         <button
           type="button"
-          onClick={handleSearch}
+          onClick={() => handleSearch()}
           disabled={searching}
           aria-label={t('common.search')}
           className="flex h-10 w-10 flex-none items-center justify-center rounded-[12px] bg-m-act text-m-actfg disabled:opacity-60"
@@ -226,19 +131,24 @@ export default function PlPlaceSearch({ planner, locationBias, countryCode, prov
       </div>
 
       {suggestions.length > 0 && (
-        <div className="absolute left-0 right-12 top-[calc(100%+6px)] z-10 max-h-[210px] overflow-y-auto rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)] shadow-[0_20px_44px_-18px_rgba(0,0,0,.45)]">
+        <div className="absolute start-0 end-12 top-[calc(100%+6px)] z-10 max-h-[210px] overflow-y-auto rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)] shadow-[0_20px_44px_-18px_rgba(0,0,0,.45)]">
           {suggestions.map(s => (
             <button
               key={s.placeId}
               type="button"
               onPointerDown={e => e.preventDefault()}
               onClick={() => handleSelectSuggestion(s)}
-              className="block w-full border-t border-[color:var(--m-rowbr)] px-[13px] py-[10px] text-left first:border-t-0"
+              className="block w-full border-t border-[color:var(--m-rowbr)] px-[13px] py-[10px] text-start first:border-t-0"
             >
-              <div className="truncate text-[0.8125rem] font-semibold text-m-ink">{s.mainText}</div>
-              {s.secondaryText && (
-                <div className="truncate font-geist text-[0.65625rem] text-m-muted">{s.secondaryText}</div>
-              )}
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[0.8125rem] font-semibold text-m-ink">{s.mainText}</div>
+                  {s.secondaryText && (
+                    <div className="truncate font-geist text-[0.65625rem] text-m-muted">{s.secondaryText}</div>
+                  )}
+                </div>
+                <SourceMark label={sourceLabel(s, acSource)} />
+              </div>
             </button>
           ))}
         </div>
@@ -250,14 +160,33 @@ export default function PlPlaceSearch({ planner, locationBias, countryCode, prov
             <button
               key={idx}
               type="button"
-              onClick={() => applyPlace(result)}
-              className="block w-full border-t border-[color:var(--m-rowbr)] px-[13px] py-[10px] text-left first:border-t-0"
+              onClick={() => applyPlace(result, { mode: 'search', rank: idx, count: results.length })}
+              className="block w-full border-t border-[color:var(--m-rowbr)] px-[13px] py-[10px] text-start first:border-t-0"
             >
-              <div className="truncate text-[0.8125rem] font-semibold text-m-ink">{String(result.name ?? '')}</div>
-              <div className="truncate font-geist text-[0.65625rem] text-m-muted">{String(result.address ?? '')}</div>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[0.8125rem] font-semibold text-m-ink">{String(result.name ?? '')}</div>
+                  <div className="truncate font-geist text-[0.65625rem] text-m-muted">{String(result.address ?? '')}</div>
+                </div>
+                <SourceMark label={sourceLabel(result, searchSource)} />
+              </div>
             </button>
           ))}
         </div>
+      )}
+      {/* The same quiet line the desktop form has: the index answers first and
+          Google only when it finds nothing, so this is how a list with the wrong
+          place on it reaches Google, where Google holds the key slot. */}
+      {results.length > 0 && offersGoogleRetry(searchSource, googleAnswers) && (
+        <button
+          type="button"
+          onClick={() => handleSearch('google')}
+          disabled={searching}
+          className="mt-2 inline-flex items-center gap-1 font-geist text-[0.6875rem] text-m-muted disabled:opacity-60"
+        >
+          <RotateCcw size={11} strokeWidth={2} aria-hidden="true" />
+          {t('places.searchGoogleInstead')}
+        </button>
       )}
     </div>
   )

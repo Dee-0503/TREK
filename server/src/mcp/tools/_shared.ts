@@ -6,7 +6,6 @@ import { errorResult } from '../../nest-mcp';
 // the impure guards (hasTripPermission/isAdminUser/safeBroadcast) moved onto
 // the injectable McpToolGuardsService (src/nest/mcp-shared/).
 export {
-  demoDenied,
   errorResult,
   ok,
   TOOL_ANNOTATIONS_DELETE,
@@ -16,8 +15,6 @@ export {
   TOOL_ANNOTATIONS_READONLY,
   TOOL_ANNOTATIONS_WRITE,
 } from '../../nest-mcp';
-
-export const MAX_MCP_TRIP_DAYS = 90;
 
 export function noAccess() {
   return errorResult('Trip not found or access denied.');

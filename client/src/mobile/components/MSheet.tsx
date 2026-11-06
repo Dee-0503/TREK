@@ -1,6 +1,12 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { lockBodyScroll } from '../../utils/bodyScrollLock'
+import { useTranslation } from '../../i18n'
+import { useDiscardGuard } from '../../components/shared/useDiscardGuard'
+import { keepTabInside, useModalFocus } from './modalFocus'
+import { useSheetDrag } from './useSheetDrag'
+import { useOverlay } from '../overlayStack'
+import { tickHaptic } from '../../native/haptics'
 
 export type MSheetVariant = 'card' | 'bottom' | 'drawer'
 export type MSheetMaterial = 'glass' | 'bar-glass' | 'opaque'
@@ -20,16 +26,21 @@ interface MSheetProps {
   ariaLabel?: string
   className?: string
   children?: ReactNode
+  /**
+   * The form's state, for the unsaved-changes question the desktop dialogs ask
+   * (#2253): a flick of the handle, a tap on the scrim or Escape asks before
+   * throwing away a state that differs from the one at the first touch.
+   */
+  discardGuard?: unknown
 }
 
-const EXIT_MS = 280
+const EXIT_MS = 300
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const DISCARD_BUTTON = 'rounded-full bg-danger px-4 py-2 text-body font-semibold text-white' // theme-lint-disable: white on the danger fill, as ConfirmDialog draws it
 
 const POSITION: Record<MSheetVariant, string> = {
-  card: 'absolute left-[14px] right-[14px] top-1/2 -translate-y-1/2',
-  bottom: 'absolute left-4 right-4 bottom-[calc(var(--bottom-nav-h,84px)+16px)]',
+  card: 'absolute inset-x-[14px] top-1/2 -translate-y-1/2',
+  bottom: 'absolute inset-x-4 bottom-[calc(var(--bottom-nav-h,84px)+16px)]',
   drawer: 'absolute left-0 top-0 bottom-0 w-[78%] max-w-[320px]',
 }
 
@@ -51,14 +62,20 @@ const MATERIAL: Record<MSheetMaterial, string> = {
   opaque: 'bg-[color:var(--m-sheetop)] border border-[color:var(--m-shbr)]',
 }
 
+// The docked sheet rises from below the screen edge like a native sheet; the
+// card pops in place like an alert; the drawer slides from the side.
+const ENTER: Record<MSheetVariant, string> = { card: 'm-sheet-in', bottom: 'm-sheet-up', drawer: 'm-drawer-in' }
+const EXIT: Record<MSheetVariant, string> = { card: 'm-sheet-out', bottom: 'm-sheet-down', drawer: 'm-drawer-out' }
+
 function sheetRoot(): HTMLElement {
   return document.getElementById('m-sheet-root') ?? document.body
 }
 
 /**
  * The one sheet primitive of the mobile design system. Handles portal,
- * scrim, ESC/backdrop dismissal, body scroll lock, focus trapping, 280ms
- * enter/exit and — for the bottom variant — drag-to-dismiss on the top edge.
+ * scrim, ESC/backdrop dismissal, body scroll lock, focus trapping, native
+ * enter/exit motion and — for the bottom variant — drag-to-dismiss from the top
+ * edge or from content scrolled to its top (useSheetDrag).
  */
 export default function MSheet({
   open,
@@ -69,108 +86,92 @@ export default function MSheet({
   ariaLabel,
   className = '',
   children,
+  discardGuard,
 }: MSheetProps) {
+  const { t } = useTranslation()
+  const { asking, markStart, requestClose, wouldAsk, keepEditing, discard, reset } = useDiscardGuard(discardGuard, onClose)
   const [rendered, setRendered] = useState(open)
   // Once the enter animation has played it is removed again: its forwards
   // fill would otherwise override the inline drag transform for good.
   const [entered, setEntered] = useState(false)
-  const [dragY, setDragY] = useState<number | null>(null)
+  // Thrown off screen by a drag: it leaves from where the finger let go, so the
+  // exit animation (which starts from the rest position) must not play.
+  const [flung, setFlung] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ startY: number; lastY: number; lastT: number; velocity: number } | null>(null)
+  const sheetDrag = useSheetDrag({
+    enabled: variant === 'bottom' && open && rendered,
+    panelRef,
+    onDismiss: () => {
+      if (wouldAsk()) {
+        requestClose()
+        return false
+      }
+      setFlung(true)
+      tickHaptic()
+      onClose()
+      return true
+    },
+  })
 
   // Keep the sheet mounted through the exit animation.
   useEffect(() => {
     if (open) {
       setRendered(true)
+      setFlung(false)
+      const panel = panelRef.current
+      if (panel) {
+        panel.style.transform = ''
+        panel.style.transition = ''
+      }
       return
     }
     setEntered(false)
-    setDragY(null)
+    // The sheet stays mounted between openings; the next one starts afresh.
+    reset()
     const t = setTimeout(() => setRendered(false), EXIT_MS)
     return () => clearTimeout(t)
-  }, [open])
+  }, [open, reset])
 
+  // Escape belongs to the sheet on top only: a question opened over another
+  // sheet closes alone, and the sheet under it stays open with whatever was
+  // typed into it. Sheets portal in the order they open, so the top one is the
+  // last open panel in the document.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      const openPanels = document.querySelectorAll('[data-m-sheet="open"]')
+      if (openPanels[openPanels.length - 1] !== panelRef.current) return
+      if (asking) keepEditing()
+      else requestClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, asking, keepEditing, requestClose])
 
   useEffect(() => {
     if (!open) return
     return lockBodyScroll()
   }, [open])
 
+  // A way back (the edge swipe, Android's back gesture) closes the sheet on top
+  // first, through the same path as the scrim, so unsaved changes still ask.
+  useOverlay(open && rendered, requestClose)
+
   // Move focus into the dialog on open, hand it back on close.
-  useEffect(() => {
-    if (!open || !rendered) return
-    const previous = document.activeElement as HTMLElement | null
-    panelRef.current?.focus()
-    return () => previous?.focus()
-  }, [open, rendered])
+  useModalFocus(panelRef, open && rendered)
 
   if (!rendered) return null
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    dragRef.current = { startY: e.clientY, lastY: e.clientY, lastT: e.timeStamp, velocity: 0 }
-    setDragY(0)
-  }
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d) return
-    d.velocity = (e.clientY - d.lastY) / Math.max(1, e.timeStamp - d.lastT)
-    d.lastY = e.clientY
-    d.lastT = e.timeStamp
-    setDragY(Math.max(0, e.clientY - d.startY))
-  }
-
-  const handlePointerEnd = () => {
-    const d = dragRef.current
-    if (!d) return
-    dragRef.current = null
-    const height = panelRef.current?.offsetHeight ?? 0
-    const dy = Math.max(0, d.lastY - d.startY)
-    setDragY(null)
-    // Past 30% of the panel or a decisive flick → dismiss.
-    if ((height > 0 && dy > height * 0.3) || d.velocity > 0.6) onClose()
-  }
-
   // Keep Tab inside the dialog while it is open.
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Tab') return
-    const panel = panelRef.current
-    if (!panel) return
-    const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE)
-    if (focusable.length === 0) {
-      e.preventDefault()
-      return
-    }
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault()
-      first.focus()
-    }
-  }
+  const handleKeyDown = (e: React.KeyboardEvent) => keepTabInside(e, panelRef.current)
 
-  const enterClass = variant === 'drawer' ? 'm-drawer-in' : 'm-sheet-in'
-  const exitClass = variant === 'drawer' ? 'm-drawer-out' : 'm-sheet-out'
-  const animation = open ? (entered ? '' : enterClass) : exitClass
+  const enterClass = ENTER[variant]
+  const exitClass = EXIT[variant]
+  const animation = open ? (entered ? '' : enterClass) : flung ? '' : exitClass
 
-  const resolvedMaterial = material ?? (variant === 'bottom' ? 'bar-glass' : 'glass')
-
-  const dragStyle: React.CSSProperties =
-    dragY !== null
-      ? { transform: `translateY(${dragY}px)`, transition: 'none' }
-      : { transition: 'transform 280ms var(--ease-drawer)' }
+  // One material for every sheet, docked or floating, so they all read the same.
+  const resolvedMaterial = material ?? 'glass'
 
   return createPortal(
     // m-root on the overlay so the --m-* tokens resolve even when the portal
@@ -183,7 +184,7 @@ export default function MSheet({
       className={`m-root fixed inset-0 z-[60] ${dimTransparent ? 'bg-transparent' : `bg-[color:var(--m-dim)] ${open ? 'm-fade-in' : 'm-fade-out'}`}`}
       role="presentation"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget) requestClose()
       }}
     >
       <div className={POSITION[variant]}>
@@ -192,27 +193,43 @@ export default function MSheet({
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
+          data-m-sheet={open ? 'open' : 'closing'}
           tabIndex={-1}
           className={`relative flex flex-col overflow-hidden outline-none text-m-ink ${SHAPE[variant]} ${MATERIAL[resolvedMaterial]} ${animation} ${className}`}
-          style={variant === 'bottom' ? dragStyle : undefined}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={handleKeyDown}
+          onKeyDownCapture={markStart}
+          onPointerDownCapture={markStart}
           onAnimationEnd={(e) => {
             if (e.target === e.currentTarget && open) setEntered(true)
           }}
         >
           {variant === 'bottom' && (
-            // Invisible drag strip along the top edge — the design shows no
-            // handle, the panel starts directly with its content.
+            // Invisible grab strip along the top edge — the design shows no
+            // handle, the panel starts directly with its content. The content
+            // pulls the sheet too, once it is scrolled to its top.
             <div
-              className="absolute inset-x-0 top-0 z-[1] h-5 cursor-grab touch-none active:cursor-grabbing"
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerEnd}
-              onPointerCancel={handlePointerEnd}
+              className="absolute inset-x-0 top-0 z-[1] h-6 cursor-grab touch-none active:cursor-grabbing"
+              {...sheetDrag.strip}
             />
           )}
           {children}
+          {asking && (
+            <div className="absolute inset-0 z-10 grid place-items-center bg-[color:var(--m-dim)] p-5 backdrop-blur-[2px]">
+              <div role="alertdialog" aria-label={t('common.unsavedTitle')} className="w-full max-w-[320px] rounded-[22px] border border-[color:var(--m-shbr)] bg-[color:var(--m-sheetop)] p-5">
+                <div className="text-subtitle font-semibold text-m-ink">{t('common.unsavedTitle')}</div>
+                <p className="m-0 mt-1.5 text-body text-m-muted">{t('common.unsavedMessage')}</p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button type="button" autoFocus onClick={keepEditing} className="rounded-full border border-[color:var(--m-shbr)] px-4 py-2 text-body font-semibold text-m-ink">
+                    {t('common.keepEditing')}
+                  </button>
+                  <button type="button" onClick={discard} className={DISCARD_BUTTON}>
+                    {t('common.discard')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>,

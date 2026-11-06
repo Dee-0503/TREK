@@ -1,14 +1,13 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 /*
- * These cases are about the layouts written in autoLayout.ts, which are what an
- * entry falls back on when no hand-drawn template suits it. With the real
- * templates in place they would be testing whichever spread somebody last drew
- * in Studio — so the set is empty here on purpose.
+ * These cases are about the layouts written as code in the shared auto layout
+ * (shared/src/book/auto), which are what an entry falls back on when no
+ * hand-drawn template suits it. With the real templates in place they would be
+ * testing whichever spread somebody last drew in Studio, so the input passes an
+ * empty template set on purpose.
  */
-vi.mock('../../../src/components/Studio/bookTemplates.data', () => ({ SPREAD_TEMPLATES: [] }))
-import { bookDocumentSchema, bookPageSetupSchema, type BookSpread } from '@trek/shared'
-import { buildBook, type AutoEntry, type AutoInput } from '../../../src/components/Studio/autoLayout'
+import { bookDocumentSchema, bookPageSetupSchema, buildBook, type AutoEntry, type AutoInput, type BookSpread } from '@trek/shared'
 
 /**
  * A journey with little in it (#1973).
@@ -37,6 +36,7 @@ const rich = (id: number): AutoEntry => ({
 const document = (entries: AutoEntry[]) => buildBook({
   locale: 'en', title: 'T', subtitle: null, coverPhotoId: null,
   entries, page, stats: null, stationsLabel: 'Stations', dayLabel: 'DAY', summaryLabel: 'Trip summary', countriesLabel: 'Countries',
+  templates: [],
 })
 
 function build(entries: AutoEntry[]): BookSpread[] {
@@ -178,9 +178,9 @@ describe('an entry with words but no pictures', () => {
 })
 
 describe('a journey with nothing at all', () => {
-  it('produces a book of a cover and a back, and no blank pages between', () => {
+  it('produces a book of the covers and the single pages inside them, and no spreads between', () => {
     const spreads = build([])
     expect(inner(spreads)).toHaveLength(0)
-    expect(spreads.map(s => s.role)).toEqual(['cover', 'back'])
+    expect(spreads.map(s => s.role)).toEqual(['cover', 'first', 'last', 'back'])
   })
 })

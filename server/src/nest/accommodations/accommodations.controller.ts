@@ -1,32 +1,10 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Headers,
-  HttpException,
-  Param,
-  Post,
-  Put,
-  UseGuards,
-} from '@nestjs/common';
 import type { User } from '../../types';
-import { AccommodationsService } from './accommodations.service';
-import { AccommodationCreateDto, AccommodationUpdateDto } from './accommodations.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentUser } from '../auth-core/current-user.decorator';
+import { JwtAuthGuard } from '../auth-core/jwt-auth.guard';
 import { RequirePermission, TripAccessGuard } from '../permissions/trip-access.guard';
-
-type AccommodationBody = {
-  place_id?: number;
-  start_day_id?: number;
-  end_day_id?: number;
-  check_in?: string | null;
-  check_in_end?: string | null;
-  check_out?: string | null;
-  confirmation?: string | null;
-  notes?: string | null;
-};
+import { AccommodationCreateDto, AccommodationUpdateDto } from './accommodations.dto';
+import { AccommodationsService, type StayInput } from './accommodations.service';
+import { Body, Controller, Delete, Query, Get, Headers, Param, Post, Put, UseGuards } from '@nestjs/common';
 
 /**
  * /api/trips/:tripId/accommodations — trip-scoped lodging blocks.
@@ -37,6 +15,14 @@ type AccommodationBody = {
  * found) bodies, create 201 / rest 200, and the cascade broadcasts (a created
  * accommodation also emits reservation:created; a delete emits the linked
  * reservation/budget deletions) with the forwarded X-Socket-Id.
+ *
+ * A booking also writes the day stop that puts it on the route. What that did to
+ * the day plan goes to every socket, the sender's included, and the answers
+ * carry the stop alongside the existing fields as well, for a session whose
+ * socket is down at that moment.
+ *
+ * The handlers are adapters: the whole write, its checks and its events live in
+ * AccommodationsService's stay use cases, which the MCP tools call as well.
  */
 @Controller('api/trips/:tripId/accommodations')
 // TripAccessGuard resolves :tripId and 404s a trip the user cannot reach; mutations
@@ -46,79 +32,70 @@ type AccommodationBody = {
 export class AccommodationsController {
   constructor(private readonly accommodations: AccommodationsService) {}
 
-
-
   @Get()
-  list(@CurrentUser() user: User, @Param('tripId') tripId: string) {
-    return { accommodations: this.accommodations.list(tripId) };
+  async list(@CurrentUser() user: User, @Param('tripId') tripId: string) {
+    return { accommodations: await this.accommodations.list(tripId) };
   }
 
   @RequirePermission('day_edit')
   @Post()
-  create(
+  async create(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @Body() rawBody: AccommodationCreateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
-    const body = rawBody as AccommodationBody;
-    const { place_id, start_day_id, end_day_id, check_in, check_in_end, check_out, confirmation, notes } = body;
-    if (!place_id || !start_day_id || !end_day_id) {
-      throw new HttpException({ error: 'place_id, start_day_id, and end_day_id are required' }, 400);
-    }
-    const errors = this.accommodations.validateRefs(tripId, place_id, start_day_id, end_day_id);
-    if (errors.length > 0) {
-      throw new HttpException({ error: errors[0].message }, 404);
-    }
-    const accommodation = this.accommodations.create(tripId, { place_id, start_day_id, end_day_id, check_in, check_in_end, check_out, confirmation, notes } as never);
-    this.accommodations.broadcast(tripId, 'accommodation:created', { accommodation }, socketId);
-    this.accommodations.broadcast(tripId, 'reservation:created', {}, socketId);
-    return { accommodation };
+    const { accommodation, mirror } = await this.accommodations.createStay(
+      tripId,
+      rawBody as StayInput,
+      this.accommodations.restWriter(tripId, user, socketId),
+    );
+    // The stop rides in the answer as well, for the session that booked the night
+    // with its socket down: over the socket it would already have it.
+    return { accommodation, assignment: mirror.created };
   }
 
   @RequirePermission('day_edit')
   @Put(':id')
-  update(
+  async update(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @Param('id') id: string,
     @Body() rawBody: AccommodationUpdateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
-    const body = rawBody as AccommodationBody;
-    const existing = this.accommodations.get(id, tripId);
-    if (!existing) {
-      throw new HttpException({ error: 'Accommodation not found' }, 404);
-    }
-    const { place_id, start_day_id, end_day_id, check_in, check_in_end, check_out, confirmation, notes } = body;
-    const errors = this.accommodations.validateRefs(tripId, place_id, start_day_id, end_day_id);
-    if (errors.length > 0) {
-      throw new HttpException({ error: errors[0].message }, 404);
-    }
-    const accommodation = this.accommodations.update(id, existing as never, { place_id, start_day_id, end_day_id, check_in, check_in_end, check_out, confirmation, notes } as never);
-    this.accommodations.broadcast(tripId, 'accommodation:updated', { accommodation }, socketId);
-    return { accommodation };
+    const { accommodation, mirror } = await this.accommodations.updateStay(
+      tripId,
+      id,
+      rawBody as StayInput,
+      this.accommodations.restWriter(tripId, user, socketId),
+    );
+    return {
+      accommodation,
+      assignment: mirror.created,
+      movedAssignment: mirror.moved,
+      removedAssignments: mirror.removed,
+    };
   }
 
   @RequirePermission('day_edit')
   @Delete(':id')
-  remove(
+  async remove(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @Param('id') id: string,
     @Headers('x-socket-id') socketId?: string,
+    @Query('keepStop') keepStop?: string,
   ) {
-    if (!this.accommodations.get(id, tripId)) {
-      throw new HttpException({ error: 'Accommodation not found' }, 404);
-    }
-    const { linkedReservationIds, deletedBudgetItemIds } = this.accommodations.remove(id);
-    for (const reservationId of linkedReservationIds) {
-      this.accommodations.broadcast(tripId, 'reservation:deleted', { reservationId }, socketId);
-    }
-    for (const itemId of deletedBudgetItemIds) {
-      this.accommodations.broadcast(tripId, 'budget:deleted', { itemId }, socketId);
-    }
-    this.accommodations.broadcast(tripId, 'accommodation:deleted', { accommodationId: Number(id) }, socketId);
-    return { success: true };
+    // Turning a night back into a pause in road trip mode: the booking goes, the
+    // stop stays and becomes the traveller's. Everywhere else a cancelled booking
+    // takes the stop it brought with it.
+    const { mirror } = await this.accommodations.deleteStay(
+      tripId,
+      id,
+      this.accommodations.restWriter(tripId, user, socketId),
+      { keepStop: keepStop === 'true' },
+    );
+    return { success: true, removedAssignments: mirror.removed, updatedAssignments: mirror.updated };
   }
 }

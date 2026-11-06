@@ -55,41 +55,41 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': 'Vào thông báo {n}',
   'system_notice.pager.position': 'Thông báo {current} của {total}',
-  // 4.0.0 release modal — the release on the left, the note from the maintainer on the right
-  'system_notice.release_400.eyebrow': 'Đã cập nhật',
-  'system_notice.release_400.tag': 'Phiên bản',
-  'system_notice.release_400.headline': 'Bản phát hành lớn nhất TREK từng có.',
-  'system_notice.release_400.intro':
-    'TREK có điện thoại, và một cuốn sách. Mười chín người đã viết nên bản này — cùng khoảng một trăm năm mươi lỗi được báo cáo.',
-  'system_notice.release_400.feature_mobile_title': 'TREK lên di động',
-  'system_notice.release_400.feature_mobile_body':
-    'Mọi thứ dưới 768px giờ là giao diện riêng — thanh dock kính, các bảng riêng, công cụ lập kế hoạch riêng. Mở TREK trên điện thoại.',
-  'system_notice.release_400.feature_studio_title': 'TREK Studio',
-  'system_notice.release_400.feature_studio_badge': 'Beta',
-  'system_notice.release_400.feature_studio_body':
-    'Bản PDF của Journey đã thành một công cụ thiết kế sách ảnh. Nó tự dàn trang khi bạn yêu cầu, rồi lui ra một bên.',
-  'system_notice.release_400.feature_vacay_title': 'Vacay học nốt',
-  'system_notice.release_400.feature_vacay_body':
-    'Nửa ngày, ngày bù và ngày linh hoạt, kỳ nghỉ học trên lưới — và một năm phép không nhất thiết bắt đầu từ tháng Một.',
-  'system_notice.release_400.feature_places_title': 'Địa điểm tự hiện ra, tệp dọn ra ngoài',
-  'system_notice.release_400.feature_places_body':
-    'Ảnh và mô tả tự điền vào trước khi bạn lưu một địa điểm. Và các tệp tải lên không còn phải nằm trên ổ đĩa chạy TREK nữa.',
-  'system_notice.release_400.footnote':
-    'Và đây mới là bốn trong số đó. 4.0.0 mang theo vài trăm thay đổi khác, từ Collections và Atlas cho tới toàn bộ máy chủ bên dưới.',
-  'system_notice.release_400.note_eyebrow': 'Lời nhắn từ người bảo trì',
-  'system_notice.release_400.note_title': 'Cảm ơn bạn đã sử dụng TREK.',
-  'system_notice.release_400.note_body':
-    'TREK bắt đầu như một công cụ nhỏ cho chuyến đi của riêng tôi, viết trong thời gian rảnh. Đến giờ vẫn vậy: buổi tối, cuối tuần, những giờ bên cạnh công việc toàn thời gian.\n\nĐã có lúc chỉ mình tôi. Giờ thì không nữa — mười chín người đã làm nên bản phát hành này, và hàng nghìn bạn đã đến với sao, báo lỗi, bản dịch và pull request. Tôi biết ơn tất cả.',
-  'system_notice.release_400.promise_label': 'Lời hứa',
-  'system_notice.release_400.promise_text':
-    'Phần mã nguồn mở của TREK vẫn miễn phí, mãi mãi. Không tầng trả phí, không đăng ký, không ràng buộc. Tôi hứa.',
-  'system_notice.release_400.note_body_after':
-    '4.0.0 tốn nhiều tuần thức khuya — một ứng dụng điện thoại, một công cụ thiết kế sách, một lần chuyển máy chủ, phần lớn viết từ nửa đêm đến hai giờ. Không phải than phiền: tôi thích làm việc này. Đó chỉ là câu trả lời thật lòng cho việc một bản cỡ này ra đời từ một dự án lúc rảnh.',
-  'system_notice.release_400.note_closing': 'Cảm ơn bạn đã ở đây.',
-  'system_notice.release_400.note_signature': '— Maurice',
-  'system_notice.release_400.support_text':
-    'Sự ủng hộ là thứ giữ cho mọi thứ chạy — máy chủ, tên miền, và những đêm khuya biến thành các bản phát hành như thế này. Nếu TREK có giá trị với bạn, một ly cà phê là cách trực tiếp nhất để duy trì nó.',
-  'system_notice.release_400.cta_bmc': 'Buy me a coffee',
-  'system_notice.release_400.cta_kofi': 'Hỗ trợ trên Ko-fi',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Đã cập nhật',
+  'system_notice.release_notes.headline': 'Đúng địa điểm, ngay đầu tiên.',
+  'system_notice.release_notes.intro':
+    'Tìm địa điểm, tìm địa chỉ và chỉ đường giờ chạy trên máy chủ riêng của TREK, được dataforest cloud tài trợ, và mỗi TREK đều có thể chia sẻ những gì nó biết về các địa điểm với tất cả những TREK khác.',
+  'system_notice.release_notes.features_label': 'Những điểm nhấn',
+  'system_notice.release_notes.features_aside': 'Chưa phải tất cả',
+  'system_notice.release_notes.feature_search_title': 'Tìm địa điểm trúng ngay',
+  'system_notice.release_notes.feature_search_body':
+    'Thành phố, hòn đảo, địa danh và sân bay theo mã hiện lên trước, quán cà phê được tìm quanh bạn, và gợi ý xuất hiện ngay khi bạn đang gõ.',
+  'system_notice.release_notes.feature_share_title': 'Chi tiết địa điểm, cùng chia sẻ',
+  'system_notice.release_notes.feature_share_body':
+    'Chia sẻ trang web, giờ mở cửa và ảnh với mọi TREK, theo từng mục, và những địa điểm bạn đã lưu sẽ nhận thêm thông tin người khác bổ sung.',
+  'system_notice.release_notes.feature_routing_title': 'Chỉ đường nhanh hơn',
+  'system_notice.release_notes.feature_routing_body':
+    'Cả một ngày với tối đa hai mươi điểm dừng được chỉ đường trong một lần, một tuyến chậm không còn giữ chân các tuyến khác, và phương tiện công cộng sẽ hỏi nhà cung cấp thứ hai khi nhà cung cấp đầu tiên không tìm thấy gì.',
+  'system_notice.release_notes.footnote':
+    'Và còn cả một danh sách dài những thay đổi nhỏ hơn ở khắp phần còn lại của TREK.',
+  'system_notice.release_notes.notes_label': 'Ghi chú phát hành',
+  'system_notice.release_notes.note_eyebrow': 'Lời nhắn từ người bảo trì',
+  'system_notice.release_notes.note_title': 'Bạn là lý do tôi tiếp tục xây dựng TREK.',
+  'system_notice.release_notes.note_body':
+    'TREK bắt đầu là một công cụ nhỏ cho những chuyến đi của riêng tôi, viết sau giờ làm vì tôi muốn có một cách lên kế hoạch tốt hơn. Từ đó đến giờ nó chưa bao giờ thật sự ngừng lớn lên. Gần như mọi thứ bạn đang dùng đều được làm vào đêm khuya, vào cuối tuần, trên tàu, bên cạnh một công việc toàn thời gian, và đã có không ít buổi tối tôi lặng lẽ tự hỏi liệu có ai ngoài kia sẽ mở nó ra không.',
+  'system_notice.release_notes.promise_label': 'Lời hứa',
+  'system_notice.release_notes.promise_lead': 'TREK luôn miễn phí, mãi mãi.',
+  'system_notice.release_notes.promise_text':
+    'Mọi tính năng, mọi bản cập nhật, cho tất cả mọi người. Không tầng trả phí, không đăng ký, không ràng buộc.',
+  'system_notice.release_notes.note_body_after':
+    'Rồi các bạn đã mở nó. Chỉ trong vài tháng đã có hàng nghìn bạn: những ngôi sao, báo lỗi, bản dịch sang những ngôn ngữ tôi không biết nói, pull request từ những người tôi chưa từng gặp. Đến giờ, việc đầu tiên tôi làm mỗi sáng vẫn là mở kho mã, và cảm giác vẫn chưa hẳn là thật.',
+  'system_notice.release_notes.note_closing': 'Cảm ơn bạn đã ở đây. Thân mến, Maurice.',
+  'system_notice.release_notes.support_label': 'Giữ sự độc lập',
+  'system_notice.release_notes.support_lead': 'Không phụ thuộc Google và các ông lớn.',
+  'system_notice.release_notes.support_text':
+    'Tìm địa điểm, tìm địa chỉ và chỉ đường chạy trên máy chủ riêng của TREK, hiện được dataforest cloud tài trợ. Tôi chiến đấu vì điều đó mỗi ngày, và để giữ được như vậy cần có sự ủng hộ của bạn.',
+  'system_notice.release_notes.cta_bmc': 'Mời tôi một ly cà phê',
+  'system_notice.release_notes.cta_kofi': 'Hỗ trợ trên Ko-fi',
 };
 export default system_notice;

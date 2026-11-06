@@ -1,4 +1,3 @@
-import { createZodDto } from 'nestjs-zod';
 import {
   registerRequestSchema,
   loginRequestSchema,
@@ -9,6 +8,7 @@ import {
   mfaEnableRequestSchema,
   mfaDisableRequestSchema,
   mcpTokenCreateRequestSchema,
+  apiTokenCreateRequestSchema,
   mapsKeyUpdateRequestSchema,
   apiKeysUpdateRequestSchema,
   settingsUpdateRequestSchema,
@@ -20,6 +20,8 @@ import {
   passkeyRenameRequestSchema,
   passkeyDeleteRequestSchema,
 } from '@trek/shared';
+
+import { createZodDto } from 'nestjs-zod';
 
 /**
  * Server-side createZodDto wrappers over the @trek/shared auth contracts. The
@@ -38,6 +40,12 @@ export class MfaVerifyLoginDto extends createZodDto(mfaVerifyLoginRequestSchema)
 export class MfaEnableDto extends createZodDto(mfaEnableRequestSchema) {}
 export class MfaDisableDto extends createZodDto(mfaDisableRequestSchema) {}
 export class McpTokenCreateDto extends createZodDto(mcpTokenCreateRequestSchema) {}
+/**
+ * Its own DTO rather than a field added to the one above: both create routes
+ * share that schema, and widening it would make POST /api/auth/mcp-tokens
+ * quietly accept read scopes that an MCP token has no way to honour.
+ */
+export class ApiTokenCreateDto extends createZodDto(apiTokenCreateRequestSchema) {}
 export class MapsKeyUpdateDto extends createZodDto(mapsKeyUpdateRequestSchema) {}
 export class ApiKeysUpdateDto extends createZodDto(apiKeysUpdateRequestSchema) {}
 export class SettingsUpdateDto extends createZodDto(settingsUpdateRequestSchema) {}

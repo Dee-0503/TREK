@@ -1,10 +1,11 @@
-// FE-COMP-FILEMANAGER-001 to FE-COMP-FILEMANAGER-012
-import { render, screen, waitFor, fireEvent } from '../../../tests/helpers/render';
+// FE-COMP-FILEMANAGER-001 to FE-COMP-FILEMANAGER-038
+import { render, screen, waitFor, fireEvent, within } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
 import { useAuthStore } from '../../store/authStore';
 import { useTripStore } from '../../store/tripStore';
+import { useDocSyncOfferStore } from '../../store/docSyncOfferStore';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import { buildUser, buildTrip } from '../../../tests/helpers/factories';
 import type { TripFile } from '../../types';
@@ -104,6 +105,15 @@ beforeEach(() => {
     }),
   );
 
+  // Document sync, as a fresh install has it: every provider off, nothing bound.
+  useDocSyncOfferStore.setState({ bound: {}, providers: null });
+  server.use(
+    http.get('/api/trips/:tripId/docsync/providers', () => HttpResponse.json([])),
+    http.get('/api/trips/:tripId/docsync/links', () => HttpResponse.json([])),
+    http.get('/api/trips/:tripId/docsync/connections', () => HttpResponse.json([])),
+    http.get('/api/trips/:tripId/docsync/status', () => HttpResponse.json({ links: [], items: {} })),
+  );
+
   // Stub window.confirm
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
@@ -155,10 +165,10 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Find the star button by its title
-    const starBtn = screen.getByTitle(/star/i);
+    const starBtn = screen.getByRole('button', { name: /star/i });
     await user.click(starBtn);
 
-    expect(filesApi.toggleStar).toHaveBeenCalledWith(1, 1);
+    await waitFor(() => expect(filesApi.toggleStar).toHaveBeenCalledWith(1, 1));
   });
 
   it('FE-COMP-FILEMANAGER-006: trash toggle loads and displays trashed files', async () => {
@@ -172,7 +182,7 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Click trash toggle button
-    const trashBtn = screen.getByText(/trash/i);
+    const trashBtn = screen.getByRole('button', { name: /trash/i });
     await user.click(trashBtn);
 
     // Trashed file should appear
@@ -189,15 +199,15 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open trash
-    const trashBtn = screen.getByText(/trash/i);
+    const trashBtn = screen.getByRole('button', { name: /trash/i });
     await user.click(trashBtn);
     await screen.findByText('old.pdf');
 
     // Click restore button
-    const restoreBtn = screen.getByTitle(/restore/i);
+    const restoreBtn = screen.getByRole('button', { name: /restore/i });
     await user.click(restoreBtn);
 
-    expect(filesApi.restore).toHaveBeenCalledWith(1, 5);
+    await waitFor(() => expect(filesApi.restore).toHaveBeenCalledWith(1, 5));
   });
 
   it('FE-COMP-FILEMANAGER-008: permanent delete calls filesApi.permanentDelete after confirm', async () => {
@@ -210,11 +220,11 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open trash
-    await user.click(screen.getByText(/trash/i));
+    await user.click(screen.getByRole('button', { name: /trash/i }));
     await screen.findByText('old.pdf');
 
     // Click permanent delete (the Trash2 icon button in trash view)
-    const deleteBtn = screen.getByTitle(/delete/i);
+    const deleteBtn = screen.getByRole('button', { name: /delete/i });
     await user.click(deleteBtn);
 
     expect(filesApi.permanentDelete).toHaveBeenCalledWith(1, 5);
@@ -230,7 +240,7 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open trash
-    await user.click(screen.getByText(/trash/i));
+    await user.click(screen.getByRole('button', { name: /trash/i }));
     await screen.findByText('old.pdf');
 
     // Click "Empty Trash" button
@@ -285,7 +295,7 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // The delete (trash) button on a non-trash row is titled 'Delete'
-    const deleteBtn = screen.getByTitle(/delete/i);
+    const deleteBtn = screen.getByRole('button', { name: /delete/i });
     await user.click(deleteBtn);
 
     expect(onDelete).toHaveBeenCalledWith(1);
@@ -389,12 +399,12 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Pencil/assign button
-    const assignBtn = screen.getByTitle(/assign/i);
+    const assignBtn = screen.getByRole('button', { name: /assign/i });
     await user.click(assignBtn);
 
     // Assign modal should appear (it has a title and a close button)
     await waitFor(() => {
-      expect(screen.getByText(/assign/i, { selector: 'div' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: /assign/i })).toBeInTheDocument();
     });
   });
 
@@ -404,7 +414,7 @@ describe('FileManager', () => {
     render(<FileManager {...defaultProps} files={[buildFile()]} places={[place]} />);
     const user = userEvent.setup();
 
-    const assignBtn = screen.getByTitle(/assign/i);
+    const assignBtn = screen.getByRole('button', { name: /assign/i });
     await user.click(assignBtn);
 
     expect(await screen.findByText('Eiffel Tower')).toBeInTheDocument();
@@ -430,9 +440,9 @@ describe('FileManager', () => {
     });
 
     // Close via X button in the modal (second X button — first might be something else)
-    const closeButtons = screen.getAllByRole('button', { name: '' });
+    const closeButtons = screen.getAllByRole('button', { name: 'Close' });
     // Find a close button near the modal header — click the last X-like button
-    const xBtn = closeButtons.find(btn => btn.closest('[style*="z-index: 10000"]'));
+    const xBtn = closeButtons.find(btn => btn.closest('[role="dialog"]'));
     if (xBtn) await user.click(xBtn);
   });
 
@@ -442,7 +452,7 @@ describe('FileManager', () => {
     render(<FileManager {...defaultProps} files={[buildFile()]} reservations={[reservation]} />);
     const user = userEvent.setup();
 
-    const assignBtn = screen.getByTitle(/assign/i);
+    const assignBtn = screen.getByRole('button', { name: /assign/i });
     await user.click(assignBtn);
 
     expect(await screen.findByText('Hotel Paris')).toBeInTheDocument();
@@ -457,7 +467,7 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open assign modal
-    await user.click(screen.getByTitle(/assign/i));
+    await user.click(screen.getByRole('button', { name: /assign/i }));
     await screen.findByText('Louvre Museum');
 
     // Click on the place button to link it
@@ -474,7 +484,7 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open assign modal
-    await user.click(screen.getByTitle(/assign/i));
+    await user.click(screen.getByRole('button', { name: /assign/i }));
     await screen.findByText('Train Ticket');
 
     // Click on the reservation button to link it
@@ -490,7 +500,7 @@ describe('FileManager', () => {
     render(<FileManager {...defaultProps} files={[buildFile()]} places={[place]} reservations={[reservation]} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByTitle(/assign/i));
+    await user.click(screen.getByRole('button', { name: /assign/i }));
     await screen.findByText('Notre Dame');
     expect(await screen.findByText('Airbnb')).toBeInTheDocument();
   });
@@ -542,7 +552,7 @@ describe('FileManager', () => {
     render(<FileManager {...defaultProps} files={[buildFile()]} places={[place]} days={[day]} assignments={assignments} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByTitle(/assign/i));
+    await user.click(screen.getByRole('button', { name: /assign/i }));
     expect(await screen.findByText('Arc de Triomphe')).toBeInTheDocument();
   });
 
@@ -567,11 +577,11 @@ describe('FileManager', () => {
     const user = userEvent.setup();
 
     // Open assign modal
-    await user.click(screen.getByTitle(/assign/i));
-    await screen.findByText('Venice Beach');
+    await user.click(screen.getByRole('button', { name: /assign/i }));
+    await within(await screen.findByRole('dialog')).findByText('Venice Beach');
 
     // Clicking the linked place should unlink it
-    await user.click(screen.getByText('Venice Beach'));
+    await user.click(within(screen.getByRole('dialog')).getByText('Venice Beach'));
     expect(filesApi.update).toHaveBeenCalledWith(1, 1, { place_id: null });
   });
 
@@ -584,11 +594,11 @@ describe('FileManager', () => {
     render(<FileManager {...defaultProps} files={[file]} reservations={[reservation]} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByTitle(/assign/i));
-    await screen.findByText('Museum Pass');
+    await user.click(screen.getByRole('button', { name: /assign/i }));
+    await within(await screen.findByRole('dialog')).findByText('Museum Pass');
 
     // Clicking the linked reservation should unlink it
-    await user.click(screen.getByText('Museum Pass'));
+    await user.click(within(screen.getByRole('dialog')).getByText('Museum Pass'));
     expect(filesApi.update).toHaveBeenCalledWith(1, 1, { reservation_id: null });
   });
 
@@ -605,7 +615,7 @@ describe('FileManager', () => {
     });
 
     // Click the backdrop to close
-    const backdrop = document.querySelector('[style*="z-index: 10000"]') as HTMLElement;
+    const backdrop = document.querySelector('.trek-modal-backdrop') as HTMLElement;
     if (backdrop) await user.click(backdrop);
 
     await waitFor(() => {
@@ -629,6 +639,61 @@ describe('FileManager', () => {
       expect(onUpload).toHaveBeenCalled();
       const call = onUpload.mock.calls[0];
       expect(call[0]).toBeInstanceOf(FormData);
+    });
+  });
+
+  describe('document sync button', () => {
+    const paperless = { id: 'paperless', name: 'Paperless-ngx', description: null, icon: 'paperless', available: true, fields: [] };
+    const trashButton = () => screen.getByRole('button', { name: 'Trash' });
+
+    it('FE-COMP-FILEMANAGER-036: with no provider on and nothing bound there is no sync button, and the trash sits flush right', async () => {
+      const asked: string[] = [];
+      server.use(
+        http.get('/api/trips/:tripId/docsync/links', () => {
+          asked.push('links');
+          return HttpResponse.json([]);
+        }),
+      );
+      render(<FileManager {...defaultProps} />);
+
+      await waitFor(() => expect(asked).toContain('links'));
+      expect(screen.queryByRole('button', { name: 'Document sync' })).not.toBeInTheDocument();
+      expect(trashButton()).toBeInTheDocument();
+    });
+
+    it('FE-COMP-FILEMANAGER-037: somebody who may bind the trip gets it once a provider is on, and it opens the panel', async () => {
+      server.use(http.get('/api/trips/:tripId/docsync/providers', () => HttpResponse.json([paperless])));
+      render(<FileManager {...defaultProps} />);
+      const user = userEvent.setup();
+
+      const button = await screen.findByRole('button', { name: 'Document sync' });
+      expect(trashButton()).toBeInTheDocument();
+
+      await user.click(button);
+      expect(await screen.findByText('Connect a provider')).toBeInTheDocument();
+    });
+
+    it('FE-COMP-FILEMANAGER-038: a member sees it on a bound trip only', async () => {
+      seedStore(useAuthStore, { user: buildUser({ id: 999, role: 'user' }), isAuthenticated: true });
+      server.use(
+        http.get('/api/trips/:tripId/docsync/providers', () => HttpResponse.json([paperless])),
+        http.get('/api/trips/:tripId/docsync/links', () => HttpResponse.json([{ id: 1, providerId: 'paperless' }])),
+      );
+      const { unmount } = render(<FileManager {...defaultProps} />);
+      expect(await screen.findByRole('button', { name: 'Document sync' })).toBeInTheDocument();
+      unmount();
+
+      useDocSyncOfferStore.setState({ bound: {}, providers: null });
+      const asked: string[] = [];
+      server.use(
+        http.get('/api/trips/:tripId/docsync/links', () => {
+          asked.push('links');
+          return HttpResponse.json([]);
+        }),
+      );
+      render(<FileManager {...defaultProps} />);
+      await waitFor(() => expect(asked).toContain('links'));
+      expect(screen.queryByRole('button', { name: 'Document sync' })).not.toBeInTheDocument();
     });
   });
 });

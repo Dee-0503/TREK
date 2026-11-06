@@ -7,7 +7,7 @@ import { seedStore } from '../../../helpers/store'
 import { buildSettings } from '../../../helpers/factories'
 import { useSettingsStore } from '../../../../src/store/settingsStore'
 
-// FE-MOB-PLTIME-001 to FE-MOB-PLTIME-013
+// FE-MOB-PLTIME-001 to FE-MOB-PLTIME-017
 
 const planner = buildPlanner()
 
@@ -150,5 +150,61 @@ describe('PlTimeFields', () => {
     // With a complete 11:00 end the 10:30 place would overlap — '11:0' must not count.
     setup({ endTime: '11:0', dayAssignments: [SELF, assignment(2, 'Park', '10:30', '12:00')] })
     expect(screen.queryByText(/places.timeCollision/)).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-PLTIME-014: opened from the road trip tab, End says the drive leaves at it', () => {
+    render(
+      <PlTimeFields
+        planner={buildPlanner({ activeTab: 'roadtrip' } as never)}
+        startTime="10:00"
+        endTime="14:00"
+        onChange={vi.fn()}
+        assignmentId={1}
+        dayAssignments={[SELF]}
+        hasTimeError={false}
+      />,
+    )
+    expect(screen.getByText('roadtrip.stop.endIsLeave')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-PLTIME-015: from the plan tab End stays a plain label', () => {
+    setup()
+    expect(screen.queryByText('roadtrip.stop.endIsLeave')).not.toBeInTheDocument()
+  })
+
+  // TIME-02: an imported hike of 12 km, 300 m up and 500 m down, estimated at 4 h.
+  const hike = {
+    place_id: 1, name: 'Museum ridge', tour_type: 'hike', distance: 12, elevation_gain: 300, elevation_loss: 500,
+    duration: null, planned_duration_minutes: null, break_additional_minutes: null, difficulty: null, wanderer_ref: null,
+    match_confidence: 1, max_hiking_difficulty: null, planned: true, caution: false,
+  }
+
+  function renderTour(startTime: string, endTime: string) {
+    seedStore(useSettingsStore, { settings: buildSettings({ time_format: '24h' }) })
+    return render(
+      <PlTimeFields
+        planner={buildPlanner({ tours: [hike] } as never)}
+        startTime={startTime}
+        endTime={endTime}
+        onChange={vi.fn()}
+        assignmentId={1}
+        dayAssignments={[SELF]}
+        hasTimeError={false}
+      />,
+    )
+  }
+
+  it('FE-MOB-PLTIME-016: a tour without a typed end says the end its start and its time work out to', () => {
+    renderTour('09:00', '')
+    expect(screen.getByTestId('tour-day-end-hint')).toHaveTextContent('13:00')
+    expect(screen.getByTestId('tour-day-end-hint')).toHaveTextContent('≈ 4 h')
+  })
+
+  it('FE-MOB-PLTIME-017: before a start it says one will set the end, and a typed end needs no hint', () => {
+    const view = renderTour('', '')
+    expect(screen.getByTestId('tour-day-end-hint')).toHaveTextContent('≈ 4 h')
+    view.unmount()
+    renderTour('09:00', '15:00')
+    expect(screen.queryByTestId('tour-day-end-hint')).not.toBeInTheDocument()
   })
 })

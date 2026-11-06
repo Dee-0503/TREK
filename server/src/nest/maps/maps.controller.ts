@@ -1,68 +1,49 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpException,
-  Param,
-  Post,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
-import type { Response } from 'express';
-import type { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import type { User } from '../../types';
+import { CurrentUser } from '../auth-core/current-user.decorator';
+import { JwtAuthGuard } from '../auth-core/jwt-auth.guard';
+import { ResponseContract } from '../common/response-contract';
+import { StorageService } from '../storage/storage.service';
+import { isClientAbortError } from '../storage/storage.types';
+import { MapsSearchDto, MapsNearbyDto, MapsAutocompleteDto, MapsResolveUrlDto, MapsRouteDto } from './maps.dto';
+import { MapsService } from './maps.service';
+import { Body, Controller, Get, HttpCode, HttpException, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type {
-  GeographicContext,
   MapsAutocompleteResult,
   MapsPlaceDetailsResult,
   MapsPlacePhotoResult,
   MapsResolveUrlResult,
   MapsReverseResult,
   MapsSearchResult,
-  ProviderOverride,
 } from '@trek/shared';
-import type { User } from '../../types';
-import { MapsService } from './maps.service';
-import { StorageService } from '../storage/storage.service';
-import { isClientAbortError } from '../storage/storage.types';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CurrentUser } from '../auth/current-user.decorator';
-import { MapsSearchDto, MapsAutocompleteDto, MapsResolveUrlDto, MapsRouteDto } from './maps.dto';
+import {
+  geographicContextSchema,
+  mapsRouteResultSchema,
+  type GeographicContext,
+  type MapsRouteResult,
+} from '@trek/shared';
+
+import type { Response } from 'express';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 /** Google's session-token shape: URL-safe ASCII, at most 36 characters. The
  *  autocomplete body is validated by the Zod pipe; the details query is not,
  *  so it is checked here rather than forwarded blindly. */
 const SESSION_TOKEN = /^[A-Za-z0-9_-]{1,36}$/;
-const PROVIDER_OVERRIDES = new Set<ProviderOverride>(['google', 'amap', 'osm']);
 
-function parseGeographicContext(values: {
+function queryContext(values: {
   countryCode?: string;
   latitude?: string;
   longitude?: string;
   providerOverride?: string;
-}): GeographicContext & { override?: ProviderOverride } {
-  const context: GeographicContext & { override?: ProviderOverride } = {};
-  if (values.countryCode) {
-    const countryCode = values.countryCode.trim();
-    if (!/^[A-Za-z]{2}$/.test(countryCode)) throw new HttpException({ error: 'Invalid countryCode' }, 400);
-    context.countryCode = countryCode.toUpperCase();
-  }
-  for (const [key, raw, min, max] of [
-    ['latitude', values.latitude, -90, 90],
-    ['longitude', values.longitude, -180, 180],
-  ] as const) {
-    if (raw === undefined) continue;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < min || value > max) throw new HttpException({ error: `Invalid ${key}` }, 400);
-    context[key] = value;
-  }
-  if (values.providerOverride !== undefined) {
-    if (!PROVIDER_OVERRIDES.has(values.providerOverride as ProviderOverride)) throw new HttpException({ error: 'Invalid providerOverride' }, 400);
-    context.override = values.providerOverride as ProviderOverride;
-  }
-  return context;
+}): GeographicContext {
+  const parsed = geographicContextSchema.safeParse({
+    ...values,
+    latitude: values.latitude === undefined ? undefined : Number(values.latitude),
+    longitude: values.longitude === undefined ? undefined : Number(values.longitude),
+  });
+  if (!parsed.success) throw new HttpException({ error: 'Invalid geographic context' }, 400);
+  return parsed.data;
 }
 
 /** Maps a thrown service error to the same status + { error } body Express sent. */
@@ -104,18 +85,37 @@ export class MapsController {
   async search(
     @CurrentUser() user: User,
     @Body() body: MapsSearchDto,
+    @Query('lang') lang?: string,
   ): Promise<MapsSearchResult> {
-    const context: GeographicContext & { override?: ProviderOverride } = {
-      countryCode: body.countryCode?.toUpperCase(),
-      latitude: body.locationBias?.lat,
-      longitude: body.locationBias?.lng,
-      override: body.providerOverride,
-    };
     try {
-      return await this.maps.search(user.id, body.query, body.lang, body.locationBias, context);
+      const { countryCode, latitude, longitude, providerOverride } = body;
+      const context = { countryCode, latitude, longitude, providerOverride };
+      return Object.values(context).some((value) => value !== undefined)
+        ? await this.maps.search(user.id, body.query, body.lang ?? lang, body.locationBias, body.provider, context)
+        : await this.maps.search(user.id, body.query, body.lang ?? lang, body.locationBias, body.provider);
     } catch (err: unknown) {
       console.error('Maps search error:', err);
       throw toHttpException(err, 'Search error', 500);
+    }
+  }
+
+  // Places of any kind around a point, nearest first (#976).
+  @Post('nearby')
+  @HttpCode(200)
+  async nearby(
+    @CurrentUser() user: User,
+    @Body() body: MapsNearbyDto,
+    @Query('lang') lang?: string,
+  ): Promise<MapsSearchResult> {
+    try {
+      return await this.maps.nearbyPlaces(user.id, body.lat, body.lng, {
+        radius: body.radius,
+        limit: body.limit,
+        lang,
+        ...geographicContextSchema.parse(body),
+      });
+    } catch (err: unknown) {
+      throw toHttpException(err, 'Nearby search error', 500);
     }
   }
 
@@ -133,17 +133,48 @@ export class MapsController {
   ) {
     if (!category) throw new HttpException({ error: 'A category is required' }, 400);
     const bbox = { south: Number(south), west: Number(west), north: Number(north), east: Number(east) };
-    if (Object.values(bbox).some(v => !Number.isFinite(v))) {
+    if (Object.values(bbox).some((v) => !Number.isFinite(v))) {
       throw new HttpException({ error: 'A valid bbox (south, west, north, east) is required' }, 400);
     }
     try {
-      const context = parseGeographicContext({ countryCode, providerOverride });
-      return Object.keys(context).length
-        ? await this.maps.pois(category, bbox, lang, context)
+      const context = queryContext({ countryCode, providerOverride });
+      return Object.values(context).some((value) => value !== undefined)
+        ? await this.maps.pois(category, bbox, lang, undefined, context)
         : await this.maps.pois(category, bbox, lang);
     } catch (err: unknown) {
       throw toHttpException(err, 'POI search error', 500);
     }
+  }
+
+  /**
+   * Every place in a box, for the offline cache. Read-only and cheap.
+   *
+   * Not a browse endpoint: the index caps the box at 1.5 degrees a side, and
+   * this passes the cap's refusal straight through rather than paging around
+   * it. The honest use is one trip's area, taken once.
+   */
+  @Get('area')
+  async area(
+    @Query('minLat') minLat?: string,
+    @Query('minLng') minLng?: string,
+    @Query('maxLat') maxLat?: string,
+    @Query('maxLng') maxLng?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const bbox = {
+      minLat: Number(minLat),
+      minLng: Number(minLng),
+      maxLat: Number(maxLat),
+      maxLng: Number(maxLng),
+    };
+    if (Object.values(bbox).some((v) => !Number.isFinite(v))) {
+      throw new HttpException({ error: 'A valid bbox (minLat, minLng, maxLat, maxLng) is required' }, 400);
+    }
+    const capped = Math.min(Math.max(Number(limit) || 2000, 1), 5000);
+    const area = await this.maps.placesInArea(bbox, capped);
+    // A null means the index is off or unreachable. An empty area is not an
+    // error — the caller caches nothing and carries on.
+    return area ?? { results: [], truncated: false, unavailable: true };
   }
 
   @Post('autocomplete')
@@ -152,16 +183,15 @@ export class MapsController {
     @CurrentUser() user: User,
     @Body() body: MapsAutocompleteDto,
   ): Promise<MapsAutocompleteResult | { suggestions: never[]; source: string }> {
-    if (this.maps.autocompleteDisabled()) {
+    if (await this.maps.autocompleteDisabled()) {
       return { suggestions: [], source: 'disabled' };
     }
     try {
-      return await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken, {
-        countryCode: body.countryCode,
-        latitude: body.locationBias?.low.lat,
-        longitude: body.locationBias?.low.lng,
-        override: body.providerOverride,
-      });
+      const { countryCode, latitude, longitude, providerOverride } = body;
+      const context = { countryCode, latitude, longitude, providerOverride };
+      return Object.values(context).some((value) => value !== undefined)
+        ? await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken, context)
+        : await this.maps.autocomplete(user.id, body.input, body.lang, body.locationBias, body.sessionToken);
     } catch (err: unknown) {
       console.error('Maps autocomplete error:', err);
       throw toHttpException(err, 'Autocomplete error', 500);
@@ -179,20 +209,21 @@ export class MapsController {
     // it matches Google's shape, so a junk value bills per request instead of
     // breaking the lookup.
     @Query('sessionToken') sessionToken?: string,
-    @Query('countryCode') countryCode?: string,
-    @Query('latitude') latitude?: string,
-    @Query('longitude') longitude?: string,
-    @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsPlaceDetailsResult> {
-    if (this.maps.detailsDisabled()) {
+    if (await this.maps.detailsDisabled()) {
       return { place: null, disabled: true };
     }
     try {
-      const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
-      const validSessionToken = SESSION_TOKEN.test(sessionToken ?? '') ? sessionToken : undefined;
       return expand
-        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1', context)
-        : await this.maps.details(user.id, placeId, lang, context.override === 'amap' ? undefined : validSessionToken, context);
+        ? await this.maps.detailsExpanded(user.id, placeId, lang, refresh === '1')
+        : await this.maps.details(
+            user.id,
+            placeId,
+            lang,
+            !placeId.toLowerCase().startsWith('amap:') && SESSION_TOKEN.test(sessionToken ?? '')
+              ? sessionToken
+              : undefined,
+          );
     } catch (err: unknown) {
       console.error('Maps details error:', err);
       throw toHttpException(err, 'Error fetching place details', 500);
@@ -208,14 +239,20 @@ export class MapsController {
     @Query('name') name?: string,
   ): Promise<MapsPlacePhotoResult | { photoUrl: null }> {
     // Kill-switch only applies to Google Places fetches — Wikimedia (coords:) stays allowed.
-    if (!placeId.startsWith('coords:') && this.maps.photosDisabled()) {
+    if (!placeId.startsWith('coords:') && (await this.maps.photosDisabled())) {
       return { photoUrl: null };
     }
     // A place with no photo resolves to the same { photoUrl: null } body. It is an
     // empty result, not a missing resource, and one 404 per photo-less place gets
     // the user's IP banned by any 404-rate IPS in front of TREK (#1727).
     try {
-      return await this.maps.photo(user.id, placeId, Number.parseFloat(lat as string), Number.parseFloat(lng as string), name);
+      return await this.maps.photo(
+        user.id,
+        placeId,
+        Number.parseFloat(lat as string),
+        Number.parseFloat(lng as string),
+        name,
+      );
     } catch (err: unknown) {
       const status = (err as { status?: number }).status || 500;
       if (status >= 500) console.error('Place photo error:', err);
@@ -267,6 +304,28 @@ export class MapsController {
     }
   }
 
+  /**
+   * A brand's logo, by Wikidata id — what makes a corridor full of petrol stations
+   * readable at a glance.
+   *
+   * Proxied rather than linked: the browser never announces to Wikimedia which brands
+   * a user is looking at, and one instance asking for a handful of logos is a very
+   * different egress profile from every visitor doing it. An unknown or logo-less
+   * brand answers 204, like the photo route above and for the same reason — a marker
+   * per petrol station would otherwise be a burst of 404s from one address.
+   */
+  @Get('brand-logo/:wikidataId')
+  async brandLogo(@Param('wikidataId') wikidataId: string, @Res() res: Response): Promise<void> {
+    const logo = await this.maps.brandLogo(wikidataId);
+    if (!logo) {
+      this.emptyPhoto(res);
+      return;
+    }
+    res.set('Cache-Control', 'public, max-age=2592000, immutable');
+    res.type(logo.contentType);
+    res.send(logo.bytes);
+  }
+
   // 204 for "no bytes to serve". Overrides the immutable Cache-Control the hit
   // path already set — a photo that reappears in the cache must not stay hidden
   // behind a month-old empty response.
@@ -281,34 +340,19 @@ export class MapsController {
     @Query('lng') lng?: string,
     @Query('lang') lang?: string,
     @Query('countryCode') countryCode?: string,
-    @Query('latitude') latitude?: string,
-    @Query('longitude') longitude?: string,
     @Query('providerOverride') providerOverride?: string,
   ): Promise<MapsReverseResult> {
     if (!lat || !lng) {
       throw new HttpException({ error: 'lat and lng required' }, 400);
     }
-    const context = parseGeographicContext({ countryCode, latitude, longitude, providerOverride });
+    const context = queryContext({ countryCode, providerOverride });
     try {
-      return await this.maps.reverse(lat, lng, lang, context);
+      return Object.values(context).some((value) => value !== undefined)
+        ? await this.maps.reverse(lat, lng, lang, context)
+        : await this.maps.reverse(lat, lng, lang);
     } catch {
       // The legacy route swallows reverse-geocode failures into an empty result.
       return { name: null, address: null };
-    }
-  }
-
-  @Post('route')
-  @HttpCode(200)
-  async route(@Body() body: MapsRouteDto): Promise<import('@trek/shared').MapsRouteResult> {
-    try {
-      return await this.maps.route(body.profile, body.waypoints, {
-        countryCode: body.countryCode,
-        override: body.providerOverride,
-        latitude: body.waypoints[0]?.lat,
-        longitude: body.waypoints[0]?.lng,
-      });
-    } catch (err: unknown) {
-      throw toHttpException(err, 'Route could not be calculated', 500);
     }
   }
 
@@ -322,5 +366,18 @@ export class MapsController {
       console.error('[Maps] URL resolve error:', message);
       throw toHttpException(err, 'Failed to resolve URL', 400);
     }
+  }
+
+  @Post('route')
+  @HttpCode(200)
+  @ResponseContract(mapsRouteResultSchema)
+  async route(@CurrentUser() user: User, @Body() body: MapsRouteDto): Promise<MapsRouteResult> {
+    return this.maps.route(
+      body.profile,
+      body.waypoints,
+      { countryCode: body.countryCode, override: body.providerOverride },
+      undefined,
+      user.id,
+    );
   }
 }

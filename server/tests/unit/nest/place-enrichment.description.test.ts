@@ -7,24 +7,36 @@
  * causes, both pinned here — Google short-circuiting the free chain, and the
  * chain itself only ever starting from an OSM `wikipedia` tag.
  */
+import type { AppSettingsRepository } from '../../../src/db/repositories/AppSettings.repository';
+import type { PlaceDetailsCacheRepository } from '../../../src/db/repositories/PlaceDetailsCache.repository';
+import type { MapsService } from '../../../src/nest/maps/maps.service';
+import type { GooglePlacesClient } from '../../../src/nest/maps/providers/google-places.provider';
+import type { OsmClient } from '../../../src/nest/maps/providers/osm.client';
+import type { WikimediaClient } from '../../../src/nest/maps/providers/wikimedia.client';
+import type { TrekCommunityService } from '../../../src/nest/maps/trek-community.service';
+import { PlaceEnrichmentService } from '../../../src/nest/place-enrichment/place-enrichment.service';
+import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockDbGet, mockDbRun } = vi.hoisted(() => ({
-  // The prepare() stub below forwards the SQL and then the bound values, so the
-  // spy has to declare that shape. Inferred from a zero-arg implementation it
-  // would reject the spread at the call site.
-  mockDbGet: vi.fn((_sql: string, ..._params: unknown[]): unknown => undefined),
-  mockDbRun: vi.fn(),
-}));
-
-vi.mock('../../../src/db/database', () => ({
-  db: {
-    prepare: (sql: string) => ({
-      get: (...params: unknown[]) => mockDbGet(sql, ...params),
-      run: (...params: unknown[]) => mockDbRun(sql, ...params),
-      all: () => [],
-    }),
-  },
+// Rebuilt on PlaceDetailsCacheRepository/AppSettingsRepository (Plan 3c Task
+// 1, R8's rewrite list) — see place-enrichment.service.test.ts's header for
+// why the legacy SQL-text-keyed `db.prepare` stub cannot survive the service
+// calling two named repository methods instead.
+const { mockGetValue, mockFindEntry, mockUpsertEntry } = vi.hoisted(() => ({
+  mockGetValue: vi.fn(async (_key: string): Promise<string | null> => null),
+  mockFindEntry: vi.fn(
+    async (..._args: unknown[]): Promise<{ payload_json: string; fetched_at: number } | null> => null,
+  ),
+  mockUpsertEntry: vi.fn(
+    async (_row: {
+      place_id: string;
+      lang: string;
+      expanded: number;
+      payload_json: string;
+      fetched_at: number;
+    }): Promise<void> => {},
+  ),
 }));
 
 vi.mock('../../../src/utils/ssrfGuard', () => ({
@@ -33,13 +45,21 @@ vi.mock('../../../src/utils/ssrfGuard', () => ({
   SsrfBlockedError: class extends Error {},
 }));
 
-vi.mock('../../../src/config', () => ({ JWT_SECRET: 'test-secret', ENCRYPTION_KEY: '0'.repeat(64) }));
+const { mockTrekPlacesById } = vi.hoisted(() => ({
+  mockTrekPlacesById: vi.fn(async (_gers: string): Promise<unknown> => null),
+}));
+vi.mock('../../../src/nest/maps/trek-places.client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/nest/maps/trek-places.client')>()),
+  trekPlacesById: mockTrekPlacesById,
+}));
 
-import { db } from '../../../src/db/database';
-import { DatabaseService } from '../../../src/nest/database/database.service';
-import { PlaceEnrichmentService } from '../../../src/nest/place-enrichment/place-enrichment.service';
-import type { MapsService } from '../../../src/nest/maps/maps.service';
-import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+/** Every seam enrichment reaches: the maps orchestrator and the outbound clients it injects beside it. */
+type Seams<T> = { [K in keyof T]: T[K] };
+type EnrichmentSeams = Seams<MapsService> &
+  Seams<GooglePlacesClient> &
+  Seams<OsmClient> &
+  Seams<WikimediaClient> &
+  Seams<TrekCommunityService>;
 
 const GOOGLE_REQ = { lat: 53.6323, lng: 10.0067, name: 'Hamburg Airport', placeId: 'ChIJham', lang: 'de' };
 const OSM_REQ = { lat: 52.525, lng: 13.3694, name: 'Berlin Hauptbahnhof', placeId: 'relation:3600565', lang: 'de' };
@@ -50,7 +70,7 @@ const EXTRACT = {
   source: 'wikipedia' as const,
 };
 
-function mapsStub(over: Partial<Record<keyof MapsService, unknown>> = {}) {
+function mapsStub(over: Partial<Record<keyof EnrichmentSeams, unknown>> = {}) {
   return {
     getMapsKey: vi.fn(() => null as string | null),
     photosDisabled: vi.fn(() => false),
@@ -66,21 +86,52 @@ function mapsStub(over: Partial<Record<keyof MapsService, unknown>> = {}) {
     fetchWikiExtract: vi.fn(async () => null as typeof EXTRACT | null),
     fetchWikiExtractFor: vi.fn(async () => null as typeof EXTRACT | null),
     fetchWikidataSitelinks: vi.fn(async () => ({}) as Record<string, string>),
-    resolveOsmIdentity: vi.fn(async () => null as { tags: Record<string, string>; osmUrl: string | null; matchedName: string } | null),
+    resolveOsmIdentity: vi.fn(
+      async () => null as { tags: Record<string, string>; osmUrl: string | null; matchedName: string } | null,
+    ),
     details: vi.fn(async () => ({ place: null })),
+    trekPlacesEnabled: vi.fn(() => true),
+    photoPaths: vi.fn(async () => [] as string[]),
+    imageBytes: vi.fn(async () => null as Buffer | null),
     ...over,
-  } as unknown as MapsService;
+  } as unknown as EnrichmentSeams;
 }
 
 const cacheStub = () =>
-  ({ get: vi.fn(() => null), put: vi.fn(async () => ({ photoUrl: '/x', filePath: '/x', attribution: null })) }) as unknown as PlacePhotoCacheService;
+  ({
+    get: vi.fn(() => null),
+    put: vi.fn(async () => ({ photoUrl: '/x', filePath: '/x', attribution: null })),
+  }) as unknown as PlacePhotoCacheService;
 
-const make = (maps: MapsService) => new PlaceEnrichmentService(new DatabaseService(db as never), maps, cacheStub());
+function appSettingsStub(): AppSettingsRepository {
+  return { getValue: mockGetValue } as unknown as AppSettingsRepository;
+}
+
+function cacheRepoStub(): PlaceDetailsCacheRepository {
+  return { findEntry: mockFindEntry, upsertEntry: mockUpsertEntry } as unknown as PlaceDetailsCacheRepository;
+}
+
+const make = (maps: EnrichmentSeams) =>
+  new PlaceEnrichmentService(
+    cacheRepoStub(),
+    appSettingsStub(),
+    maps as unknown as MapsService,
+    cacheStub(),
+    maps as unknown as GooglePlacesClient,
+    maps as unknown as OsmClient,
+    maps as unknown as WikimediaClient,
+    maps as unknown as TrekCommunityService,
+  );
 
 beforeEach(() => {
-  mockDbGet.mockReset();
-  mockDbGet.mockReturnValue(undefined);
-  mockDbRun.mockReset();
+  mockGetValue.mockReset();
+  mockGetValue.mockResolvedValue(null);
+  mockFindEntry.mockReset();
+  mockFindEntry.mockResolvedValue(null);
+  mockUpsertEntry.mockReset();
+  mockUpsertEntry.mockResolvedValue(undefined);
+  mockTrekPlacesById.mockReset();
+  mockTrekPlacesById.mockResolvedValue(null);
 });
 
 describe('identity resolution', () => {
@@ -170,7 +221,7 @@ describe('description source order', () => {
   it('ENRICH-074: still falls back to Google when nothing free describes the place', async () => {
     const maps = mapsStub({
       getMapsKey: vi.fn(() => 'key'),
-      details: vi.fn(async () => ({ place: { source: 'google', google_maps_url: 'https://maps.google/x' } })),
+      details: vi.fn(async () => ({ place: { source: 'google', google_maps_url: 'https://maps.google.com/x' } })),
       fetchEditorialSummary: vi.fn(async () => 'Casual chain for wood-fired pizza.'),
     });
 
@@ -179,15 +230,97 @@ describe('description source order', () => {
     expect(out.description).toMatchObject({
       source: 'google',
       text: 'Casual chain for wood-fired pizza.',
-      sourceUrl: 'https://maps.google/x',
+      sourceUrl: 'https://maps.google.com/x',
       license: null,
+    });
+  });
+
+  it("ENRICH-120: links Google's summary only to a Google Maps address", async () => {
+    // The record and its link come with the request, and the answer is cached
+    // for every user of the instance under the label "Google". A link that is
+    // not a Google Maps address by shape is dropped; the text stays.
+    for (const bad of [
+      'https://phish.example/maps',
+      'https://google.evil.example/x',
+      'javascript:alert(1)',
+      'phish.example/maps',
+    ]) {
+      const maps = mapsStub({
+        getMapsKey: vi.fn(() => 'key'),
+        fetchEditorialSummary: vi.fn(async () => 'Casual chain for wood-fired pizza.'),
+      });
+      const out = await make(maps).enrich(1, {
+        ...GOOGLE_REQ,
+        details: { source: 'google', google_maps_url: bad },
+      });
+      expect(out.description, bad).toMatchObject({
+        source: 'google',
+        text: 'Casual chain for wood-fired pizza.',
+        sourceUrl: null,
+      });
+    }
+
+    for (const ok of [
+      'https://maps.google.com/?cid=1',
+      'https://www.google.de/maps/place/x',
+      'https://maps.app.goo.gl/abc',
+    ]) {
+      const maps = mapsStub({
+        getMapsKey: vi.fn(() => 'key'),
+        fetchEditorialSummary: vi.fn(async () => 'Casual chain for wood-fired pizza.'),
+      });
+      const out = await make(maps).enrich(1, {
+        ...GOOGLE_REQ,
+        details: { source: 'google', google_maps_url: ok },
+      });
+      expect(out.description, ok).toMatchObject({ source: 'google', sourceUrl: ok });
+    }
+
+    // #2483: the website contract completes a bare host, and the link is the
+    // completed one. The host check still decides, on the host it names.
+    const maps = mapsStub({
+      getMapsKey: vi.fn(() => 'key'),
+      fetchEditorialSummary: vi.fn(async () => 'Casual chain for wood-fired pizza.'),
+    });
+    const bare = await make(maps).enrich(1, {
+      ...GOOGLE_REQ,
+      details: { source: 'google', google_maps_url: 'maps.google.com/x' },
+    });
+    expect(bare.description).toMatchObject({ source: 'google', sourceUrl: 'https://maps.google.com/x' });
+  });
+
+  it('ENRICH-075b: a description installations shared is credited to the TREK community, not to OpenStreetMap', async () => {
+    const maps = mapsStub({
+      details: vi.fn(async () => ({
+        place: {
+          source: 'openstreetmap',
+          summary: 'An Asian restaurant in Evershagen.',
+          summary_source: 'community',
+          osm_url: 'https://osm.org/n/1',
+        },
+      })),
+      fetchWikiExtractFor: vi.fn(async () => EXTRACT),
+    });
+
+    const out = await make(maps).enrich(1, OSM_REQ);
+
+    expect(out.description).toEqual({
+      text: 'An Asian restaurant in Evershagen.',
+      source: 'community',
+      sourceUrl: null,
+      license: 'CC BY 4.0',
     });
   });
 
   it('ENRICH-075: keeps the OpenStreetMap description ahead of everything', async () => {
     const maps = mapsStub({
       details: vi.fn(async () => ({
-        place: { source: 'openstreetmap', summary: '  Ein Bahnhof.  ', osm_url: 'https://osm.org/r/1', wikidata: 'Q1097' },
+        place: {
+          source: 'openstreetmap',
+          summary: '  Ein Bahnhof.  ',
+          osm_url: 'https://osm.org/r/1',
+          wikidata: 'Q1097',
+        },
       })),
       fetchWikiExtractFor: vi.fn(async () => EXTRACT),
     });
@@ -200,7 +333,7 @@ describe('description source order', () => {
 });
 
 describe('article language choice', () => {
-  it('ENRICH-076: asks for the reader\'s language before English', async () => {
+  it("ENRICH-076: asks for the reader's language before English", async () => {
     const maps = mapsStub({
       details: vi.fn(async () => ({ place: { source: 'openstreetmap', wikidata: 'Q1097' } })),
       fetchWikidataSitelinks: vi.fn(async () => ({ dewiki: 'Berlin Hauptbahnhof', enwiki: 'Berlin Hauptbahnhof' })),
@@ -209,7 +342,8 @@ describe('article language choice', () => {
 
     await make(maps).enrich(1, OSM_REQ);
 
-    const sites = (maps.fetchWikidataSitelinks as unknown as { mock: { calls: [string, string[]][] } }).mock.calls[0][1];
+    const sites = (maps.fetchWikidataSitelinks as unknown as { mock: { calls: [string, string[]][] } }).mock
+      .calls[0][1];
     expect(sites.slice(0, 2)).toEqual(['dewikivoyage', 'dewiki']);
     expect(sites).toContain('enwiki');
     expect(maps.fetchWikiExtractFor).toHaveBeenCalledWith('wikipedia', 'de', 'Berlin Hauptbahnhof');
@@ -242,7 +376,8 @@ describe('article language choice', () => {
 
     await make(maps).enrich(1, { ...OSM_REQ, lang: 'ko' });
 
-    const sites = (maps.fetchWikidataSitelinks as unknown as { mock: { calls: [string, string[]][] } }).mock.calls[0][1];
+    const sites = (maps.fetchWikidataSitelinks as unknown as { mock: { calls: [string, string[]][] } }).mock
+      .calls[0][1];
     expect(sites.indexOf('dewiki')).toBeLessThan(sites.indexOf('enwiki'));
   });
 
@@ -265,10 +400,7 @@ describe('article language choice', () => {
     const maps = mapsStub({
       details: vi.fn(async () => ({ place: { source: 'openstreetmap', wikidata: 'Q1097' } })),
       fetchWikidataSitelinks: vi.fn(async () => ({ dewikivoyage: 'Nowhere', dewiki: 'Berlin Hauptbahnhof' })),
-      fetchWikiExtractFor: vi
-        .fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(EXTRACT),
+      fetchWikiExtractFor: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(EXTRACT),
     });
 
     const out = await make(maps).enrich(1, OSM_REQ);
@@ -292,10 +424,10 @@ describe('filling Google gaps from the free sources', () => {
     cuisine: 'pizza;italian',
     wheelchair: 'limited',
     outdoor_seating: 'yes',
-    'opening_hours': 'Mo-Su 11:30-23:00',
+    opening_hours: 'Mo-Su 11:30-23:00',
   };
 
-  const googlePlaceAlsoInOsm = (over: Partial<Record<keyof MapsService, unknown>> = {}) =>
+  const googlePlaceAlsoInOsm = (over: Partial<Record<keyof EnrichmentSeams, unknown>> = {}) =>
     mapsStub({
       getMapsKey: vi.fn(() => 'key'),
       details: vi.fn(async () => ({ place: { source: 'google', rating: 4.6, rating_count: 4495 } })),
@@ -337,5 +469,296 @@ describe('filling Google gaps from the free sources', () => {
 
     expect(out.hours?.weekdayDescriptions).toEqual(['Monday: 09:00-17:00']);
   });
-})
+});
 
+describe("the description on the place's own website", () => {
+  // The ordinary case, and the one nothing covered before: a restaurant has no
+  // encyclopaedia article and never will, but it does publish a summary of
+  // itself in JSON-LD for machines to read. 43 percent of Overture places carry
+  // a website; a fraction of a percent carry a wiki tag.
+  const GERS_REQ = {
+    lat: 54.0879,
+    lng: 12.1408,
+    name: "L'Osteria",
+    placeId: 'gers:abc-123',
+    lang: 'de',
+  };
+
+  it('ENRICH-100: asks the index for the description, not the request that carries one', async () => {
+    // The dialog's own lookup fetched this place a moment ago and the request
+    // carries its answer, description included. It is still not read from
+    // there: the result lands in a cache the whole instance reads from for a
+    // week, and the text and the link in it have to be the index's, not
+    // whatever the sender put in the body. The cached row is the proof.
+    mockTrekPlacesById.mockClear();
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock, seit 2015.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+
+    const out = await make(mapsStub()).enrich(1, {
+      ...GERS_REQ,
+      details: {
+        source: 'trek-places',
+        description: { text: 'Buchung nur noch über https://phish.example', sourceUrl: 'https://phish.example' },
+      },
+    });
+
+    expect(mockTrekPlacesById).toHaveBeenCalledWith('abc-123');
+    expect(out.description).toMatchObject({
+      text: 'Pizza in Rostock, seit 2015.',
+      source: 'website',
+      sourceUrl: 'https://losteria.net/rostock',
+    });
+    expect(mockUpsertEntry).toHaveBeenCalledTimes(1);
+    const [written] = mockUpsertEntry.mock.calls[0];
+    expect(written).toBeTruthy();
+    expect(written.payload_json).not.toContain('phish.example');
+  });
+
+  it('ENRICH-101: asks when the caller passed no details, all the same', async () => {
+    mockTrekPlacesById.mockClear();
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock, seit 2015.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+
+    const out = await make(mapsStub()).enrich(1, GERS_REQ);
+
+    expect(out.description).toMatchObject({ source: 'website' });
+    expect(mockTrekPlacesById).toHaveBeenCalledWith('abc-123');
+  });
+
+  it('ENRICH-102: a source URL that is not http(s) loses the link, not the text', async () => {
+    // It becomes an href on the client, and the value comes from whatever index
+    // the instance is pointed at. The same allow-list a place's website goes
+    // through, for the same reason.
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>', 'file:///etc/passwd', 'not a url']) {
+      mockTrekPlacesById.mockResolvedValue({ description: { text: 'Pizza in Rostock.', sourceUrl: bad } });
+      const out = await make(mapsStub()).enrich(1, GERS_REQ);
+      expect(out.description, bad).toMatchObject({ text: 'Pizza in Rostock.', sourceUrl: null });
+    }
+
+    // The ordinary case still keeps its link.
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+    const ok = await make(mapsStub()).enrich(1, GERS_REQ);
+    expect(ok.description).toMatchObject({ sourceUrl: 'https://losteria.net/rostock' });
+
+    // #2483: the index keeps a page the way it found it, sometimes without a
+    // scheme. The link that is stored is the completed one, never the bare text.
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock.', sourceUrl: 'losteria.net/rostock' },
+    });
+    const bare = await make(mapsStub()).enrich(1, GERS_REQ);
+    expect(bare.description).toMatchObject({ sourceUrl: 'https://losteria.net/rostock' });
+  });
+
+  it('ENRICH-117: a description the request made up never reaches the shared cache', async () => {
+    // The index knows no description for this place. The request claims one,
+    // with a link. Nobody gets to see it, the sender included: the website
+    // rung reads the index and nothing else.
+    mockTrekPlacesById.mockClear();
+    mockTrekPlacesById.mockResolvedValue({ description: null });
+
+    const out = await make(mapsStub()).enrich(1, {
+      ...GERS_REQ,
+      details: {
+        source: 'trek-places',
+        description: { text: 'Buchung nur noch über https://phish.example', sourceUrl: 'https://phish.example' },
+      },
+    });
+
+    expect(out.description).toBeNull();
+    for (const [row] of mockUpsertEntry.mock.calls) {
+      expect(JSON.stringify(row)).not.toContain('phish.example');
+    }
+  });
+
+  it('ENRICH-118: an OpenStreetMap summary the request carried is answered, but not cached for everyone', async () => {
+    // The OSM rung reads `summary` and `osm_url` straight off the details, and
+    // the details came with the request. Answering the sender with their own
+    // payload is harmless; writing it into the row every other user of the
+    // instance reads for a week is not. The row simply is not written.
+    const carried = {
+      ...OSM_REQ,
+      details: {
+        source: 'openstreetmap',
+        summary: 'Buchung nur noch über https://phish.example',
+        osm_url: 'https://phish.example',
+      },
+    };
+
+    const out = await make(mapsStub()).enrich(1, carried);
+
+    expect(out.description).toMatchObject({ source: 'osm', text: 'Buchung nur noch über https://phish.example' });
+    expect(mockUpsertEntry).not.toHaveBeenCalled();
+
+    // The same summary from the service's own lookup is the map's, and keeps.
+    const maps = mapsStub({
+      details: vi.fn(async () => ({
+        place: {
+          source: 'openstreetmap',
+          summary: 'Größter Kreuzungsbahnhof Europas.',
+          osm_url: 'https://www.openstreetmap.org/relation/3600565',
+        },
+      })),
+    });
+    mockUpsertEntry.mockClear();
+    const own = await make(maps).enrich(1, OSM_REQ);
+    expect(own.description).toMatchObject({ source: 'osm', text: 'Größter Kreuzungsbahnhof Europas.' });
+    expect(mockUpsertEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('ENRICH-121: a menu link the request carried is answered, but not cached for everyone', async () => {
+    // The menu chip is the other link read straight off the details: it goes
+    // out as an href under the label "Menu", and a request can put any http(s)
+    // address there. Same treatment as the summary: the sender sees it, the
+    // row is not written.
+    const out = await make(mapsStub()).enrich(1, {
+      ...OSM_REQ,
+      details: { source: 'openstreetmap', menu_url: 'https://phish.example/menu' },
+    });
+
+    expect(out.facts).toContainEqual({ kind: 'menu', value: null, url: 'https://phish.example/menu' });
+    expect(mockUpsertEntry).not.toHaveBeenCalled();
+
+    // The same link from the service's own lookup is the map's, and keeps.
+    const maps = mapsStub({
+      details: vi.fn(async () => ({ place: { source: 'openstreetmap', menu_url: 'https://example.org/karte' } })),
+    });
+    mockUpsertEntry.mockClear();
+    const own = await make(maps).enrich(1, OSM_REQ);
+    expect(own.facts).toContainEqual({ kind: 'menu', value: null, url: 'https://example.org/karte' });
+    expect(mockUpsertEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('ENRICH-122: a community summary the request carried is answered, but not cached for everyone', async () => {
+    // The community credit is read off the details as well, so a request can
+    // claim it for any text; the sender sees it, the row is not written.
+    const out = await make(mapsStub()).enrich(1, {
+      ...OSM_REQ,
+      details: { source: 'openstreetmap', summary: 'Buchung nur über phish.example', summary_source: 'community' },
+    });
+
+    expect(out.description).toMatchObject({ source: 'community', text: 'Buchung nur über phish.example' });
+    expect(mockUpsertEntry).not.toHaveBeenCalled();
+  });
+
+  it('ENRICH-119: with the index switched off, no lookup leaves for the description', async () => {
+    // TREK_PLACES_ENABLED=false is a promise about egress, and a saved index
+    // place opened later is still an index place.
+    mockTrekPlacesById.mockClear();
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock, seit 2015.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+
+    const out = await make(mapsStub({ trekPlacesEnabled: vi.fn(() => false) })).enrich(1, GERS_REQ);
+
+    expect(mockTrekPlacesById).not.toHaveBeenCalled();
+    expect(out.description).toBeNull();
+  });
+
+  it('ENRICH-090: quotes the site and credits it by URL', async () => {
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Pizza in Rostock, seit 2015.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+
+    const out = await make(mapsStub()).enrich(1, GERS_REQ);
+
+    expect(mockTrekPlacesById).toHaveBeenCalledWith('abc-123');
+    expect(out.description).toEqual({
+      text: 'Pizza in Rostock, seit 2015.',
+      source: 'website',
+      sourceUrl: 'https://losteria.net/rostock',
+      // No licence claim: the operator published a summary for machines, they
+      // did not grant terms. Naming and linking the source is what is owed.
+      license: null,
+    });
+  });
+
+  it('ENRICH-091: leaves the encyclopaedias ahead of it', async () => {
+    // An article about this exact place, written by someone with no stake in
+    // it, beats the operator's own copy. The website only fills the gap the
+    // encyclopaedias leave, which is almost every business.
+    mockTrekPlacesById.mockResolvedValue({ description: { text: 'Unser Restaurant.', sourceUrl: 'https://x.de' } });
+    const maps = mapsStub({
+      details: vi.fn(async () => ({ place: { source: 'openstreetmap', wikipedia: 'de:Irgendwas' } })),
+      fetchWikiExtract: vi.fn(async () => EXTRACT),
+    });
+
+    const out = await make(maps).enrich(1, GERS_REQ);
+
+    expect(out.description?.source).toBe('wikipedia');
+  });
+
+  it('ENRICH-092: asks only for places that came from the API', async () => {
+    await make(mapsStub()).enrich(1, { ...GERS_REQ, placeId: 'ChIJsomethinggoogle' });
+    expect(mockTrekPlacesById).not.toHaveBeenCalled();
+  });
+
+  it('ENRICH-093: a failing API costs the place nothing else', async () => {
+    mockTrekPlacesById.mockRejectedValue(new Error('places api down'));
+    const maps = mapsStub({
+      details: vi.fn(async () => ({ place: { source: 'openstreetmap', name: "L'Osteria" } })),
+    });
+
+    await expect(make(maps).enrich(1, GERS_REQ)).resolves.toMatchObject({ description: null });
+  });
+
+  it('ENRICH-094: ignores an empty or whitespace-only summary', async () => {
+    mockTrekPlacesById.mockResolvedValue({ description: { text: '   ', sourceUrl: 'https://x.de' } });
+    const out = await make(mapsStub()).enrich(1, GERS_REQ);
+    expect(out.description).toBeNull();
+  });
+
+  it('ENRICH-101: a place the index knows, whose site publishes no summary', async () => {
+    // The common answer, not an error: the GERS id resolves, and the place has
+    // no description field at all because its page carried nothing readable.
+    mockTrekPlacesById.mockResolvedValue({ gers: 'abc-123', name: "L'Osteria" });
+
+    const out = await make(mapsStub()).enrich(1, GERS_REQ);
+
+    expect(mockTrekPlacesById).toHaveBeenCalledWith('abc-123');
+    expect(out.description).toBeNull();
+  });
+
+  it('ENRICH-102: still quotes a summary the API could not name a page for', async () => {
+    // The link is the credit, not the content. Dropping the text for want of a
+    // footnote would lose the only description the place has. The field is
+    // absent rather than null, so `sourceUrl` below is the normalisation and
+    // not the fixture read back.
+    mockTrekPlacesById.mockResolvedValue({ description: { text: 'Pizza in Rostock.' } });
+
+    const out = await make(mapsStub()).enrich(1, GERS_REQ);
+
+    expect(out.description).toEqual({
+      text: 'Pizza in Rostock.',
+      source: 'website',
+      sourceUrl: null,
+      license: null,
+    });
+  });
+
+  it("ENRICH-103: the branch's own words come before the chain's article", async () => {
+    // L'Osteria Rostock carries brand:wikidata and has no article of its own.
+    // The chain article is about the company; the site is about this branch,
+    // and the branch is what was asked about.
+    mockTrekPlacesById.mockResolvedValue({
+      description: { text: 'Unsere Filiale in der Steinstraße.', sourceUrl: 'https://losteria.net/rostock' },
+    });
+    const maps = mapsStub({
+      resolveOsmIdentity: vi.fn(async () => ({
+        tags: { 'brand:wikidata': 'Q17323478', 'brand:wikipedia': 'de:L’Osteria' },
+        osmUrl: null,
+        matchedName: "L'Osteria",
+      })),
+      fetchWikiExtractFor: vi.fn(async () => EXTRACT),
+    });
+
+    const out = await make(maps).enrich(1, GERS_REQ);
+
+    expect(out.description).toMatchObject({ source: 'website', text: 'Unsere Filiale in der Steinstraße.' });
+    // The chain lookup starts at the brand's Wikidata item — it never ran.
+    expect(maps.fetchWikidataSitelinks).not.toHaveBeenCalled();
+  });
+});

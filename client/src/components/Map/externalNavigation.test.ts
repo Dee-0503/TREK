@@ -39,4 +39,15 @@ describe('AMap external navigation builders', () => {
     expect(buildAmapRouteUrl(points, 'cycling', { countryCode: 'CN' })).toContain('mode=ride')
     expect(buildAmapRouteUrl([...points, { lat: 31.5, lng: 121.7 }], 'driving', { countryCode: 'CN' })).toBeNull()
   })
+
+  it('keeps both endpoints in a two-stop route without inventing a via', () => {
+    const url = buildAmapRouteUrl([
+      { lat: 31.2, lng: 121.4, name: '起点' },
+      { lat: 31.4, lng: 121.6, name: '终点' },
+    ], 'driving', { countryCode: 'CN' }, { callnative: false })
+    const params = new URL(url!).searchParams
+    expect(params.get('from')).toContain(encodeURIComponent('起点'))
+    expect(params.get('to')).toContain(encodeURIComponent('终点'))
+    expect(params.has('via')).toBe(false)
+  })
 })
