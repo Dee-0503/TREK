@@ -1,7 +1,14 @@
 import { KitineraryExtractorService } from '../../../../src/nest/booking-import/kitinerary-extractor.service';
+import { parseQunarItinerary } from '../../../../src/nest/booking-import/qunar-itinerary';
+import { extractText } from '../../../../src/nest/llm-parse/text-extract';
 
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../../../src/nest/llm-parse/text-extract', () => ({ extractText: vi.fn().mockResolvedValue('') }));
+vi.mock('../../../../src/nest/booking-import/qunar-itinerary', () => ({
+  parseQunarItinerary: vi.fn().mockReturnValue([]),
+}));
 
 /**
  * The binary probe behind `GET /api/health/features`.
@@ -55,10 +62,37 @@ function boot(env: { extractorPath?: string; searchPath?: string[] } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(extractText).mockResolvedValue('');
+  vi.mocked(parseQunarItinerary).mockReturnValue([]);
   existsSync.mockReturnValue(false);
   readdirSync.mockReturnValue([]);
   execFileSync.mockImplementation(() => {
     throw new Error('command not found');
+  });
+});
+
+describe('KitineraryExtractorService Qunar PDFs', () => {
+  it('uses local PDF text only when the normal PDF extractor found nothing', async () => {
+    existsSync.mockImplementation((p: string) => p === '/opt/ki');
+    execFileSync.mockReturnValue(Buffer.from('kitinerary-extractor 6.3.3'));
+    const reservation = { '@type': 'FlightReservation' };
+    vi.mocked(extractText).mockResolvedValue('Qunar table');
+    vi.mocked(parseQunarItinerary).mockReturnValue([reservation]);
+    let stdout = '[]';
+    execFile.mockImplementation((_b: string, _a: string[], _o: unknown, cb: (e: null, r: unknown) => void) =>
+      cb(null, { stdout, stderr: '' }),
+    );
+    const service = boot({ extractorPath: '/opt/ki' });
+    const buffer = Buffer.from('test PDF');
+    expect(await service.extract(buffer, 'itinerary.pdf')).toEqual([reservation]);
+    expect(extractText).toHaveBeenCalledWith(buffer, 'itinerary.pdf');
+    expect(parseQunarItinerary).toHaveBeenCalledWith('Qunar table');
+    vi.mocked(extractText).mockClear();
+    stdout = JSON.stringify([reservation]);
+    expect(await service.extract(buffer, 'itinerary.pdf')).toEqual([reservation]);
+    stdout = '[]';
+    expect(await service.extract(buffer, 'booking.eml')).toEqual([]);
+    expect(extractText).not.toHaveBeenCalled();
   });
 });
 

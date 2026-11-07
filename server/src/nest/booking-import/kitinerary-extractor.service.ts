@@ -1,6 +1,8 @@
 import { kitineraryConfig } from '../app-config/tokens';
 import { logDebug } from '../audit/audit-log.logger';
+import { extractText } from '../llm-parse/text-extract';
 import type { KiReservation } from './kitinerary.types';
+import { parseQunarItinerary } from './qunar-itinerary';
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 
@@ -118,7 +120,7 @@ export class KitineraryExtractorService implements OnModuleInit {
       }
 
       const text = stdout.trim();
-      if (!text) return [];
+      if (!text) return ext === '.pdf' ? parseQunarItinerary(await extractText(buffer, fileName)) : [];
 
       let parsed: unknown;
       try {
@@ -128,7 +130,10 @@ export class KitineraryExtractorService implements OnModuleInit {
         return [];
       }
 
-      if (Array.isArray(parsed)) return parsed as KiReservation[];
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0 && ext === '.pdf') return parseQunarItinerary(await extractText(buffer, fileName));
+        return parsed as KiReservation[];
+      }
       if (typeof parsed === 'object' && parsed !== null) return [parsed as KiReservation];
       return [];
     } finally {
